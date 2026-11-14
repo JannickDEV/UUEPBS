@@ -2567,7 +2567,7 @@ namespace uuepbs::ui
         const float x_w = removable ? font->CalcTextSizeA(small, FLT_MAX, 0.0f, "x").x + pad_x : 0.0f;
         const float w = std::floor(ts.x + pad_x * 2.0f + x_w);
         // Wrap onto the next line when the chip does not fit.
-        const float right = ImGui::GetWindowPos().x + ImGui::GetContentRegionMax().x;
+        const float right = ImGui::GetCursorScreenPos().x + ImGui::GetContentRegionAvail().x; // GetContentRegionMax() is gone under IMGUI_DISABLE_OBSOLETE_FUNCTIONS
         if (ImGui::GetCursorScreenPos().x + w > right && ImGui::GetCursorScreenPos().x > ImGui::GetWindowPos().x + ImGui::GetStyle().WindowPadding.x + 1.0f)
         {
             ImGui::NewLine();
@@ -2614,7 +2614,7 @@ namespace uuepbs::ui
         if (tags.size() < PresetLibrary::kMaxTags)
         {
             const float w = std::max(dpi_px(90.0f), ImGui::CalcTextSize("Add tag...").x + dpi_px(16.0f));
-            const float right = ImGui::GetWindowPos().x + ImGui::GetContentRegionMax().x;
+            const float right = ImGui::GetCursorScreenPos().x + ImGui::GetContentRegionAvail().x; // GetContentRegionMax() is gone under IMGUI_DISABLE_OBSOLETE_FUNCTIONS
             if (!tags.empty() && ImGui::GetCursorScreenPos().x + w > right)
             {
                 ImGui::NewLine();
