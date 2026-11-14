@@ -182,6 +182,19 @@ namespace uuepbs
         return t.baseline;
     }
 
+    void EditHistory::checkpoint(const std::string& actor, const EditSnapshot& now, Clock::time_point time)
+    {
+        Track& t = m_tracks[actor];
+        if (!t.started)
+        {
+            observe(actor, now, false, time);
+            return;
+        }
+        t.pending = now;
+        t.pending_since = time;
+        commit(t);
+    }
+
     void EditHistory::forget(const std::string& actor)
     {
         m_tracks.erase(actor);

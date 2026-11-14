@@ -11,6 +11,9 @@ Host-side tests (Linux/macOS/WSL with g++ 13+ or clang 17+). None of them need W
     # undo/redo history, "Changed only" filter and preset details
     g++ -std=c++23 -I$S test_changes.cpp $S/core/*.cpp -o test_changes && ./test_changes
 
+    # symmetry tools: Mirror L to R / R to L, Randomize limits, one undo step per action
+    g++ -std=c++23 -I$S test_symmetry.cpp $S/core/*.cpp -o test_symmetry && ./test_symmetry
+
     # left/right naming for common rigs + mirroring measured from the reference pose
     g++ -std=c++23 -I$S test_mirror.cpp $S/core/*.cpp -o test_mirror && ./test_mirror
     g++ -std=c++23 -I$S test_groups.cpp $S/core/*.cpp -o test_groups

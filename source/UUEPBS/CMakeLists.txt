@@ -60,6 +60,7 @@ add_library(UUEPBS SHARED
     src/core/resolver.cpp
     src/core/rig_names.cpp
     src/core/sculpt.cpp
+    src/core/symmetry.cpp
     src/ui/image_decode.cpp
     src/ui/panel_view.cpp
     src/ui/portraits.cpp
