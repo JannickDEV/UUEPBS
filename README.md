@@ -14,6 +14,9 @@ https://github.com/user-attachments/assets/4e4372bc-8a64-4255-b8ae-a33645ce187e
 * **Rename** a character: your name for it is shown everywhere in the window and saved in `UUEPBS Presets\_characters\_names.txt`; the game and engine names stay in tooltips and on the Status tab
 * Character portraits in the banner and the grid: your own PNG/JPG in `UUEPBS Presets\_portraits`, or taken automatically in the game (the game's own portrait when the profile names it, else a head shot). **Retake portrait** in the Rename window. `AutoPortraits = false` in `config.lua` turns the automatic part off
 * Bone tree and morph list moved to the **Advanced** tab (was the Detailed Panel). Skins keep working; tabs no longer show icons
+* Added Undo / Redo for slider edits (buttons in the character banner, **Ctrl+Z** / **Ctrl+Y** or **Ctrl+Shift+Z**), kept per character
+* Added a "Changed only" filter to the Body tab
+* Added preset details: the Presets tab shows which body parts, bones and morphs a preset changes before you load it
 
 ### V2.6.1 - Changelogs
 * Added full support for player and NPC that works simultaneously
@@ -61,6 +64,9 @@ https://github.com/user-attachments/assets/4e4372bc-8a64-4255-b8ae-a33645ce187e
   Scale sliders run from 0.1× to 10× on a log scale; the tick marks 1.0×. **Ctrl + mouse wheel** nudges a slider by 0.01, and **Ctrl + Shift + wheel** by 0.001.
   Click the number box next to a slider to type a value. **Reset** on the section bar resets the whole category.
   Morph groups from the game profile (`MorphGroups`, see below) appear here as extra sliders.
+  **Changed only** hides every body part and morph group that is still at the game's own shape.
+* **Undo / Redo** (buttons in the character banner, **Ctrl+Z** and **Ctrl+Y** / **Ctrl+Shift+Z** while the window has focus) step back and forth through slider changes.
+  A whole drag, a burst of Ctrl+wheel nudges, a preset load or a reset counts as one step. Each character has its own history (up to 100 steps), so undoing never touches another character's sliders.
 * **Advanced** tab (called the Detailed Panel in 2.2–2.6, the Bones tab before). When the meshes have morph targets it has two sub-tabs, **Bones** and **Morphs**.
   * **Bones:** every bone of the primary mesh, with search, "edited only" and mirror left/right.
     * **Scale**, **Rotate** (roll/pitch/yaw in degrees, pivoting on the joint) and **Move** (cm), all in the bone's own axes (X runs along the bone).
@@ -74,7 +80,8 @@ https://github.com/user-attachments/assets/4e4372bc-8a64-4255-b8ae-a33645ce187e
     * A morph you move **replaces** the game's own value, even at 0. **Reset** gives it back, and the value the game had before comes back.
     * *Mirror left/right morphs* moves `…_L`/`…_R` twins together.
     * A **!** next to a name means the game keeps setting that morph itself (an animation or its own code). UUEPBS puts your value back each time it notices, but it may flicker or not stick.
-* **Presets** tab: save, load (or double-click), delete and open the folder. Presets are JSON files in **`<Win64>\UUEPBS Presets`** and hold bones and morphs.
+* **Presets** tab: save, load (or double-click), delete and open the folder. Clicking a preset once shows what it changes next to the list:
+  body parts with their size (and whether they are rotated or moved), other bones, morphs with their weights, and anything the current character doesn't have. Presets are JSON files in **`<Win64>\UUEPBS Presets`** and hold bones and morphs.
   The current sliders auto-save to `_last_session.json` and come back next time.
   Bone and morph names aren't case-sensitive, and names a character doesn't have are skipped, so one preset can be shared between characters on the same rig.
 * **Status** tab: hook details, the Lua link, mirroring, morph counts, the **window skin** picker, tracked meshes, **Rescan**, and **Write diagnostics**, which dumps what the hook finder sees into the log for bug reports.

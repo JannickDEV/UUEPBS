@@ -9,6 +9,8 @@
 #pragma once
 
 #include "../core/body_groups.hpp"
+#include "../core/changes.hpp"
+#include "../core/history.hpp"
 #include "../core/morphs.hpp"
 #include "../core/presets.hpp"
 #include "../core/registry.hpp"
@@ -106,6 +108,7 @@ namespace uuepbs::ui
         void focus_category(const std::string& name) { m_category = name; }
         // Opens (true) or closes (false) the "Choose character" grid on the next frame.
         void show_character_chooser(bool show) { (show ? m_choose_open : m_choose_close) = true; }
+        void pick_preset(const std::string& name) { m_picked = name; } // shows its details in the Presets tab
         void set_message(const std::string& text);
 
       private:
@@ -186,6 +189,18 @@ namespace uuepbs::ui
         void draw_edited_characters();
         bool is_edited(const std::string& key) const;
 
+        // Quality-of-life pieces, each in its own function so the layout can move them around.
+        EditSnapshot snapshot() const;
+        void track_history();          // records undo steps and handles Ctrl+Z / Ctrl+Y (once per frame)
+        void apply_snapshot(const EditSnapshot& s);
+        void undo_edit();
+        void redo_edit();
+        void draw_undo_redo();         // Undo / Redo buttons
+        float undo_redo_width() const; // width draw_undo_redo() takes
+        void draw_changed_only_filter(); // "Changed only" checkbox of the Simplified Panel
+        void refresh_preset_details();
+        void draw_preset_details();    // what the picked preset changes, before loading it
+
         const PresetShelf* m_shelf{};
         PanelHost* m_host{};
         TargetSource* m_targets{};
@@ -252,6 +267,20 @@ namespace uuepbs::ui
         char m_preset_name[96]{};
         std::string m_picked{};
         std::string m_pending{};
+
+        // undo / redo of slider edits (per character)
+        EditHistory m_history{};
+        std::string m_history_actor{kPlayerActor};
+
+        // Simplified Panel: show only the body parts / morph groups that are changed
+        bool m_simplified_changed_only{false};
+
+        // Presets tab: details of the picked preset
+        std::string m_details_for{};
+        bool m_details_ok{false};
+        std::string m_details_error{};
+        EditSummary m_details{};
+        Clock::time_point m_details_time{};
 
         std::vector<std::string> m_skins{};
         Clock::time_point m_skins_time{};
