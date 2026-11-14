@@ -6,6 +6,9 @@ Universal Unreal Engine Player Body Sliders (UUEPBS) is a near universal player 
 
 
 https://github.com/user-attachments/assets/4e4372bc-8a64-4255-b8ae-a33645ce187e
+### Next version - Changelogs
+* Readable character names: the Character list, the window header and the mesh labels show "Eve" or "Captain Vey" instead of engine names like `BP_Rokuv3_C_0`, `00_EVE_01_Body` or `SkeletalMeshComponent_2147...`. The name comes from the game itself when it has one (`DisplayName` / `CharacterName` on the character or its character data), else from the new `"Names"` table in the game profile, else from the engine name cleaned up. Saved sliders, remembered NPCs and presets are unaffected. `FriendlyNames = false` in `config.lua` brings the engine names back.
+
 ### V2.6.1 - Changelogs
 * Added full support for player and NPC that works simultaneously
 * Improved performance
@@ -126,6 +129,17 @@ Install the mod in as many games as you like; each one gets its own file.
 ```
 * **`MorphGroups`** adds sliders to the Simplified Panel. Each drives every morph whose name matches (names from Detailed Panel > Morphs; `*` = anything, `#` = digits, not case-sensitive).
 * **`ExcludeMorphs`** hides morphs from the window, e.g. corrective shapes and face visemes. Hidden morphs are never touched.
+
+**Character names in the window** (optional):
+```json
+"Names": {
+  "BP_Rokuv3_C": "Roku",
+  "00_EVE_*":    "Eve"
+}
+```
+* The window shows each character by a readable name. It uses, in this order: the game's own name for the character (`DisplayName`, `CharacterName` and similar, on the character or on its character data), then this table, then the engine name cleaned up (`BP_Guard_C_3` becomes "Guard", `00_EVE_01_Body` becomes "Eve").
+* **`Names`** maps engine names to the name you want. A key can be the character's object name (`BP_Eve_C_0`), its class (`BP_Eve_C`), or one of its mesh assets (`00_EVE_01_Body`). The engine names are in the tooltip of the Character list and on the Status tab. `*` matches anything, a plain key also matches every name that starts with it, and matching is not case-sensitive.
+* Only the labels change. Saved sliders, remembered NPCs and presets still go by the engine names, so renaming here loses nothing. Set `FriendlyNames = false` in `config.lua` to see the engine names in the list again.
 
 ### Simplified Panel mapping (bone dictionary)
 

@@ -88,6 +88,7 @@ namespace uuepbs
         size_t morphs{};
         bool active{};
         std::string identity; // who the NPC is across reloads ("Anca"); empty = not remembered
+        std::string engine;   // engine object name of the character (BP_Guard_C_3); empty when not known
     };
 
     // An NPC's sliders as they should be remembered (one file per identity).
@@ -130,7 +131,8 @@ namespace uuepbs
 
         // ---- characters --------------------------------------------------------
         // The character the window edits. Rebuilds the skeleton view when it changes.
-        void set_active_actor(const std::string& key, const std::string& label, const std::string& pick_id);
+        // engine: the character's engine object name, kept next to the (readable) label when not empty.
+        void set_active_actor(const std::string& key, const std::string& label, const std::string& pick_id, const std::string& engine = {});
         std::string active_actor() const;
         // Characters with any bone or morph edits (the active one included), active first.
         std::vector<ActorSummary> edited_actors() const;
@@ -198,6 +200,7 @@ namespace uuepbs
             std::string label;
             std::string pick_id;
             std::string identity;
+            std::string engine; // engine object name (empty when not known)
             EditBook book;
             uint64_t revision{}; // value of m_edit_revision at its last change (unique across actors)
         };

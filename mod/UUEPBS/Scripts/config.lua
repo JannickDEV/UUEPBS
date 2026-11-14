@@ -45,6 +45,11 @@ return {
     -- window opens and on Refresh; while it stays open, newly spawned characters are added as they appear.
     CandidateClasses = { "Character" },
     MaxCandidates = 40,
+    -- Readable names in the Character list and mesh labels ("Eve" instead of BP_Eve_C_2147482611 or
+    -- 00_EVE_01_Body): the game's own name for the character when it has one, else the game profile's
+    -- "Names" table, else the engine name cleaned up. Saved sliders and presets don't depend on it.
+    -- false = show the engine's object names.
+    FriendlyNames = true,
     -- Characters you picked and edited keep their sliders while you edit someone else
     -- (characters you never edited are left alone). This caps how many are kept at once.
     MaxEditedCharacters = 16,
