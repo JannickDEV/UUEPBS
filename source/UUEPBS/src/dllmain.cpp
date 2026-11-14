@@ -16,6 +16,7 @@
 #include "core/bridge.hpp"
 #include "core/json.hpp"
 #include "core/morphs.hpp"
+#include "core/preset_cycle.hpp"
 #include "core/presets.hpp"
 #include "core/registry.hpp"
 #include "ui/panel_view.hpp"
@@ -287,6 +288,26 @@ namespace
 
         std::string hotkey_text() override { return key_label(m_hotkey.load()); }
 
+        std::string preset_hotkeys_text() override
+        {
+            const int next = m_next_preset_key.load();
+            const int prev = m_prev_preset_key.load();
+            if (!next && !prev)
+            {
+                return {};
+            }
+            std::string text;
+            if (prev)
+            {
+                text += "previous preset " + key_label(prev);
+            }
+            if (next)
+            {
+                text += std::string(text.empty() ? "" : ", ") + "next preset " + key_label(next);
+            }
+            return text;
+        }
+
         std::string write_diagnostics() override
         {
             const uintptr_t comp = uuepbs::Registry::instance().primary_component();
@@ -348,6 +369,52 @@ namespace
             {
                 refresh_now();
             }
+            if (pressed(m_next_preset_key.load(), m_next_preset_down))
+            {
+                cycle_preset(+1);
+            }
+            if (pressed(m_prev_preset_key.load(), m_prev_preset_down))
+            {
+                cycle_preset(-1);
+            }
+        }
+
+        // Next / previous preset hotkeys (and "ubs next" / "ubs prev"): loads the following preset
+        // onto the character picked in the window (the player unless you picked someone else).
+        // Each character keeps its own place in the list. Runs on this thread only.
+        std::string cycle_preset(int step)
+        {
+            if (!m_shelf.ready())
+            {
+                return "the preset folder is not set up yet";
+            }
+            uuepbs::Registry& reg = uuepbs::Registry::instance();
+            const std::string who = reg.active_actor();
+            const std::vector<std::string> names = m_shelf.list();
+            const std::string name = uuepbs::PresetCycle::pick(names, m_cycle.current(who), step);
+            if (name.empty())
+            {
+                uuepbs::ui::post_message("No presets to cycle through yet (save one in the Presets tab)");
+                return "no presets saved yet";
+            }
+            m_cycle.remember(who, name); // also when it fails to load, so a broken file is skipped next time
+            uuepbs::EditBook book;
+            uuepbs::MorphBook morphs;
+            std::string message;
+            std::string text;
+            if (m_shelf.load(name, book, message, &morphs))
+            {
+                reg.replace_edits(std::move(book));
+                reg.replace_morphs(std::move(morphs));
+                text = "Preset " + uuepbs::PresetCycle::position(names, name) + ": " + name + " (" + message + ")";
+            }
+            else
+            {
+                text = "Could not load preset " + name + ": " + message;
+            }
+            g_log.line(text);
+            uuepbs::ui::post_message(text);
+            return text;
         }
 
         // Same as the window's Refresh button: rescan the character, relist the picker, and
@@ -768,6 +835,17 @@ namespace
             m_hotkey.store(vk ? vk : VK_F6);
             const std::string refresh_name = state.setting("refresh_key", "F7");
             m_refresh_key.store(uuepbs::bridge::virtual_key_from_name(refresh_name)); // "" or unknown = off
+            // Preset cycling keys: "" or unknown = off; a key already used for the window or Refresh is ignored.
+            auto preset_key = [&](const char* setting) {
+                const int k = uuepbs::bridge::virtual_key_from_name(state.setting(setting));
+                return (k && k != m_hotkey.load() && k != m_refresh_key.load()) ? k : 0;
+            };
+            m_next_preset_key.store(preset_key("next_preset_key"));
+            m_prev_preset_key.store(preset_key("prev_preset_key"));
+            if (m_prev_preset_key.load() == m_next_preset_key.load())
+            {
+                m_prev_preset_key.store(0);
+            }
 
             const std::string folder = state.setting("presets");
             if (!m_shelf_ready || folder != m_shelf_source)
@@ -1244,6 +1322,10 @@ namespace
                 }
                 return joined.empty() ? "no presets saved yet" : joined;
             }
+            if (v == "next" || v == "prev")
+            {
+                return cycle_preset(v == "next" ? +1 : -1);
+            }
             if (v == "load" || v == "save")
             {
                 std::string message;
@@ -1364,6 +1446,11 @@ namespace
         std::atomic<int> m_refresh_key{VK_F7};
         bool m_key_down{};
         bool m_refresh_down{};
+        std::atomic<int> m_next_preset_key{0};
+        std::atomic<int> m_prev_preset_key{0};
+        bool m_next_preset_down{};
+        bool m_prev_preset_down{};
+        uuepbs::PresetCycle m_cycle; // per character: the preset the hotkeys last loaded
         bool m_retry_hook{};
         bool m_window_started{};
 

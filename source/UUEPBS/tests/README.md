@@ -23,6 +23,9 @@ Host-side tests (Linux/macOS/WSL with g++ 13+ or clang 17+). None of them need W
     # names given to characters in the window (_characters/_names.txt) and portrait requests
     g++ -std=c++23 -I$S test_names.cpp $S/core/*.cpp -o test_names && ./test_names
 
+    # preset share codes (encode/decode, damaged and hostile codes) and the next/previous preset order
+    g++ -std=c++23 -I$S test_share.cpp $S/core/*.cpp -o test_share && ./test_share
+
     # Lua <-> DLL file bridge
     g++ -std=c++23 -I$S bridge_peer.cpp $S/core/*.cpp -o bridge_peer
     g++ -std=c++23 -I$S test_bridge.cpp $S/core/*.cpp -o test_bridge

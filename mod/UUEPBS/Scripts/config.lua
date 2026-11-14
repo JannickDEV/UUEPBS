@@ -8,6 +8,13 @@ return {
     -- Handy in games that finish setting the character up late. "" turns it off.
     RefreshKey = "F7",
 
+    -- Load the next / previous saved preset (alphabetical, wraps around) onto the character picked in
+    -- the window (the player unless you picked someone else), without opening the window. Each character
+    -- keeps its own place in the list. Same key names as MenuKey; "" turns a key off.
+    -- Also available as console commands: ubs next / ubs prev.
+    NextPresetKey = "",
+    PrevPresetKey = "",
+
     -- Presets go to <Win64>\<PresetFolderName> (the folder that holds the game exe).
     -- Set PresetFolder to an absolute path to use somewhere else instead.
     -- Presets from an older "RBS Presets" folder next to it are copied over the first time.

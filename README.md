@@ -6,6 +6,10 @@ Universal Unreal Engine Player Body Sliders (UUEPBS) is a near universal player 
 
 
 https://github.com/user-attachments/assets/4e4372bc-8a64-4255-b8ae-a33645ce187e
+### Unreleased - Preset hotkeys and share codes
+* **Next / previous preset hotkeys**: `NextPresetKey` and `PrevPresetKey` in `config.lua` (off by default) load the next or previous saved preset onto the character picked in the window, without opening it. Each character keeps its own place in the list. Console: `ubs next`, `ubs prev`
+* **Share codes** in the Presets tab: **Copy current sliders** or **Copy picked preset** puts the preset on the clipboard as one line of text (`UUEPBS1.…`); **Paste code** reads one back, shows what it holds, and only changes anything when you press **Apply** or **Save as preset**. Codes are checksummed and size-limited, and values are clamped like preset files. Preset files are unchanged
+
 ### V2.7.0 - Changelogs
 * New window look: flat slate-navy theme with sharp corners, flush text tabs (**Body**, **Presets**, **Advanced**, **Status**) and 1px bordered groups
 * Body tab (was the Simplified Panel): body-part categories on the left, the picked category's sliders on the right under a section bar with **Reset**
@@ -77,9 +81,11 @@ https://github.com/user-attachments/assets/4e4372bc-8a64-4255-b8ae-a33645ce187e
 * **Presets** tab: save, load (or double-click), delete and open the folder. Presets are JSON files in **`<Win64>\UUEPBS Presets`** and hold bones and morphs.
   The current sliders auto-save to `_last_session.json` and come back next time.
   Bone and morph names aren't case-sensitive, and names a character doesn't have are skipped, so one preset can be shared between characters on the same rig.
+  * **Share codes:** **Copy current sliders** (or **Copy picked preset**) copies a preset as one line starting with `UUEPBS1.` that you can paste into chat or a mod page. **Paste code** reads a code from the clipboard and shows its name and size; **Apply to <character>** loads it, **Save as preset** writes it to the folder. Line breaks or spaces added by chat apps are ignored. A code holds only bone and morph values (a compact preset JSON with a checksum), never files or paths.
+  * **Preset hotkeys:** set `NextPresetKey` / `PrevPresetKey` in `config.lua` (e.g. `"PageDown"` / `"PageUp"`) to step through your saved presets in alphabetical order, wrapping around, on the character picked in the window. Each character remembers where it is in the list. A key already used for the window or Refresh is ignored.
 * **Status** tab: hook details, the Lua link, mirroring, morph counts, the **window skin** picker, tracked meshes, **Rescan**, and **Write diagnostics**, which dumps what the hook finder sees into the log for bug reports.
 
-UE4SS console: `uuepbs` (toggle window), `uuepbs status`, `uuepbs rescan`, `uuepbs list`, `uuepbs load <name>`, `uuepbs save <name>`, `uuepbs on|off`, `uuepbs reset`, `uuepbs diag`,
+UE4SS console: `uuepbs` (toggle window), `uuepbs status`, `uuepbs rescan`, `uuepbs list`, `uuepbs load <name>`, `uuepbs save <name>`, `uuepbs next|prev` (cycle presets), `uuepbs on|off`, `uuepbs reset`, `uuepbs diag`,
 `uuepbs skin` (list skins), `uuepbs skin <name>` (switch; `Default` = built-in look), `uuepbs morph <name> <weight>` (set a morph; without a weight it goes back to the game).
 `ubs …` is the short form.
 
