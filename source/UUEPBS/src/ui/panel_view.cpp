@@ -520,7 +520,7 @@ namespace uuepbs::ui
         const float title_h = below.y - top.y;
 
         const float box = ImGui::GetFrameHeight() + ImGui::CalcTextSize("Enabled").x + style.ItemInnerSpacing.x;
-        ImGui::SetCursorScreenPos(ImVec2(ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMax().x - box, top.y + (title_h - ImGui::GetFrameHeight()) * 0.5f));
+        ImGui::SetCursorScreenPos(ImVec2(ImGui::GetCursorScreenPos().x + ImGui::GetContentRegionAvail().x - box, top.y + (title_h - ImGui::GetFrameHeight()) * 0.5f));
         bool on = Registry::instance().enabled();
         if (sk.checkbox("Enabled", &on))
         {
@@ -605,7 +605,7 @@ namespace uuepbs::ui
 
         // Right column first (its width limits the text column): Change character, then note + Rename.
         const float change_w = sk.button_width("Change character    ");
-        const float right_x = ImGui::GetWindowContentRegionMax().x;
+        const float right_x = ImGui::GetCursorPos().x + ImGui::GetContentRegionAvail().x; // GetWindowContentRegionMax() is gone under IMGUI_DISABLE_OBSOLETE_FUNCTIONS
         std::string note;
         std::string others;
         size_t n_others = 0;
@@ -792,7 +792,7 @@ namespace uuepbs::ui
         ImGui::TextColored(muted(), "Every character loaded right now, nearest first. Each one keeps its own sliders.");
         ImGui::PopFont();
         const ImVec2 after = ImGui::GetCursorPos();
-        const float right_x = ImGui::GetWindowContentRegionMax().x;
+        const float right_x = ImGui::GetCursorPos().x + ImGui::GetContentRegionAvail().x; // GetWindowContentRegionMax() is gone under IMGUI_DISABLE_OBSOLETE_FUNCTIONS
         ImGui::SetCursorPos(ImVec2(right_x - close_w - refresh_w - style.ItemSpacing.x, top.y));
         if (sk.button("Refresh"))
         {
@@ -1593,6 +1593,7 @@ namespace uuepbs::ui
         }
         rail_w = std::min(rail_w + ImGui::GetFontSize() * 5.0f, ImGui::GetContentRegionAvail().x * 0.29f);
 
+        draw_symmetry_tools(true);
         draw_category_rail(cats, rail_w);
         ImGui::SameLine(0.0f, ImGui::GetStyle().ItemSpacing.x * 2.0f + 1.0f);
         ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0, 0, 0, 0));
@@ -1618,6 +1619,10 @@ namespace uuepbs::ui
 
     void PanelView::draw_detailed()
     {
+        if (!m_skeleton.names.empty() || !m_morph_names.empty())
+        {
+            draw_symmetry_tools(false);
+        }
         if (m_morph_names.empty())
         {
             draw_detailed_bones();
@@ -1734,7 +1739,7 @@ namespace uuepbs::ui
         if (can_mirror && m_mirror)
         {
             ImGui::SameLine();
-            ImGui::TextColored(muted(), "+ %s", mirror.c_str());
+            ImGui::TextColored(muted(), "+ %s (Symmetry lock)", mirror.c_str());
         }
 
         BoneEdit s = scale_of(m_selected, Spread::Chain);
@@ -1825,11 +1830,6 @@ namespace uuepbs::ui
                 "Keep children size: children follow rotation/move and the new shape but keep their own size.\n"
                 "This bone only: nothing below it changes (rotation/move included).");
 
-        if (can_mirror)
-        {
-            sk.checkbox("Mirror to other side", &m_mirror);
-            ImGui::SameLine();
-        }
         if (sk.button("Reset bone", "reset"))
         {
             BoneEdit neutral;
@@ -1937,9 +1937,6 @@ namespace uuepbs::ui
         }
         sk.end_child();
 
-        sk.checkbox("Mirror left/right morphs", &m_mirror);
-        tooltip("Moving a _L morph also moves its _R twin (and the other way round).");
-        ImGui::SameLine();
         ImGui::BeginDisabled(m_morphs.empty());
         if (sk.button("Reset all morphs", "reset"))
         {
@@ -2891,5 +2888,176 @@ namespace uuepbs::ui
         {
             it = now - it->second > std::chrono::seconds(30) ? m_thumb_wait.erase(it) : std::next(it);
         }
+    }
+
+    // ---- symmetry tools ------------------------------------------------------------
+
+    void PanelView::apply_action(const EditSnapshot& next, const char* what)
+    {
+        if (same_edits(next, snapshot()))
+        {
+            set_message(std::string(what) + ": nothing to change");
+            return;
+        }
+        m_history.checkpoint(m_history_actor, snapshot()); // an edit still settling stays its own step
+        apply_snapshot(next);
+        m_history.checkpoint(m_history_actor, snapshot()); // the action is exactly one step
+    }
+
+    void PanelView::mirror_all(Side from)
+    {
+        MirrorCount count;
+        const EditSnapshot next = mirror_sides(snapshot(), m_skeleton.names, m_morph_names, from, Registry::instance().mirror_table(), &count);
+        const char* what = from == Side::Left ? "Mirror left to right" : "Mirror right to left";
+        apply_action(next, what);
+        if (count.bones || count.morphs)
+        {
+            char buf[160];
+            std::snprintf(buf, sizeof(buf), "%s: %zu bone%s, %zu morph%s (Ctrl+Z to undo)", what, count.bones, count.bones == 1 ? "" : "s",
+                          count.morphs, count.morphs == 1 ? "" : "s");
+            set_message(buf);
+        }
+    }
+
+    void PanelView::randomize_body()
+    {
+        std::vector<RandomPart> parts;
+        for (const GroupBones& gb : m_body.groups)
+        {
+            if (m_random_category_only && gb.group.section != m_category)
+            {
+                continue;
+            }
+            RandomPart p;
+            p.spread = gb.group.spread;
+            for (const std::string& b : gb.bones)
+            {
+                if (has_bone(b))
+                {
+                    p.bones.push_back(b);
+                }
+            }
+            if (!p.bones.empty())
+            {
+                parts.push_back(std::move(p));
+            }
+        }
+        std::vector<std::vector<std::string>> morphs;
+        for (const MorphGroupMorphs& mg : m_morph_groups)
+        {
+            const std::string section = mg.group.section.empty() ? std::string("Morphs") : mg.group.section;
+            if (!mg.morphs.empty() && (!m_random_category_only || section == m_category))
+            {
+                morphs.push_back(mg.morphs);
+            }
+        }
+        const uint64_t seed = static_cast<uint64_t>(Clock::now().time_since_epoch().count()) ^ (++m_random_count * 0x9E3779B97F4A7C15ull);
+        apply_action(randomize_parts(snapshot(), parts, morphs, m_random, seed), "Randomize");
+        set_message(m_random_category_only ? "Randomized " + m_category + " (Ctrl+Z to undo)" : std::string("Randomized the body (Ctrl+Z to undo)"));
+    }
+
+    void PanelView::draw_random_limits()
+    {
+        Skin& sk = skin();
+        if (!ImGui::BeginPopup("##randomlimits"))
+        {
+            return;
+        }
+        ImGui::TextUnformatted("Randomize limits");
+        ImGui::Separator();
+        const float w = ImGui::GetFontSize() * 12.0f;
+        float size = static_cast<float>(m_random.size * 100.0);
+        float shape = static_cast<float>(m_random.shape * 100.0);
+        float lo = static_cast<float>(m_random.morph_lo);
+        float hi = static_cast<float>(m_random.morph_hi);
+        sk.checkbox("Body parts", &m_random.parts);
+        ImGui::BeginDisabled(!m_random.parts);
+        ImGui::SetNextItemWidth(w);
+        if (ImGui::SliderFloat("Size +/-", &size, 0.0f, 50.0f, "%.0f %%", ImGuiSliderFlags_AlwaysClamp))
+        {
+            m_random.size = size / 100.0;
+        }
+        tooltip("How far each part's overall size may move from 1.0 (15 % = 0.85 to 1.15).");
+        ImGui::SetNextItemWidth(w);
+        if (ImGui::SliderFloat("Shape +/-", &shape, 0.0f, 25.0f, "%.0f %%", ImGuiSliderFlags_AlwaysClamp))
+        {
+            m_random.shape = shape / 100.0;
+        }
+        tooltip("Extra variation of length, width and depth on top of the size. 0 keeps parts in proportion.");
+        ImGui::EndDisabled();
+        ImGui::BeginDisabled(m_morph_groups.empty());
+        sk.checkbox("Morph groups", &m_random.morphs);
+        ImGui::BeginDisabled(!m_random.morphs);
+        ImGui::SetNextItemWidth(w);
+        if (ImGui::DragFloatRange2("Weights", &lo, &hi, 0.01f, static_cast<float>(kMorphMin), static_cast<float>(kMorphMax), "%.2f", "%.2f",
+                                   ImGuiSliderFlags_AlwaysClamp))
+        {
+            m_random.morph_lo = lo;
+            m_random.morph_hi = hi;
+        }
+        tooltip("Morph group sliders get a weight between these two values.");
+        ImGui::EndDisabled();
+        ImGui::EndDisabled();
+        ImGui::Separator();
+        const std::string only = "Only " + (m_category.empty() ? std::string("this category") : m_category);
+        sk.checkbox(only.c_str(), &m_random_category_only);
+        tooltip("Leave the other Body tab categories as they are.");
+        if (sk.button("Defaults", "reset"))
+        {
+            m_random = RandomLimits{};
+            m_random_category_only = false;
+        }
+        m_random.clamp();
+        ImGui::EndPopup();
+    }
+
+    // One row above the sliders:  [x] Symmetry lock   Mirror L to R   Mirror R to L   ...   Randomize  Limits
+    void PanelView::draw_symmetry_tools(bool randomize)
+    {
+        Skin& sk = skin();
+        const ImGuiStyle& style = ImGui::GetStyle();
+        sk.checkbox("Symmetry lock", &m_mirror);
+        tooltip("On: editing a left or right bone (or _L/_R morph) under Advanced also edits its partner, as a mirror image.\n"
+                "Body tab parts always move both sides together.");
+        const bool any = !m_book.empty() || !m_morphs.empty();
+        ImGui::SameLine(0.0f, style.ItemSpacing.x * 3.0f);
+        ImGui::BeginDisabled(!any);
+        if (sk.button("Mirror L to R", "mirror"))
+        {
+            mirror_all(Side::Left);
+        }
+        tooltip("Copy every left-side edit onto the right side, as a mirror image.\nRight-side edits are replaced. One Ctrl+Z undoes it.");
+        ImGui::SameLine();
+        if (sk.button("Mirror R to L", "mirror"))
+        {
+            mirror_all(Side::Right);
+        }
+        tooltip("Copy every right-side edit onto the left side, as a mirror image.\nLeft-side edits are replaced. One Ctrl+Z undoes it.");
+        ImGui::EndDisabled();
+        if (randomize)
+        {
+            const float right = sk.button_width("Randomize", "random") + sk.button_width("Limits", "settings") + style.ItemSpacing.x;
+            ImGui::SameLine();
+            const float room = ImGui::GetContentRegionAvail().x - right;
+            if (room > 0.0f)
+            {
+                ImGui::SetCursorPosX(ImGui::GetCursorPosX() + room);
+            }
+            ImGui::BeginDisabled(!(m_random.parts && !m_body.groups.empty()) && !(m_random.morphs && !m_morph_groups.empty()));
+            if (sk.button("Randomize", "random"))
+            {
+                randomize_body();
+            }
+            ImGui::EndDisabled();
+            tooltip("Give every body part a random size inside the limits (both sides alike). One Ctrl+Z undoes it.");
+            ImGui::SameLine();
+            if (sk.button("Limits", "settings"))
+            {
+                ImGui::OpenPopup("##randomlimits");
+            }
+            tooltip("How far Randomize may go, and what it touches.");
+            draw_random_limits();
+        }
+        ImGui::Dummy(ImVec2(0.0f, dpi_px(4.0f)));
     }
 } // namespace uuepbs::ui

@@ -15,6 +15,7 @@
 #include "../core/preset_library.hpp"
 #include "../core/presets.hpp"
 #include "../core/registry.hpp"
+#include "../core/symmetry.hpp"
 
 #include <imgui.h>
 
@@ -219,6 +220,12 @@ namespace uuepbs::ui
         void draw_preset_tags(); // chips of the picked preset + "Add tag"
         bool tag_chip(const char* label, bool active, bool removable = false); // true when clicked
         void request_preset_thumbnail(const std::string& preset);
+        // Symmetry tools (Body and Advanced tabs): Symmetry lock, Mirror L to R / R to L, Randomize.
+        void draw_symmetry_tools(bool randomize);
+        void apply_action(const EditSnapshot& next, const char* what); // one undo step
+        void mirror_all(Side from);
+        void randomize_body();
+        void draw_random_limits(); // "Limits" popup
 
         const PresetShelf* m_shelf{};
         PanelHost* m_host{};
@@ -278,7 +285,7 @@ namespace uuepbs::ui
         std::map<std::string, Spread> m_spread_hint{};
         char m_filter[64]{};
         bool m_only_edited{false};
-        bool m_mirror{true};
+        bool m_mirror{true}; // Symmetry lock: an Advanced bone/morph edit also writes its mirror image
         std::string m_selected{};
 
         std::vector<std::string> m_presets{};
@@ -311,6 +318,10 @@ namespace uuepbs::ui
         bool m_preset_list_view{false};       // false = thumbnail grid
         bool m_scroll_to_picked{false};
         std::map<std::string, Clock::time_point> m_thumb_wait{}; // preset -> when its picture was asked for
+        // Randomize
+        RandomLimits m_random{};
+        bool m_random_category_only{false};
+        uint64_t m_random_count{0};
 
         std::vector<std::string> m_skins{};
         Clock::time_point m_skins_time{};

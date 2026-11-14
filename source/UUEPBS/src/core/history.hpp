@@ -48,6 +48,11 @@ namespace uuepbs
         std::optional<EditSnapshot> undo(const std::string& actor, const EditSnapshot& now);
         std::optional<EditSnapshot> redo(const std::string& actor, const EditSnapshot& now);
 
+        // Records `now` as a finished step right away, without waiting for it to settle. Used
+        // around one-click actions (Mirror, Randomize): a checkpoint before keeps an edit that
+        // was still settling as its own step, and one after makes the action exactly one step.
+        void checkpoint(const std::string& actor, const EditSnapshot& now, Clock::time_point t = Clock::now());
+
         void forget(const std::string& actor);
         // Drops the history of every character not in `keep` (released or despawned ones:
         // their keys are addresses that a new character could reuse).
