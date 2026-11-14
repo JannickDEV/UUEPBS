@@ -512,7 +512,7 @@ namespace uuepbs::ui
         const float title_h = below.y - top.y;
 
         const float box = ImGui::GetFrameHeight() + ImGui::CalcTextSize("Enabled").x + style.ItemInnerSpacing.x;
-        ImGui::SetCursorScreenPos(ImVec2(ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMax().x - box, top.y + (title_h - ImGui::GetFrameHeight()) * 0.5f));
+        ImGui::SetCursorScreenPos(ImVec2(ImGui::GetCursorScreenPos().x + ImGui::GetContentRegionAvail().x - box, top.y + (title_h - ImGui::GetFrameHeight()) * 0.5f));
         bool on = Registry::instance().enabled();
         if (sk.checkbox("Enabled", &on))
         {
@@ -597,7 +597,7 @@ namespace uuepbs::ui
 
         // Right column first (its width limits the text column): Change character, then note + Rename.
         const float change_w = sk.button_width("Change character    ");
-        const float right_x = ImGui::GetWindowContentRegionMax().x;
+        const float right_x = ImGui::GetCursorPos().x + ImGui::GetContentRegionAvail().x; // GetWindowContentRegionMax() is gone under IMGUI_DISABLE_OBSOLETE_FUNCTIONS
         std::string note;
         std::string others;
         size_t n_others = 0;
@@ -781,7 +781,7 @@ namespace uuepbs::ui
         ImGui::TextColored(muted(), "Every character loaded right now, nearest first. Each one keeps its own sliders.");
         ImGui::PopFont();
         const ImVec2 after = ImGui::GetCursorPos();
-        const float right_x = ImGui::GetWindowContentRegionMax().x;
+        const float right_x = ImGui::GetCursorPos().x + ImGui::GetContentRegionAvail().x; // GetWindowContentRegionMax() is gone under IMGUI_DISABLE_OBSOLETE_FUNCTIONS
         ImGui::SetCursorPos(ImVec2(right_x - close_w - refresh_w - style.ItemSpacing.x, top.y));
         if (sk.button("Refresh"))
         {
