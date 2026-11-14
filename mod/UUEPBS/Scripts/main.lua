@@ -2776,15 +2776,19 @@ end
 
 -- Portraits for the window (uuepbs_portraits.lua): taken on request, one at a time.
 -- Kept in `late` (main.lua is at Lua's limit of 200 locals).
-if Config.AutoPortraits ~= false then
+-- The same module takes preset thumbnails (PresetThumbnails in config.lua).
+if Config.AutoPortraits ~= false or Config.PresetThumbnails ~= false then
     local okP, mod = pcall(require, "uuepbs_portraits")
     if okP and type(mod) == "table" then
         late.portraits = mod
         mod.setup({
             say = say,
             chatter = chatter,
+            portraits = Config.AutoPortraits ~= false,
             folder = presetFolder .. "\\_portraits",
             request_file = nativeDir .. "\\portrait_requests.txt",
+            thumb_folder = Config.PresetThumbnails ~= false and (presetFolder .. "\\_library") or nil,
+            thumb_request_file = nativeDir .. "\\thumbnail_requests.txt",
             profile = function()
                 return Profile
             end,

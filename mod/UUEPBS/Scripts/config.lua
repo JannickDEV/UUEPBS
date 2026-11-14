@@ -91,6 +91,11 @@ return {
     -- Your own PNG/JPG there, named after the character, always wins. false = only your own images.
     AutoPortraits = true,
 
+    -- Saving a preset takes a whole-body picture of the character for the preset browser, saved in
+    -- "UUEPBS Presets\_library\<preset>.auto.png". Your own PNG/JPG there named after the preset wins.
+    -- The game profile's "ThumbnailDistance" (cm) / "ThumbnailFov" tune the framing. false = no pictures.
+    PresetThumbnails = true,
+
     Verbose = false,
 
     -- Starting values for a new game profile. The first time the mod runs in a game it writes

@@ -12,6 +12,7 @@
 #include "core/character_memory.hpp"
 #include "core/character_names.hpp"
 #include "core/portrait_requests.hpp"
+#include "core/preset_library.hpp"
 #include "ui/portraits.hpp"
 #include "core/bridge.hpp"
 #include "core/json.hpp"
@@ -238,6 +239,15 @@ namespace
             if (m_portrait_requests.add(id, stem, retake) && !m_portrait_requests.write(m_folder / L"portrait_requests.txt"))
             {
                 g_log.line("could not write portrait_requests.txt");
+            }
+        }
+
+        void request_thumbnail(const std::string& id, const std::string& preset) override
+        {
+            std::lock_guard guard(m_portrait_lock);
+            if (m_thumbnail_requests.add(id, preset) && !m_thumbnail_requests.write(m_folder / L"thumbnail_requests.txt"))
+            {
+                g_log.line("could not write thumbnail_requests.txt");
             }
         }
 
@@ -1374,6 +1384,7 @@ namespace
         std::mutex m_lock; // guards m_state, m_out
         std::mutex m_portrait_lock;
         uuepbs::PortraitRequests m_portrait_requests; // portraits the window asked the script to take
+        uuepbs::ThumbnailRequests m_thumbnail_requests; // preset thumbnails (same lock)
         uuepbs::bridge::LuaState m_state;
         uuepbs::bridge::DllState m_out;
         bool m_out_dirty{true};
