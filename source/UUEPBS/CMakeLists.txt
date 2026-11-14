@@ -48,17 +48,22 @@ add_library(UUEPBS SHARED
     src/dllmain.cpp
     src/core/body_groups.cpp
     src/core/character_names.cpp
+    src/core/changes.cpp
     src/core/character_memory.cpp
+    src/core/history.cpp
     src/core/bridge.cpp
     src/core/mirror.cpp
     src/core/morphs.cpp
     src/core/portrait_requests.cpp
+    src/core/preset_library.cpp
     src/core/presets.cpp
     src/core/proportions.cpp
     src/core/registry.cpp
     src/core/resolver.cpp
     src/core/rig_names.cpp
     src/core/sculpt.cpp
+    src/core/share_code.cpp
+    src/core/symmetry.cpp
     src/ui/image_decode.cpp
     src/ui/panel_view.cpp
     src/ui/portraits.cpp

@@ -5,6 +5,7 @@
 #include "core/bridge.hpp"
 #include <algorithm>
 #include <cstdio>
+#include <cstdlib>
 #include <fstream>
 #include <sstream>
 using namespace uuepbs::bridge;
@@ -34,6 +35,15 @@ int main(int argc, char** argv)
             for (auto& m : r.morphs) std::printf(" %s", m.c_str());
             std::printf("\n");
         }
+    }
+    // engine names (2.8) on lines of their own, only when asked for (older checks match whole lines)
+    if (std::getenv("UUEPBS_PEER_ENGINE"))
+    {
+        std::printf("target_engine %s\n", st->target.engine.c_str());
+        for (auto& c : st->candidates) std::printf("cand_engine %s %s\n", c.key.c_str(), c.engine.c_str());
+        for (auto& n : st->npcs) std::printf("npc_engine %s %s\n", n.key.c_str(), n.engine.c_str());
+        for (auto& p : st->party) std::printf("party_engine %s %s\n", p.key.c_str(), p.engine.c_str());
+        for (auto& r : st->rigs) std::printf("rig_engine %s | %s | %s | %s\n", r.label.c_str(), r.engine.c_str(), r.owner.c_str(), r.owner_engine.c_str());
     }
     if (!st->switch_who.empty()) std::printf("switch %s\n", st->switch_who.c_str());
     for (auto& p : st->party) std::printf("party %s %s %s\n", p.key.c_str(), p.identity.c_str(), p.label.c_str());

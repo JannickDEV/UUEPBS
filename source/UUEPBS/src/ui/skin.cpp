@@ -426,7 +426,7 @@ skin.json
   "icons": {                 // square-ish images, drawn at text height
     "bones": "...", "morphs": "...",     // Advanced sub-tabs
     "reset": "...", "xyz": "...", "save": "...", "load": "...",
-    "delete": "...", "folder": "...",    // with an icon, Reset and XYZ on slider rows become icon-only
+    "delete": "...", "folder": "...", "undo": "...", "redo": "...", // with an icon, Reset and XYZ on slider rows become icon-only
     "section.Hips & Legs": "icons/legs.png"   // any Body tab category, by its name
   }
   (Since 2.7 the main tabs are text only, and slider rows use a square bullet instead of

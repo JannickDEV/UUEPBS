@@ -457,6 +457,7 @@ namespace uuepbs::ui
                 ImGui_ImplWin32_Shutdown();
                 skin().shutdown(); // after the backend released the textures, before the context goes
                 portraits().shutdown();
+                preset_thumbnails().shutdown();
                 ImGui::DestroyContext(m_imgui);
                 m_imgui = nullptr;
                 destroy_device();
@@ -470,6 +471,7 @@ namespace uuepbs::ui
                 const std::string before = skin().status();
                 m_skin_dirty = skin().update() || m_skin_dirty;
                 portraits().update(ImGui::GetTime()); // picks up new/changed portrait files, frees replaced ones
+                preset_thumbnails().update(ImGui::GetTime()); // same for preset thumbnails (_library)
                 if (m_skin_dirty && skin().status() != before)
                 {
                     m_view.set_message("Window skin: " + skin().status());

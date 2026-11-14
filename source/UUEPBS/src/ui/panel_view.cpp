@@ -217,6 +217,13 @@ namespace uuepbs::ui
             m_rigs_time = now;
             m_mirror_text = reg.mirror_source();
             m_animated = reg.animated_morphs();
+            // Released or despawned characters lose their undo history (their address keys can be reused).
+            std::set<std::string> keep{kPlayerActor, reg.active_actor()};
+            for (const ActorSummary& a : m_edited)
+            {
+                keep.insert(a.key);
+            }
+            m_history.retain(keep);
         }
         if (m_targets && now - m_target_time > std::chrono::milliseconds(400))
         {
@@ -411,6 +418,7 @@ namespace uuepbs::ui
     void PanelView::draw()
     {
         sync();
+        track_history();
         Skin& sk = skin();
         const ImGuiViewport* vp = ImGui::GetMainViewport();
         ImGui::SetNextWindowPos(vp->WorkPos);
@@ -519,7 +527,7 @@ namespace uuepbs::ui
         const float title_h = below.y - top.y;
 
         const float box = ImGui::GetFrameHeight() + ImGui::CalcTextSize("Enabled").x + style.ItemInnerSpacing.x;
-        ImGui::SetCursorScreenPos(ImVec2(ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMax().x - box, top.y + (title_h - ImGui::GetFrameHeight()) * 0.5f));
+        ImGui::SetCursorScreenPos(ImVec2(ImGui::GetCursorScreenPos().x + ImGui::GetContentRegionAvail().x - box, top.y + (title_h - ImGui::GetFrameHeight()) * 0.5f));
         bool on = Registry::instance().enabled();
         if (sk.checkbox("Enabled", &on))
         {
@@ -604,7 +612,7 @@ namespace uuepbs::ui
 
         // Right column first (its width limits the text column): Change character, then note + Rename.
         const float change_w = sk.button_width("Change character    ");
-        const float right_x = ImGui::GetWindowContentRegionMax().x;
+        const float right_x = ImGui::GetCursorPos().x + ImGui::GetContentRegionAvail().x; // GetWindowContentRegionMax() is gone under IMGUI_DISABLE_OBSOLETE_FUNCTIONS
         std::string note;
         std::string others;
         size_t n_others = 0;
@@ -631,10 +639,12 @@ namespace uuepbs::ui
         }
         ImGui::PushFont(nullptr, base * 0.86f);
         const float rename_w = ImGui::CalcTextSize("Rename").x + style.FramePadding.x * 2.0f;
-        const std::string shown_note = fit_text(note, std::max(dpi_px(60.0f), ImGui::GetContentRegionAvail().x * 0.30f - rename_w));
+        const float history_w = undo_redo_width() + style.ItemSpacing.x; // Undo / Redo sit left of Rename
+        const std::string shown_note = fit_text(note, std::max(dpi_px(60.0f), ImGui::GetContentRegionAvail().x * 0.30f - rename_w - history_w));
         const float note_w = ImGui::CalcTextSize(shown_note.c_str()).x;
         ImGui::PopFont();
-        const float right_w = std::max(change_w, note_w + rename_w + style.ItemSpacing.x);
+        const float compare_w = compare_switch_width();
+        const float right_w = std::max(change_w + style.ItemSpacing.x + compare_w, note_w + history_w + rename_w + style.ItemSpacing.x);
 
         ImGui::BeginGroup();
         const float text_w = std::max(dpi_px(80.0f), right_x - ImGui::GetCursorPosX() - right_w - style.ItemSpacing.x * 2.0f);
@@ -680,6 +690,11 @@ namespace uuepbs::ui
                 std::snprintf(buf, sizeof(buf), "Tracking %zu mesh%s - waiting for an animated frame", m_rigs.size(), m_rigs.size() == 1 ? "" : "es");
                 line = buf;
             }
+            else if (Registry::instance().comparing())
+            {
+                col = accent();
+                line = "Before: the game's own body   \xC2\xB7   your edits are kept";
+            }
             else
             {
                 std::snprintf(buf, sizeof(buf), "%s   \xC2\xB7   live on %zu mesh%s   \xC2\xB7   %zu bones%s", Registry::instance().enabled() ? "Edits on" : "Edits off",
@@ -696,7 +711,9 @@ namespace uuepbs::ui
         ImGui::PopFont();
         ImGui::EndGroup();
 
-        // Right: Change character (opens the grid), then Rename and a short note.
+        // Right: Before / After and Change character (opens the grid), then Rename and a short note.
+        ImGui::SetCursorPos(ImVec2(right_x - change_w - style.ItemSpacing.x - compare_w, pad));
+        draw_compare_switch();
         ImGui::SetCursorPos(ImVec2(right_x - change_w, pad));
         ImGui::BeginDisabled(!m_targets);
         if (sk.button("Change character    ", {}, ImVec2(change_w, 0.0f)))
@@ -718,7 +735,7 @@ namespace uuepbs::ui
 
         ImGui::PushFont(nullptr, base * 0.86f);
         const float row_y = pad + ImGui::GetFrameHeight() + style.ItemSpacing.y * 0.75f;
-        ImGui::SetCursorPos(ImVec2(right_x - rename_w - style.ItemSpacing.x - note_w, row_y + (ImGui::GetFrameHeight() - ImGui::GetTextLineHeight()) * 0.5f));
+        ImGui::SetCursorPos(ImVec2(right_x - rename_w - history_w - style.ItemSpacing.x - note_w, row_y + (ImGui::GetFrameHeight() - ImGui::GetTextLineHeight()) * 0.5f));
         ImGui::TextColored(is_message ? accent() : muted(), "%s", shown_note.c_str());
         if (is_message)
         {
@@ -729,6 +746,8 @@ namespace uuepbs::ui
             const std::string tip = "Also keeping sliders on: " + others;
             tooltip(tip.c_str());
         }
+        ImGui::SetCursorPos(ImVec2(right_x - rename_w - history_w, row_y));
+        draw_undo_redo();
         ImGui::SetCursorPos(ImVec2(right_x - rename_w, row_y));
         ImGui::BeginDisabled(m_target.label.empty());
         if (sk.button("Rename", {}, ImVec2(rename_w, 0.0f)))
@@ -753,6 +772,60 @@ namespace uuepbs::ui
             m_choose_open = false;
         }
         ImGui::Dummy(ImVec2(0.0f, dpi_px(4.0f)));
+    }
+
+    float PanelView::compare_switch_width()
+    {
+        const ImGuiStyle& style = ImGui::GetStyle();
+        return std::ceil(std::max(ImGui::CalcTextSize("Before").x, ImGui::CalcTextSize("After").x) + style.FramePadding.x * 2.0f) * 2.0f;
+    }
+
+    // Before | After: two flush cells; the one showing is filled with the accent and gets an accent top
+    // line (the line also shows on skins that draw buttons with images). "Before" shows the game's own
+    // body for every character, "After" the sliders. Moving a slider or closing the window goes back to After.
+    void PanelView::draw_compare_switch()
+    {
+        Skin& sk = skin();
+        Registry& reg = Registry::instance();
+        const ImGuiStyle& style = ImGui::GetStyle();
+        const float cell = compare_switch_width() * 0.5f;
+        const bool before = reg.comparing();
+        const bool held = reg.compare().held();
+        std::string tip = "Before shows the game's own body, After shows your sliders. Nothing is lost.\n"
+                          "Moving a slider or closing the window goes back to After.";
+        const std::string key = m_targets ? m_targets->compare_hotkey_text() : std::string();
+        tip += key.empty() ? std::string("\nSet CompareKey in config.lua to compare by holding a key in game.")
+                           : "\nOr hold " + key + " in game to see the original while the key is down.";
+        ImDrawList* dl = ImGui::GetWindowDrawList();
+        ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0.0f, style.ItemSpacing.y));
+        for (int i = 0; i < 2; ++i)
+        {
+            const bool is_before = i == 0;
+            const bool on = is_before == before;
+            if (!is_before)
+            {
+                ImGui::SameLine();
+            }
+            if (on)
+            {
+                ImGui::PushStyleColor(ImGuiCol_Button, accent_dim());
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered, accent_dim());
+                ImGui::PushStyleColor(ImGuiCol_ButtonActive, accent_dim());
+            }
+            if (sk.button(is_before ? "Before##compare" : "After##compare", {}, ImVec2(cell, 0.0f)))
+            {
+                reg.set_compare(is_before);
+            }
+            if (on)
+            {
+                ImGui::PopStyleColor(3);
+                const ImVec2 a = ImGui::GetItemRectMin();
+                const ImVec2 b = ImGui::GetItemRectMax();
+                dl->AddRectFilled(a, ImVec2(b.x, a.y + std::max(1.0f, std::floor(dpi_px(2.0f)))), u32(accent()));
+            }
+            tooltip(held && !is_before ? (tip + "\n(" + key + " is held down right now.)").c_str() : tip.c_str());
+        }
+        ImGui::PopStyleVar();
     }
 
     void PanelView::draw_character_chooser()
@@ -788,7 +861,7 @@ namespace uuepbs::ui
         ImGui::TextColored(muted(), "Every character loaded right now, nearest first. Each one keeps its own sliders.");
         ImGui::PopFont();
         const ImVec2 after = ImGui::GetCursorPos();
-        const float right_x = ImGui::GetWindowContentRegionMax().x;
+        const float right_x = ImGui::GetCursorPos().x + ImGui::GetContentRegionAvail().x; // GetWindowContentRegionMax() is gone under IMGUI_DISABLE_OBSOLETE_FUNCTIONS
         ImGui::SetCursorPos(ImVec2(right_x - close_w - refresh_w - style.ItemSpacing.x, top.y));
         if (sk.button("Refresh"))
         {
@@ -1402,6 +1475,9 @@ namespace uuepbs::ui
         const ImGuiStyle& style = ImGui::GetStyle();
         const bool reset_all = section_bar(cat.name.c_str(), "Reset", cat.changed > 0);
         ImGui::PushFont(nullptr, style.FontSizeBase * 0.86f);
+        draw_changed_only_filter();
+        ImGui::SameLine();
+        ImGui::AlignTextToFramePadding();
         ImGui::TextColored(muted(), cat.changed ? "%zu of %zu parts changed. Click a number to type it." : "%zu parts. Click a number to type it.",
                            cat.changed ? cat.changed : cat.parts, cat.parts);
         ImGui::PopFont();
@@ -1426,14 +1502,16 @@ namespace uuepbs::ui
         ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(style.ItemSpacing.x, dpi_px(12.0f)));
         sk.begin_child("##group", ImVec2(0, 0), ImGuiChildFlags_Borders | ImGuiChildFlags_AutoResizeY | ImGuiChildFlags_AlwaysUseWindowPadding);
         ImGui::PopStyleVar();
+        size_t shown = 0; // rows left after the "Changed only" filter
 
         for (const GroupBones& gb : m_body.groups)
         {
             const BodyGroup& g = gb.group;
-            if (g.section != cat.name)
+            if (g.section != cat.name || (m_simplified_changed_only && !group_changed(gb, m_book)))
             {
                 continue;
             }
+            ++shown;
             ImGui::PushID(g.title.c_str());
             BoneEdit s = scale_of(gb.bones.front(), g.spread);
             const double one[3] = {1.0, 1.0, 1.0};
@@ -1506,10 +1584,12 @@ namespace uuepbs::ui
 
         for (const MorphGroupMorphs& mg : m_morph_groups)
         {
-            if ((mg.group.section.empty() ? std::string("Morphs") : mg.group.section) != cat.name)
+            if ((mg.group.section.empty() ? std::string("Morphs") : mg.group.section) != cat.name ||
+                (m_simplified_changed_only && !morph_group_changed(mg, m_morphs)))
             {
                 continue;
             }
+            ++shown;
             ImGui::PushID(("morphgroup:" + mg.group.title).c_str());
             std::optional<double> current;
             for (const std::string& m : mg.morphs)
@@ -1557,6 +1637,10 @@ namespace uuepbs::ui
             }
             ImGui::PopID();
         }
+        if (shown == 0)
+        {
+            ImGui::TextColored(muted(), "Nothing in %s is changed yet. Untick \"Changed only\" to see every part.", cat.name.c_str());
+        }
         sk.end_child();
         ImGui::PopStyleVar();
     }
@@ -1585,6 +1669,7 @@ namespace uuepbs::ui
         }
         rail_w = std::min(rail_w + ImGui::GetFontSize() * 5.0f, ImGui::GetContentRegionAvail().x * 0.29f);
 
+        draw_symmetry_tools(true);
         draw_category_rail(cats, rail_w);
         ImGui::SameLine(0.0f, ImGui::GetStyle().ItemSpacing.x * 2.0f + 1.0f);
         ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0, 0, 0, 0));
@@ -1798,6 +1883,10 @@ namespace uuepbs::ui
 
     void PanelView::draw_detailed()
     {
+        if (!m_skeleton.names.empty() || !m_morph_names.empty())
+        {
+            draw_symmetry_tools(false);
+        }
         if (m_morph_names.empty())
         {
             draw_detailed_bones();
@@ -1914,7 +2003,7 @@ namespace uuepbs::ui
         if (can_mirror && m_mirror)
         {
             ImGui::SameLine();
-            ImGui::TextColored(muted(), "+ %s", mirror.c_str());
+            ImGui::TextColored(muted(), "+ %s (Symmetry lock)", mirror.c_str());
         }
 
         BoneEdit s = scale_of(m_selected, Spread::Chain);
@@ -2005,11 +2094,6 @@ namespace uuepbs::ui
                 "Keep children size: children follow rotation/move and the new shape but keep their own size.\n"
                 "This bone only: nothing below it changes (rotation/move included).");
 
-        if (can_mirror)
-        {
-            sk.checkbox("Mirror to other side", &m_mirror);
-            ImGui::SameLine();
-        }
         if (sk.button("Reset bone", "reset"))
         {
             BoneEdit neutral;
@@ -2117,9 +2201,6 @@ namespace uuepbs::ui
         }
         sk.end_child();
 
-        sk.checkbox("Mirror left/right morphs", &m_mirror);
-        tooltip("Moving a _L morph also moves its _R twin (and the other way round).");
-        ImGui::SameLine();
         ImGui::BeginDisabled(m_morphs.empty());
         if (sk.button("Reset all morphs", "reset"))
         {
@@ -2153,6 +2234,7 @@ namespace uuepbs::ui
             Registry::instance().replace_edits(std::move(book));
             Registry::instance().replace_morphs(std::move(morphs));
             std::snprintf(m_preset_name, sizeof(m_preset_name), "%s", name.c_str());
+            m_picked = name; // its details stay on show
         }
         set_message(message);
     }
@@ -2160,13 +2242,21 @@ namespace uuepbs::ui
     void PanelView::save_preset(const std::string& name)
     {
         std::string message;
+        bool saved = false;
         if (m_shelf)
         {
             const MorphBook morphs = Registry::instance().morphs();
-            m_shelf->save(name, Registry::instance().edits(), message, &morphs);
+            saved = m_shelf->save(name, Registry::instance().edits(), message, &morphs);
         }
         set_message(message);
         refresh_presets();
+        if (saved)
+        {
+            const std::string clean = PresetShelf::clean_name(name);
+            m_picked = clean;
+            m_scroll_to_picked = true;
+            request_preset_thumbnail(clean); // a picture of the character as it looks now
+        }
     }
 
     void PanelView::draw_presets()
@@ -2221,24 +2311,8 @@ namespace uuepbs::ui
 
         ImGui::Spacing();
         section_bar("Saved presets");
-        const float list_h = std::max(120.0f, ImGui::GetContentRegionAvail().y - ImGui::GetFrameHeightWithSpacing() * 4.5f);
-        sk.begin_child("##presetlist", ImVec2(0, list_h), ImGuiChildFlags_Borders);
-        if (m_presets.empty())
-        {
-            ImGui::TextColored(muted(), "No presets yet.");
-        }
-        for (const std::string& name : m_presets)
-        {
-            if (ImGui::Selectable(name.c_str(), m_picked == name, ImGuiSelectableFlags_AllowDoubleClick))
-            {
-                m_picked = name;
-                if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
-                {
-                    load_preset(name);
-                }
-            }
-        }
-        sk.end_child();
+        const float list_h = std::max(160.0f, ImGui::GetContentRegionAvail().y - ImGui::GetFrameHeightWithSpacing() * 4.5f - share_codes_height());
+        draw_preset_browser(list_h);
 
         const bool picked = !m_picked.empty() && std::find(m_presets.begin(), m_presets.end(), m_picked) != m_presets.end();
         ImGui::BeginDisabled(!picked);
@@ -2252,6 +2326,13 @@ namespace uuepbs::ui
             m_pending = m_picked;
             ImGui::OpenPopup("Delete preset?");
         }
+        ImGui::SameLine();
+        if (sk.button("Retake picture"))
+        {
+            request_preset_thumbnail(m_picked);
+        }
+        tooltip("Takes a new thumbnail of the selected character as it looks right now (load the preset first).\n"
+                "Your own PNG/JPG named after the preset in the presets folder's _library folder always wins.");
         ImGui::EndDisabled();
         ImGui::SameLine();
         if (sk.button("Open folder", "folder"))
@@ -2266,11 +2347,14 @@ namespace uuepbs::ui
 
         if (ImGui::BeginPopupModal("Delete preset?", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
         {
-            ImGui::Text("Delete '%s' from disk?", m_pending.c_str());
+            ImGui::Text("Delete '%s' (and its thumbnail and tags) from disk?", m_pending.c_str());
             if (sk.button("Delete"))
             {
                 std::string message;
-                m_shelf->remove(m_pending, message);
+                if (m_shelf->remove(m_pending, message))
+                {
+                    m_library.forget(m_pending); // its tags and thumbnail
+                }
                 set_message(message);
                 m_picked.clear();
                 refresh_presets();
@@ -2308,10 +2392,148 @@ namespace uuepbs::ui
             ImGui::EndPopup();
         }
 
+        draw_share_codes();
+
         ImGui::Spacing();
         ImGui::PushTextWrapPos(0.0f);
         ImGui::TextColored(muted(), "Folder: %s", path_to_utf8(m_shelf->folder()).c_str());
+        const std::string keys = m_targets ? m_targets->preset_hotkeys_text() : std::string();
+        if (!keys.empty())
+        {
+            ImGui::TextColored(muted(), "Hotkeys: %s (NextPresetKey / PrevPresetKey in config.lua)", keys.c_str());
+        }
         ImGui::PopTextWrapPos();
+    }
+
+    float PanelView::share_codes_height() const
+    {
+        // section bar + button row + one line of status/hint (+ name/apply row when a code is waiting)
+        float rows = (m_import || !m_import_error.empty()) ? 4.2f : 3.2f;
+        if (m_targets && !m_targets->preset_hotkeys_text().empty())
+        {
+            rows += 1.0f;
+        }
+        return ImGui::GetFrameHeightWithSpacing() * rows;
+    }
+
+    void PanelView::draw_share_codes()
+    {
+        Skin& sk = skin();
+        ImGui::Spacing();
+        section_bar("Share codes");
+
+        auto copy_code = [&](const EditBook& book, const MorphBook& morphs, const std::string& name) {
+            if (book.empty() && morphs.empty())
+            {
+                set_message("Nothing to share: these sliders are all unchanged");
+                return;
+            }
+            const std::string code = share::encode(book, &morphs, name);
+            ImGui::SetClipboardText(code.c_str());
+            set_message("Preset code copied (" + std::to_string(code.size()) + " characters): paste it anywhere to share");
+        };
+
+        if (sk.button("Copy current sliders", "save"))
+        {
+            const std::string who = m_target.label.empty() ? std::string() : CharacterNames::instance().shown(m_target.label, m_target.key, identity_of(m_target.key));
+            copy_code(Registry::instance().edits(), Registry::instance().morphs(), PresetShelf::clean_name(m_preset_name).empty() ? who : m_preset_name);
+        }
+        tooltip("Copies the sliders of the character shown above as a code (starts with UUEPBS1.)");
+        ImGui::SameLine();
+        const bool picked = !m_picked.empty() && std::find(m_presets.begin(), m_presets.end(), m_picked) != m_presets.end();
+        ImGui::BeginDisabled(!picked);
+        if (sk.button("Copy picked preset", "load"))
+        {
+            EditBook book;
+            MorphBook morphs;
+            std::string message;
+            if (m_shelf->load(m_picked, book, message, &morphs))
+            {
+                copy_code(book, morphs, m_picked);
+            }
+            else
+            {
+                set_message(message);
+            }
+        }
+        ImGui::EndDisabled();
+        ImGui::SameLine();
+        if (sk.button("Paste code", "load"))
+        {
+            const char* clip = ImGui::GetClipboardText();
+            share::Decoded decoded;
+            std::string message;
+            m_import.reset();
+            m_import_error.clear();
+            if (share::decode(clip ? clip : "", decoded, message))
+            {
+                std::snprintf(m_import_name, sizeof(m_import_name), "%s", decoded.name.c_str());
+                m_import = std::move(decoded);
+            }
+            else
+            {
+                m_import_error = message;
+            }
+            set_message(message);
+        }
+        tooltip("Reads a preset code from the clipboard. Nothing changes until you Apply or Save it.");
+
+        if (!m_import_error.empty())
+        {
+            ImGui::PushTextWrapPos(0.0f);
+            ImGui::TextColored(warn(), "%s", m_import_error.c_str());
+            ImGui::PopTextWrapPos();
+            if (sk.button("Dismiss"))
+            {
+                m_import_error.clear();
+            }
+            return;
+        }
+        if (!m_import)
+        {
+            ImGui::TextColored(muted(), "Codes hold bones and morphs only, never files, so they are safe to paste.");
+            return;
+        }
+
+        ImGui::TextColored(muted(), "Pasted code: %s%s%s", m_import->name.empty() ? "unnamed" : m_import->name.c_str(), " - ", m_import->summary.c_str());
+        const std::string who =
+            m_target.label.empty() ? std::string("this character") : CharacterNames::instance().shown(m_target.label, m_target.key, identity_of(m_target.key));
+        const std::string apply = "Apply to " + who;
+        if (sk.button(apply.c_str(), "load"))
+        {
+            Registry::instance().replace_edits(m_import->bones);
+            Registry::instance().replace_morphs(m_import->morphs);
+            set_message("Applied the pasted code to " + who + " (" + m_import->summary + ")");
+        }
+        ImGui::SameLine();
+        const float save_w = sk.button_width("Save as preset", "save");
+        const float clear_w = sk.button_width("Clear");
+        ImGui::SetNextItemWidth(std::max(80.0f, ImGui::GetContentRegionAvail().x - save_w - clear_w - ImGui::GetStyle().ItemSpacing.x * 2));
+        ImGui::InputTextWithHint("##importname", "Name for the preset", m_import_name, sizeof(m_import_name));
+        ImGui::SameLine();
+        const std::string name = PresetShelf::clean_name(m_import_name);
+        const bool taken = !name.empty() && m_shelf->exists(name);
+        ImGui::BeginDisabled(name.empty() || taken);
+        if (sk.button("Save as preset", "save"))
+        {
+            std::string message;
+            if (m_shelf->save(name, m_import->bones, message, &m_import->morphs))
+            {
+                m_picked = name;
+            }
+            set_message(message);
+            refresh_presets();
+        }
+        ImGui::EndDisabled();
+        if (taken && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled | ImGuiHoveredFlags_DelayShort))
+        {
+            ImGui::SetTooltip("A preset with this name exists already: pick another name");
+        }
+        ImGui::SameLine();
+        if (sk.button("Clear"))
+        {
+            m_import.reset();
+        }
     }
 
     void PanelView::draw_skin_picker()
@@ -2474,5 +2696,770 @@ namespace uuepbs::ui
                                     "pose updates on the next animated frame.",
                            key.c_str());
         ImGui::PopTextWrapPos();
+    }
+
+    // ---- undo / redo ----------------------------------------------------------
+
+    EditSnapshot PanelView::snapshot() const
+    {
+        return EditSnapshot{m_book, m_morphs};
+    }
+
+    void PanelView::track_history()
+    {
+        const std::string actor = Registry::instance().active_actor();
+        if (actor != m_history_actor)
+        {
+            m_history_actor = actor;
+            // The window's copies may still be the previous character's until the next sync.
+            m_book = Registry::instance().edits(&m_book_revision);
+            m_morphs = Registry::instance().morphs(&m_morph_revision);
+        }
+        // A slider being dragged or typed into is one step, recorded once it is let go.
+        m_history.observe(actor, snapshot(), ImGui::IsAnyItemActive());
+
+        const ImGuiIO& io = ImGui::GetIO();
+        if (io.WantTextInput || ImGui::IsAnyItemActive())
+        {
+            return; // text fields keep their own Ctrl+Z
+        }
+        if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_Z))
+        {
+            undo_edit();
+        }
+        else if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_Y) || ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_Z))
+        {
+            redo_edit();
+        }
+    }
+
+    void PanelView::apply_snapshot(const EditSnapshot& s)
+    {
+        Registry& reg = Registry::instance();
+        reg.replace_edits(s.bones);
+        reg.replace_morphs(s.morphs);
+        m_book = reg.edits(&m_book_revision);
+        m_morphs = reg.morphs(&m_morph_revision);
+    }
+
+    void PanelView::undo_edit()
+    {
+        if (const auto s = m_history.undo(m_history_actor, snapshot()))
+        {
+            apply_snapshot(*s);
+            set_message("Undone");
+        }
+    }
+
+    void PanelView::redo_edit()
+    {
+        if (const auto s = m_history.redo(m_history_actor, snapshot()))
+        {
+            apply_snapshot(*s);
+            set_message("Redone");
+        }
+    }
+
+    float PanelView::undo_redo_width() const
+    {
+        return skin().button_width("Undo", "undo") + skin().button_width("Redo", "redo") + ImGui::GetStyle().ItemSpacing.x;
+    }
+
+    void PanelView::draw_undo_redo()
+    {
+        Skin& sk = skin();
+        ImGui::BeginDisabled(!m_history.can_undo(m_history_actor));
+        if (sk.button("Undo", "undo"))
+        {
+            undo_edit();
+        }
+        ImGui::EndDisabled();
+        tooltip("Undo the last slider change of this character (Ctrl+Z).\nA whole drag, a preset load or a reset is one step.");
+        ImGui::SameLine();
+        ImGui::BeginDisabled(!m_history.can_redo(m_history_actor));
+        if (sk.button("Redo", "redo"))
+        {
+            redo_edit();
+        }
+        ImGui::EndDisabled();
+        tooltip("Redo what Undo took back (Ctrl+Y or Ctrl+Shift+Z).");
+    }
+
+    // ---- Body tab filter ------------------------------------------------------
+
+    void PanelView::draw_changed_only_filter()
+    {
+        skin().checkbox("Changed only", &m_simplified_changed_only);
+        tooltip("Show only the body parts (and morph groups) that differ from the game's own shape.");
+    }
+
+    // ---- preset details ----------------------------------------------------------
+
+    void PanelView::refresh_preset_details()
+    {
+        const auto now = Clock::now();
+        if (m_details_for == m_picked && now - m_details_time < std::chrono::seconds(2))
+        {
+            return;
+        }
+        m_details_for = m_picked;
+        m_details_time = now;
+        m_details = {};
+        m_details_ok = false;
+        m_details_error.clear();
+        if (m_picked.empty() || !m_shelf)
+        {
+            return;
+        }
+        EditBook book;
+        MorphBook morphs;
+        std::string message;
+        if (!m_shelf->load(m_picked, book, message, &morphs))
+        {
+            m_details_error = message;
+            return;
+        }
+        m_details = summarize_edits(book, morphs, m_body, m_morph_groups, m_skeleton.names, m_morph_names);
+        m_details_ok = true;
+    }
+
+    void PanelView::draw_preset_details()
+    {
+        refresh_preset_details();
+        if (m_picked.empty())
+        {
+            ImGui::TextColored(muted(), "Pick a preset to see what it changes.");
+            return;
+        }
+        if (!m_details_ok)
+        {
+            ImGui::PushTextWrapPos(0.0f);
+            ImGui::TextColored(warn(), "%s", m_details_error.c_str());
+            ImGui::PopTextWrapPos();
+            return;
+        }
+        const EditSummary& d = m_details;
+        ImGui::TextColored(accent(), "%s", m_picked.c_str());
+        ImGui::TextColored(muted(), "%zu bone%s, %zu morph%s", d.bones, d.bones == 1 ? "" : "s", d.morphs.size(), d.morphs.size() == 1 ? "" : "s");
+        draw_preset_tags();
+
+        auto part_row = [](const PartChange& p) {
+            std::string extra;
+            if (p.turn)
+            {
+                extra += ", rotated";
+            }
+            if (p.shift)
+            {
+                extra += ", moved";
+            }
+            ImGui::BulletText("%s  %.2fx%s", p.title.c_str(), p.scale, extra.c_str());
+        };
+        if (!d.parts.empty())
+        {
+            section_bar("Body parts");
+            for (const PartChange& p : d.parts)
+            {
+                part_row(p);
+                if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
+                {
+                    std::string tip = "Bones:";
+                    for (const std::string& b : p.bones)
+                    {
+                        tip += " " + b;
+                    }
+                    ImGui::SetTooltip("%s", tip.c_str());
+                }
+            }
+        }
+        if (!d.other_bones.empty())
+        {
+            section_bar("Other bones");
+            for (const PartChange& p : d.other_bones)
+            {
+                part_row(p);
+            }
+        }
+        if (!d.morphs.empty())
+        {
+            section_bar("Morphs");
+            for (const MorphChange& m : d.morphs)
+            {
+                const std::string group = m.group.empty() ? std::string() : "  [" + m.group + "]";
+                if (m.present)
+                {
+                    ImGui::BulletText("%s  %.2f%s", m.name.c_str(), m.weight, group.c_str());
+                }
+                else
+                {
+                    ImGui::TextColored(muted(), "  %s  %.2f  (not on this character)", m.name.c_str(), m.weight);
+                }
+            }
+        }
+        if (!d.missing.empty())
+        {
+            std::string list;
+            for (const std::string& b : d.missing)
+            {
+                list += (list.empty() ? "" : ", ") + b;
+            }
+            ImGui::Spacing();
+            ImGui::PushTextWrapPos(0.0f);
+            ImGui::TextColored(warn(), "Not on this character (%zu): %s", d.missing.size(), list.c_str());
+            ImGui::PopTextWrapPos();
+        }
+        if (d.morphs.empty())
+        {
+            ImGui::Spacing();
+            ImGui::PushTextWrapPos(0.0f);
+            ImGui::TextColored(muted(), "No morphs: loading it gives every morph back to the game.");
+            ImGui::PopTextWrapPos();
+        }
+    }
+    // ---- preset browser ----------------------------------------------------------
+
+    void PanelView::search_presets(const std::string& query, std::set<std::string> tags)
+    {
+        std::snprintf(m_preset_search, sizeof(m_preset_search), "%s", query.c_str());
+        m_tag_filter.clear();
+        for (const std::string& t : tags)
+        {
+            m_tag_filter.insert(fold_case(t));
+        }
+    }
+
+    void PanelView::sync_library()
+    {
+        const std::filesystem::path folder = m_shelf ? m_shelf->folder() : std::filesystem::path();
+        if (folder != m_library_for)
+        {
+            m_library_for = folder;
+            m_library.set_presets_folder(folder);
+            preset_thumbnails().set_folder(m_library.folder());
+            m_library_time = Clock::now();
+        }
+        else if (Clock::now() - m_library_time > std::chrono::seconds(2))
+        {
+            m_library.reload_if_changed(); // tags edited by hand
+            m_library_time = Clock::now();
+        }
+    }
+
+    void PanelView::request_preset_thumbnail(const std::string& preset)
+    {
+        if (preset.empty() || !m_targets || m_target.id.empty())
+        {
+            return;
+        }
+        m_targets->request_thumbnail(m_target.id, preset);
+        m_thumb_wait[fold_case(preset)] = Clock::now();
+    }
+
+    bool PanelView::tag_chip(const char* label, bool active, bool removable)
+    {
+        Skin& sk = skin();
+        const float pad_x = dpi_px(7.0f);
+        const float h = std::floor(ImGui::GetFontSize() * 0.86f + dpi_px(8.0f));
+        const float small = ImGui::GetFontSize() * 0.86f;
+        ImFont* font = ImGui::GetFont();
+        const ImVec2 ts = font->CalcTextSizeA(small, FLT_MAX, 0.0f, label);
+        const float x_w = removable ? font->CalcTextSizeA(small, FLT_MAX, 0.0f, "x").x + pad_x : 0.0f;
+        const float w = std::floor(ts.x + pad_x * 2.0f + x_w);
+        // Wrap onto the next line when the chip does not fit.
+        const float right = ImGui::GetCursorScreenPos().x + ImGui::GetContentRegionAvail().x; // GetContentRegionMax() is gone under IMGUI_DISABLE_OBSOLETE_FUNCTIONS
+        if (ImGui::GetCursorScreenPos().x + w > right && ImGui::GetCursorScreenPos().x > ImGui::GetWindowPos().x + ImGui::GetStyle().WindowPadding.x + 1.0f)
+        {
+            ImGui::NewLine();
+        }
+        ImGui::PushID(label);
+        const ImVec2 a = ImGui::GetCursorScreenPos();
+        const bool pressed = ImGui::InvisibleButton("##chip", ImVec2(w, h));
+        const bool hovered = ImGui::IsItemHovered();
+        ImGui::PopID();
+        ImDrawList* dl = ImGui::GetWindowDrawList();
+        const ImVec2 b(a.x + w, a.y + h);
+        dl->AddRectFilled(a, b, u32(active ? sk.color(Role::AccentDim) : hovered ? ImGui::GetStyleColorVec4(ImGuiCol_FrameBgHovered) : ImGui::GetStyleColorVec4(ImGuiCol_FrameBg)));
+        dl->AddRect(a, b, u32(active ? accent() : hovered ? accent_dim() : sk.color(Role::Border)), 0.0f, 0, 1.0f);
+        const float ty = std::floor(a.y + (h - ts.y) * 0.5f);
+        dl->AddText(font, small, ImVec2(a.x + pad_x, ty), u32(active ? sk.color(Role::Title) : ImGui::GetStyleColorVec4(ImGuiCol_Text)), label);
+        if (removable)
+        {
+            dl->AddText(font, small, ImVec2(b.x - pad_x - x_w + pad_x * 0.5f, ty), u32(hovered ? warn() : muted()), "x");
+        }
+        ImGui::SameLine(0.0f, dpi_px(4.0f));
+        return pressed;
+    }
+
+    void PanelView::draw_preset_tags()
+    {
+        if (m_picked.empty() || !m_library.ready())
+        {
+            return;
+        }
+        ImGui::Dummy(ImVec2(0.0f, dpi_px(2.0f)));
+        const std::vector<std::string> tags = m_library.tags(m_picked);
+        std::string remove;
+        for (const std::string& t : tags)
+        {
+            if (tag_chip(t.c_str(), false, true))
+            {
+                remove = t;
+            }
+            if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
+            {
+                ImGui::SetTooltip("Remove the tag '%s'", t.c_str());
+            }
+        }
+        if (tags.size() < PresetLibrary::kMaxTags)
+        {
+            const float w = std::max(dpi_px(90.0f), ImGui::CalcTextSize("Add tag...").x + dpi_px(16.0f));
+            const float right = ImGui::GetCursorScreenPos().x + ImGui::GetContentRegionAvail().x; // GetContentRegionMax() is gone under IMGUI_DISABLE_OBSOLETE_FUNCTIONS
+            if (!tags.empty() && ImGui::GetCursorScreenPos().x + w > right)
+            {
+                ImGui::NewLine();
+            }
+            ImGui::SetNextItemWidth(w);
+            ImGui::PushFont(nullptr, ImGui::GetStyle().FontSizeBase * 0.86f);
+            if (ImGui::InputTextWithHint("##newtag", "Add tag...", m_new_tag, sizeof(m_new_tag), ImGuiInputTextFlags_EnterReturnsTrue))
+            {
+                if (!PresetLibrary::split_tags(m_new_tag).empty() && !m_library.add_tag(m_picked, m_new_tag))
+                {
+                    set_message("Could not save the tags (presets folder read-only?)");
+                }
+                m_new_tag[0] = '\0';
+                ImGui::SetKeyboardFocusHere(-1); // keep typing the next one
+            }
+            ImGui::PopFont();
+            tooltip("Type a tag and press Enter (commas add several). Tags are saved in the presets folder's _library\\presets.json.");
+        }
+        else
+        {
+            ImGui::NewLine();
+        }
+        if (!remove.empty())
+        {
+            m_library.remove_tag(m_picked, remove);
+        }
+    }
+
+    void PanelView::draw_preset_browser(float height)
+    {
+        Skin& sk = skin();
+        const ImGuiStyle& style = ImGui::GetStyle();
+        sync_library();
+
+        const float left_w = std::floor(ImGui::GetContentRegionAvail().x * 0.5f);
+        ImGui::BeginGroup();
+
+        // Search + Grid/List toggle
+        const float grid_w = sk.button_width("Grid");
+        const float list_w = sk.button_width("List");
+        ImGui::SetNextItemWidth(left_w - grid_w - list_w - style.ItemSpacing.x);
+        ImGui::InputTextWithHint("##presetsearch", "Search name or #tag", m_preset_search, sizeof(m_preset_search));
+        tooltip("Every word must match the name or a tag. #word matches tags only.");
+        ImGui::SameLine();
+        auto toggle = [&](const char* label, bool on) {
+            ImGui::PushStyleColor(ImGuiCol_Button, on ? sk.color(Role::AccentDim) : ImGui::GetStyleColorVec4(ImGuiCol_FrameBg));
+            ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0.0f, style.ItemSpacing.y));
+            const bool hit = sk.button(label);
+            ImGui::PopStyleVar();
+            ImGui::PopStyleColor();
+            return hit;
+        };
+        if (toggle("Grid", !m_preset_list_view))
+        {
+            m_preset_list_view = false;
+        }
+        ImGui::SameLine(0.0f, 0.0f);
+        if (toggle("List", m_preset_list_view))
+        {
+            m_preset_list_view = true;
+        }
+
+        // Tag filter chips (every tag in use; the active ones first)
+        const auto counts = m_library.tag_counts(m_presets);
+        std::erase_if(m_tag_filter, [&](const std::string& t) {
+            return std::none_of(counts.begin(), counts.end(), [&](const auto& c) { return fold_case(c.first) == t; });
+        });
+        const float chips_top = ImGui::GetCursorPosY();
+        if (!counts.empty())
+        {
+            ImGui::BeginChild("##tagchips", ImVec2(left_w, 0.0f), ImGuiChildFlags_AutoResizeY, ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoScrollbar);
+            constexpr size_t kShownChips = 14;
+            size_t shown = 0;
+            std::string toggled;
+            for (int pass = 0; pass < 2; ++pass)
+            {
+                for (const auto& [tag, n] : counts)
+                {
+                    const bool on = m_tag_filter.count(fold_case(tag)) > 0;
+                    if ((pass == 0) != on || (!on && shown >= kShownChips))
+                    {
+                        continue;
+                    }
+                    ++shown;
+                    const std::string label = tag + "  " + std::to_string(n);
+                    if (tag_chip(label.c_str(), on))
+                    {
+                        toggled = fold_case(tag);
+                    }
+                }
+            }
+            if (!m_tag_filter.empty() || m_preset_search[0])
+            {
+                if (tag_chip("Clear", false))
+                {
+                    m_tag_filter.clear();
+                    m_preset_search[0] = '\0';
+                }
+            }
+            ImGui::NewLine();
+            if (!toggled.empty() && !m_tag_filter.erase(toggled))
+            {
+                m_tag_filter.insert(toggled);
+            }
+            ImGui::EndChild();
+        }
+        const float used = ImGui::GetCursorPosY() - chips_top;
+
+        // Grid / list
+        const std::vector<std::string> shown = m_library.filter(m_presets, m_preset_search, m_tag_filter);
+        const float grid_h = std::max(ImGui::GetFrameHeight() * 3.0f, height - used - ImGui::GetFrameHeightWithSpacing());
+        sk.begin_child("##presetgrid", ImVec2(left_w, grid_h), ImGuiChildFlags_Borders);
+        if (m_presets.empty())
+        {
+            ImGui::PushTextWrapPos(0.0f);
+            ImGui::TextColored(muted(), "No presets yet. Save one above: a picture of the character is taken for it.");
+            ImGui::PopTextWrapPos();
+        }
+        else if (shown.empty())
+        {
+            ImGui::TextColored(muted(), "No preset matches.");
+        }
+
+        ImDrawList* dl = ImGui::GetWindowDrawList();
+        const float base = style.FontSizeBase;
+        const float small = base * style.FontScaleDpi * 0.8f;
+        const auto now = Clock::now();
+        std::string load;
+        auto picture = [&](const std::string& name, ImVec2 a, ImVec2 b, bool selected, bool hovered) {
+            const ImU32 border = u32(selected ? accent() : hovered ? accent_dim() : sk.color(Role::Border));
+            ImTextureData* thumb = preset_thumbnails().find({name});
+            const auto wait = m_thumb_wait.find(fold_case(name));
+            const bool waiting = !thumb && wait != m_thumb_wait.end() && now - wait->second < std::chrono::seconds(20);
+            monogram_frame(dl, a, b, thumb ? std::string() : monogram(name), (b.y - a.y) > dpi_px(60.0f) ? base * style.FontScaleDpi * 1.4f : small,
+                           u32(hovered ? ImGui::GetStyleColorVec4(ImGuiCol_FrameBgHovered) : sk.color(Role::Section)), border,
+                           u32(ImVec4(sk.color(Role::Title).x, sk.color(Role::Title).y, sk.color(Role::Title).z, 0.85f)));
+            if (thumb)
+            {
+                Portraits::draw(dl, thumb, ImVec2(a.x + 1.0f, a.y + 1.0f), ImVec2(b.x - 1.0f, b.y - 1.0f));
+                dl->AddRect(a, b, border, 0.0f, 0, 1.0f);
+            }
+            else if (waiting && (b.y - a.y) > dpi_px(60.0f))
+            {
+                const char* t = "taking picture";
+                const ImVec2 ts = ImGui::GetFont()->CalcTextSizeA(small, FLT_MAX, 0.0f, t);
+                dl->AddText(ImGui::GetFont(), small, ImVec2(std::floor((a.x + b.x - ts.x) * 0.5f), b.y - ts.y - dpi_px(6.0f)), u32(muted()), t);
+            }
+        };
+        auto tags_line = [&](const std::string& name) {
+            std::string line;
+            for (const std::string& t : m_library.tags(name))
+            {
+                line += (line.empty() ? "" : ", ") + t;
+            }
+            return line;
+        };
+        auto hover_tip = [&](const std::string& name, const std::string& tags) {
+            if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
+            {
+                ImGui::SetTooltip("%s%s%s\nDouble-click to load.", name.c_str(), tags.empty() ? "" : "\nTags: ", tags.c_str());
+            }
+        };
+
+        if (!m_preset_list_view)
+        {
+            const float gap = dpi_px(8.0f);
+            const float avail = ImGui::GetContentRegionAvail().x;
+            const int cols = std::max(2, static_cast<int>((avail + gap) / (dpi_px(76.0f) + gap)));
+            const float tile_w = std::floor((avail - gap * static_cast<float>(cols - 1)) / static_cast<float>(cols));
+            const float img_h = std::floor(tile_w * 1.25f);
+            const float foot_h = std::floor(ImGui::GetFontSize() + small + dpi_px(12.0f));
+            int index = 0;
+            for (const std::string& name : shown)
+            {
+                ImGui::PushID(name.c_str());
+                if (index % cols != 0)
+                {
+                    ImGui::SameLine(0.0f, gap);
+                }
+                const ImVec2 a = ImGui::GetCursorScreenPos();
+                const bool selected = m_picked == name;
+                if (ImGui::InvisibleButton("##tile", ImVec2(tile_w, img_h + foot_h)))
+                {
+                    m_picked = name;
+                }
+                if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
+                {
+                    load = name;
+                }
+                const bool hovered = ImGui::IsItemHovered();
+                const std::string tags = tags_line(name);
+                hover_tip(name, tags);
+                if (selected && m_scroll_to_picked)
+                {
+                    ImGui::SetScrollHereY(0.5f);
+                    m_scroll_to_picked = false;
+                }
+                const ImVec2 img_b(a.x + tile_w, a.y + img_h);
+                const ImVec2 b(a.x + tile_w, a.y + img_h + foot_h);
+                picture(name, a, img_b, selected, hovered);
+                dl->AddRectFilled(ImVec2(a.x, img_b.y), b, u32(selected ? accent_dim() : ImGui::GetStyleColorVec4(ImGuiCol_FrameBg)));
+                dl->AddRect(a, b, u32(selected ? accent() : hovered ? accent_dim() : sk.color(Role::Border)), 0.0f, 0, 1.0f);
+                if (selected)
+                {
+                    dl->AddRectFilled(a, ImVec2(b.x, a.y + dpi_px(2.0f)), u32(accent())); // accent top line, like the active tab
+                }
+                const float tx = a.x + dpi_px(6.0f);
+                const float ny = img_b.y + dpi_px(5.0f);
+                dl->PushClipRect(ImVec2(a.x, img_b.y), ImVec2(b.x - dpi_px(3.0f), b.y), true);
+                dl->AddText(ImVec2(tx, ny), u32(ImGui::GetStyleColorVec4(ImGuiCol_Text)), fit_text(name, tile_w - dpi_px(10.0f)).c_str());
+                dl->AddText(ImGui::GetFont(), small, ImVec2(tx, ny + ImGui::GetFontSize() + dpi_px(1.0f)), u32(muted()), tags.empty() ? "no tags" : tags.c_str());
+                dl->PopClipRect();
+                ImGui::PopID();
+                ++index;
+            }
+        }
+        else
+        {
+            const float row_h = std::floor(ImGui::GetFontSize() * 2.0f + dpi_px(8.0f));
+            const float avail = ImGui::GetContentRegionAvail().x;
+            for (const std::string& name : shown)
+            {
+                ImGui::PushID(name.c_str());
+                const ImVec2 a = ImGui::GetCursorScreenPos();
+                const bool selected = m_picked == name;
+                if (ImGui::InvisibleButton("##row", ImVec2(avail, row_h)))
+                {
+                    m_picked = name;
+                }
+                if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
+                {
+                    load = name;
+                }
+                const bool hovered = ImGui::IsItemHovered();
+                const std::string tags = tags_line(name);
+                hover_tip(name, tags);
+                if (selected && m_scroll_to_picked)
+                {
+                    ImGui::SetScrollHereY(0.5f);
+                    m_scroll_to_picked = false;
+                }
+                const ImVec2 b(a.x + avail, a.y + row_h);
+                if (selected || hovered)
+                {
+                    dl->AddRectFilled(a, b, u32(selected ? accent_dim() : ImGui::GetStyleColorVec4(ImGuiCol_FrameBgHovered)));
+                }
+                const float pic = row_h - dpi_px(4.0f);
+                const ImVec2 pa(a.x + dpi_px(2.0f), a.y + dpi_px(2.0f));
+                picture(name, pa, ImVec2(pa.x + std::floor(pic * 0.75f), pa.y + pic), selected, hovered);
+                const float tx = pa.x + std::floor(pic * 0.75f) + dpi_px(8.0f);
+                dl->PushClipRect(a, ImVec2(b.x - dpi_px(3.0f), b.y), true);
+                dl->AddText(ImVec2(tx, a.y + dpi_px(3.0f)), u32(ImGui::GetStyleColorVec4(ImGuiCol_Text)), name.c_str());
+                dl->AddText(ImGui::GetFont(), small, ImVec2(tx, a.y + dpi_px(4.0f) + ImGui::GetFontSize()), u32(muted()), tags.empty() ? "no tags" : tags.c_str());
+                dl->PopClipRect();
+                ImGui::PopID();
+            }
+        }
+        sk.end_child();
+        ImGui::TextColored(muted(), "%zu of %zu preset%s", shown.size(), m_presets.size(), m_presets.size() == 1 ? "" : "s");
+        ImGui::EndGroup();
+
+        ImGui::SameLine();
+        sk.begin_child("##presetdetails", ImVec2(0, height), ImGuiChildFlags_Borders);
+        draw_preset_details();
+        sk.end_child();
+
+        if (!load.empty())
+        {
+            m_picked = load;
+            load_preset(load);
+        }
+        // Forget waits that are over (picture arrived or gave up).
+        for (auto it = m_thumb_wait.begin(); it != m_thumb_wait.end();)
+        {
+            it = now - it->second > std::chrono::seconds(30) ? m_thumb_wait.erase(it) : std::next(it);
+        }
+    }
+
+    // ---- symmetry tools ------------------------------------------------------------
+
+    void PanelView::apply_action(const EditSnapshot& next, const char* what)
+    {
+        if (same_edits(next, snapshot()))
+        {
+            set_message(std::string(what) + ": nothing to change");
+            return;
+        }
+        m_history.checkpoint(m_history_actor, snapshot()); // an edit still settling stays its own step
+        apply_snapshot(next);
+        m_history.checkpoint(m_history_actor, snapshot()); // the action is exactly one step
+    }
+
+    void PanelView::mirror_all(Side from)
+    {
+        MirrorCount count;
+        const EditSnapshot next = mirror_sides(snapshot(), m_skeleton.names, m_morph_names, from, Registry::instance().mirror_table(), &count);
+        const char* what = from == Side::Left ? "Mirror left to right" : "Mirror right to left";
+        apply_action(next, what);
+        if (count.bones || count.morphs)
+        {
+            char buf[160];
+            std::snprintf(buf, sizeof(buf), "%s: %zu bone%s, %zu morph%s (Ctrl+Z to undo)", what, count.bones, count.bones == 1 ? "" : "s",
+                          count.morphs, count.morphs == 1 ? "" : "s");
+            set_message(buf);
+        }
+    }
+
+    void PanelView::randomize_body()
+    {
+        std::vector<RandomPart> parts;
+        for (const GroupBones& gb : m_body.groups)
+        {
+            if (m_random_category_only && gb.group.section != m_category)
+            {
+                continue;
+            }
+            RandomPart p;
+            p.spread = gb.group.spread;
+            for (const std::string& b : gb.bones)
+            {
+                if (has_bone(b))
+                {
+                    p.bones.push_back(b);
+                }
+            }
+            if (!p.bones.empty())
+            {
+                parts.push_back(std::move(p));
+            }
+        }
+        std::vector<std::vector<std::string>> morphs;
+        for (const MorphGroupMorphs& mg : m_morph_groups)
+        {
+            const std::string section = mg.group.section.empty() ? std::string("Morphs") : mg.group.section;
+            if (!mg.morphs.empty() && (!m_random_category_only || section == m_category))
+            {
+                morphs.push_back(mg.morphs);
+            }
+        }
+        const uint64_t seed = static_cast<uint64_t>(Clock::now().time_since_epoch().count()) ^ (++m_random_count * 0x9E3779B97F4A7C15ull);
+        apply_action(randomize_parts(snapshot(), parts, morphs, m_random, seed), "Randomize");
+        set_message(m_random_category_only ? "Randomized " + m_category + " (Ctrl+Z to undo)" : std::string("Randomized the body (Ctrl+Z to undo)"));
+    }
+
+    void PanelView::draw_random_limits()
+    {
+        Skin& sk = skin();
+        if (!ImGui::BeginPopup("##randomlimits"))
+        {
+            return;
+        }
+        ImGui::TextUnformatted("Randomize limits");
+        ImGui::Separator();
+        const float w = ImGui::GetFontSize() * 12.0f;
+        float size = static_cast<float>(m_random.size * 100.0);
+        float shape = static_cast<float>(m_random.shape * 100.0);
+        float lo = static_cast<float>(m_random.morph_lo);
+        float hi = static_cast<float>(m_random.morph_hi);
+        sk.checkbox("Body parts", &m_random.parts);
+        ImGui::BeginDisabled(!m_random.parts);
+        ImGui::SetNextItemWidth(w);
+        if (ImGui::SliderFloat("Size +/-", &size, 0.0f, 50.0f, "%.0f %%", ImGuiSliderFlags_AlwaysClamp))
+        {
+            m_random.size = size / 100.0;
+        }
+        tooltip("How far each part's overall size may move from 1.0 (15 % = 0.85 to 1.15).");
+        ImGui::SetNextItemWidth(w);
+        if (ImGui::SliderFloat("Shape +/-", &shape, 0.0f, 25.0f, "%.0f %%", ImGuiSliderFlags_AlwaysClamp))
+        {
+            m_random.shape = shape / 100.0;
+        }
+        tooltip("Extra variation of length, width and depth on top of the size. 0 keeps parts in proportion.");
+        ImGui::EndDisabled();
+        ImGui::BeginDisabled(m_morph_groups.empty());
+        sk.checkbox("Morph groups", &m_random.morphs);
+        ImGui::BeginDisabled(!m_random.morphs);
+        ImGui::SetNextItemWidth(w);
+        if (ImGui::DragFloatRange2("Weights", &lo, &hi, 0.01f, static_cast<float>(kMorphMin), static_cast<float>(kMorphMax), "%.2f", "%.2f",
+                                   ImGuiSliderFlags_AlwaysClamp))
+        {
+            m_random.morph_lo = lo;
+            m_random.morph_hi = hi;
+        }
+        tooltip("Morph group sliders get a weight between these two values.");
+        ImGui::EndDisabled();
+        ImGui::EndDisabled();
+        ImGui::Separator();
+        const std::string only = "Only " + (m_category.empty() ? std::string("this category") : m_category);
+        sk.checkbox(only.c_str(), &m_random_category_only);
+        tooltip("Leave the other Body tab categories as they are.");
+        if (sk.button("Defaults", "reset"))
+        {
+            m_random = RandomLimits{};
+            m_random_category_only = false;
+        }
+        m_random.clamp();
+        ImGui::EndPopup();
+    }
+
+    // One row above the sliders:  [x] Symmetry lock   Mirror L to R   Mirror R to L   ...   Randomize  Limits
+    void PanelView::draw_symmetry_tools(bool randomize)
+    {
+        Skin& sk = skin();
+        const ImGuiStyle& style = ImGui::GetStyle();
+        sk.checkbox("Symmetry lock", &m_mirror);
+        tooltip("On: editing a left or right bone (or _L/_R morph) under Advanced also edits its partner, as a mirror image.\n"
+                "Body tab parts always move both sides together.");
+        const bool any = !m_book.empty() || !m_morphs.empty();
+        ImGui::SameLine(0.0f, style.ItemSpacing.x * 3.0f);
+        ImGui::BeginDisabled(!any);
+        if (sk.button("Mirror L to R", "mirror"))
+        {
+            mirror_all(Side::Left);
+        }
+        tooltip("Copy every left-side edit onto the right side, as a mirror image.\nRight-side edits are replaced. One Ctrl+Z undoes it.");
+        ImGui::SameLine();
+        if (sk.button("Mirror R to L", "mirror"))
+        {
+            mirror_all(Side::Right);
+        }
+        tooltip("Copy every right-side edit onto the left side, as a mirror image.\nLeft-side edits are replaced. One Ctrl+Z undoes it.");
+        ImGui::EndDisabled();
+        if (randomize)
+        {
+            const float right = sk.button_width("Randomize", "random") + sk.button_width("Limits", "settings") + style.ItemSpacing.x;
+            ImGui::SameLine();
+            const float room = ImGui::GetContentRegionAvail().x - right;
+            if (room > 0.0f)
+            {
+                ImGui::SetCursorPosX(ImGui::GetCursorPosX() + room);
+            }
+            ImGui::BeginDisabled(!(m_random.parts && !m_body.groups.empty()) && !(m_random.morphs && !m_morph_groups.empty()));
+            if (sk.button("Randomize", "random"))
+            {
+                randomize_body();
+            }
+            ImGui::EndDisabled();
+            tooltip("Give every body part a random size inside the limits (both sides alike). One Ctrl+Z undoes it.");
+            ImGui::SameLine();
+            if (sk.button("Limits", "settings"))
+            {
+                ImGui::OpenPopup("##randomlimits");
+            }
+            tooltip("How far Randomize may go, and what it touches.");
+            draw_random_limits();
+        }
+        ImGui::Dummy(ImVec2(0.0f, dpi_px(4.0f)));
     }
 } // namespace uuepbs::ui

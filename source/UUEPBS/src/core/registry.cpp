@@ -383,7 +383,7 @@ namespace uuepbs
         }
 
         // Each mesh is sculpted with its own character's edits.
-        const bool on = m_enabled.load(std::memory_order_relaxed);
+        const bool on = applying(); // off, or showing the original for a before/after compare
         const uint64_t wanted = rig->actor->revision | (on ? 0 : kDisabledBit);
         const EditBook& book = on ? rig->actor->book : m_empty_book;
         const bool proportions = has_proportions(book);
@@ -508,7 +508,7 @@ namespace uuepbs
         }
     }
 
-    void Registry::set_active_actor(const std::string& key_in, const std::string& label, const std::string& pick_id)
+    void Registry::set_active_actor(const std::string& key_in, const std::string& label, const std::string& pick_id, const std::string& engine)
     {
         const std::string key = key_in.empty() ? std::string(kPlayerActor) : key_in;
         {
@@ -521,6 +521,10 @@ namespace uuepbs
             if (!pick_id.empty())
             {
                 a.pick_id = pick_id;
+            }
+            if (!engine.empty())
+            {
+                a.engine = engine;
             }
             if (m_active == key)
             {
@@ -566,7 +570,7 @@ namespace uuepbs
             {
                 continue;
             }
-            out.push_back({key, a.label, a.pick_id, a.book.size(), morphs, key == m_active, a.identity});
+            out.push_back({key, a.label, a.pick_id, a.book.size(), morphs, key == m_active, a.identity, a.engine});
         }
         // morphs only, character not known to the bone side (should not happen, but keep them)
         for (const auto& [key, n] : morph_counts)
@@ -730,6 +734,7 @@ namespace uuepbs
 
     void Registry::set_bone(const std::string& bone, const BoneEdit& scale)
     {
+        end_compare_for_edit(); // show what was just changed
         if (bone.empty())
         {
             return;
@@ -746,6 +751,7 @@ namespace uuepbs
 
     void Registry::clear_bone(const std::string& bone)
     {
+        end_compare_for_edit(); // show what was just changed
         std::lock_guard guard(m_lock);
         Actor& a = active_locked();
         if (a.book.erase(fold_case(bone)) > 0)
@@ -756,6 +762,7 @@ namespace uuepbs
 
     void Registry::replace_edits(EditBook book)
     {
+        end_compare_for_edit(); // show what was just changed
         std::lock_guard guard(m_lock);
         Actor& a = active_locked();
         a.book = std::move(book);
@@ -764,6 +771,7 @@ namespace uuepbs
 
     void Registry::clear_edits()
     {
+        end_compare_for_edit(); // show what was just changed
         std::lock_guard guard(m_lock);
         Actor& a = active_locked();
         a.book.clear();
@@ -774,6 +782,27 @@ namespace uuepbs
     {
         m_enabled.store(on, std::memory_order_relaxed);
         m_morph_revision.fetch_add(1, std::memory_order_acq_rel);
+    }
+
+    void Registry::set_compare(bool show_original)
+    {
+        if (m_compare.set_latched(show_original))
+        {
+            m_morph_revision.fetch_add(1, std::memory_order_acq_rel); // morphs go back to (or leave) the game's values
+        }
+    }
+
+    void Registry::set_compare_held(bool down)
+    {
+        if (m_compare.set_held(down))
+        {
+            m_morph_revision.fetch_add(1, std::memory_order_acq_rel);
+        }
+    }
+
+    void Registry::end_compare_for_edit()
+    {
+        set_compare(false); // the hotkey's hold is left alone: it ends when the key comes up
     }
 
     MorphBook Registry::morphs(uint64_t* revision) const
@@ -789,6 +818,7 @@ namespace uuepbs
 
     void Registry::set_morph(const std::string& morph, double weight)
     {
+        end_compare_for_edit(); // show what was just changed
         if (morph.empty())
         {
             return;
@@ -802,6 +832,7 @@ namespace uuepbs
 
     void Registry::clear_morph(const std::string& morph)
     {
+        end_compare_for_edit(); // show what was just changed
         std::lock_guard guard(m_morph_lock);
         auto it = m_morph_books.find(m_morph_active);
         if (it != m_morph_books.end() && it->second.erase(fold_case(morph)) > 0)
@@ -816,6 +847,7 @@ namespace uuepbs
 
     void Registry::replace_morphs(MorphBook book)
     {
+        end_compare_for_edit(); // show what was just changed
         for (auto& [key, e] : book)
         {
             e.weight = clamp_morph(e.weight);
@@ -834,6 +866,7 @@ namespace uuepbs
 
     void Registry::clear_morphs()
     {
+        end_compare_for_edit(); // show what was just changed
         std::lock_guard guard(m_morph_lock);
         m_morph_books.erase(m_morph_active);
         m_morph_revision.fetch_add(1, std::memory_order_acq_rel);
