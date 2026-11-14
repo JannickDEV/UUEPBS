@@ -39,7 +39,9 @@ Host-side tests (Linux/macOS/WSL with g++ 13+ or clang 17+). None of them need W
     g++ -std=c++23 -I$S test_bridge.cpp $S/core/*.cpp -o test_bridge
     mkdir -p /tmp/uuepbs && lua lua_harness.lua ../../../mod/UUEPBS/Scripts ./bridge_peer /tmp/uuepbs gon
     ./test_bridge /tmp/uuepbs/bridge_in.txt
-    for m in generic nodir broken legacy; do lua lua_harness.lua ../../../mod/UUEPBS/Scripts ./bridge_peer /tmp/uuepbs $m; done
+    for m in generic nodir broken legacy polaris nobody tekkenedit tekkenjson names; do lua lua_harness.lua ../../../mod/UUEPBS/Scripts ./bridge_peer /tmp/uuepbs $m; done
+    # every mode also checks the readable-name rules of Scripts/uuepbs_names.lua; "names" runs the script with
+    # FriendlyNames on (the other modes keep engine names in the labels) and checks labels + engine names sent to the DLL
     # the harness also fails if the script searches the object array or rewrites bridge_in.txt while idle
     # mutation check: breaks one behaviour of main.lua at a time (per-character scans, settle checks, range,
     # mesh budget, world-search fallbacks...) and expects the harness to catch each

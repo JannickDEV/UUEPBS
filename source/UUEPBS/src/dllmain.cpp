@@ -192,7 +192,7 @@ namespace
             std::vector<uuepbs::ui::TargetChoice> out;
             for (const auto& c : m_state.candidates)
             {
-                out.push_back({c.id, c.label, c.key});
+                out.push_back({c.id, c.label, c.key, c.engine});
             }
             return out;
         }
@@ -200,7 +200,7 @@ namespace
         uuepbs::ui::TargetChoice current_target() override
         {
             std::lock_guard guard(m_lock);
-            return {m_state.target.id, m_state.target.label, m_state.target.key};
+            return {m_state.target.id, m_state.target.label, m_state.target.key, m_state.target.engine};
         }
 
         void pick_target(const std::string& id) override
@@ -682,7 +682,7 @@ namespace
 
             setup(state);
             // The character picked in the window gets the sliders; others keep their own edits.
-            reg.set_active_actor(state.target.key, state.target.label, state.target.id);
+            reg.set_active_actor(state.target.key, state.target.label, state.target.id, state.target.engine);
             for (const std::string& key : state.gone)
             {
                 const auto edited = reg.edited_actors();

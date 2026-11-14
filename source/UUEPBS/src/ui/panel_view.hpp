@@ -48,7 +48,7 @@ namespace uuepbs::ui
         std::string id;
         std::string label;
         std::string key{"player"}; // actor key: "player" for the default character, else its address
-        std::string engine; // engine object name, e.g. BP_Rokuv3_C_0 (empty from older scripts)
+        std::string engine;        // engine object name, e.g. BP_Rokuv3_C_0 (empty from older scripts); label is the readable name
     };
 
     // Characters the user can switch the sliders to (fed by the Lua script).
