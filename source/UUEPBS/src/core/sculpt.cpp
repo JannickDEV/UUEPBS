@@ -181,10 +181,16 @@ namespace uuepbs
         return it == m_lookup.end() ? -1 : it->second;
     }
 
-    void RigSculptor::bind(const EditBook& book, uint64_t revision)
+    void RigSculptor::bind(const EditBook& book, uint64_t revision, double world)
     {
         const size_t n = m_names.size();
         m_revision = revision;
+        m_world = std::isfinite(world) ? std::min(kMaxScale, std::max(kMinScale, world)) : 1.0;
+        if (std::fabs(m_world - 1.0) < kNeutralEps)
+        {
+            m_world = 1.0;
+        }
+        const bool world_on = m_world != 1.0;
         m_scales.clear();
         m_turns.clear();
         m_plan.clear();
@@ -215,7 +221,7 @@ namespace uuepbs
             turn_quaternion(s, q.data());
             m_turns.push_back(q);
         }
-        if (m_scales.empty())
+        if (m_scales.empty() && !world_on)
         {
             return;
         }
@@ -228,13 +234,14 @@ namespace uuepbs
             const bool moved_by_ancestor = p >= 0 && pushes_children[p];
             const int32_t slot = m_edit_slot[i];
             const bool edited = slot >= 0;
-            if (!edited && !moved_by_ancestor)
+            const bool world_root = world_on && p < 0; // a root carries the whole-pose scale to everything below it
+            if (!edited && !moved_by_ancestor && !world_root)
             {
                 continue;
             }
             m_in_plan[i] = 1;
             m_plan.push_back(static_cast<int32_t>(i));
-            pushes_children[i] = moved_by_ancestor || (edited && m_scales[slot].spread != Spread::Solo);
+            pushes_children[i] = moved_by_ancestor || world_root || (edited && m_scales[slot].spread != Spread::Solo);
         }
 
         std::vector<uint8_t> needed(n, 0);
@@ -419,6 +426,17 @@ namespace uuepbs
             {
                 m_fresh[i] = xf::compose(local, parent_after);
                 m_for_children[i] = m_fresh[i];
+            }
+            if (p < 0 && m_world != 1.0)
+            {
+                // Uniform scale about the component origin; children pick it up through parent_after.
+                for (int a = 0; a < 3; ++a)
+                {
+                    m_fresh[i].pos[a] *= m_world;
+                    m_fresh[i].scl[a] *= m_world;
+                    m_for_children[i].pos[a] *= m_world;
+                    m_for_children[i].scl[a] *= m_world;
+                }
             }
             m_fresh[i].pos[3] = 0.0;
             m_fresh[i].scl[3] = 0.0;

@@ -11,6 +11,10 @@ https://github.com/user-attachments/assets/4e4372bc-8a64-4255-b8ae-a33645ce187e
 * Hold-to-compare hotkey: hold **F8** (`CompareKey` in `config.lua`, `""` turns it off) in game to see the original body, let go to get your sliders back. Console: `ubs compare [on|off]`
 * **Next / previous preset hotkeys**: `NextPresetKey` and `PrevPresetKey` in `config.lua` (off by default) load the next or previous saved preset onto the character picked in the window, without opening it. Each character keeps its own place in the list. Console: `ubs next`, `ubs prev`
 * **Share codes** in the Presets tab: **Copy current sliders** or **Copy picked preset** puts the preset on the clipboard as one line of text (`UUEPBS1.…`); **Paste code** reads one back, shows what it holds, and only changes anything when you press **Apply** or **Save as preset**. Codes are checksummed and size-limited, and values are clamped like preset files. Preset files are unchanged
+* New **Character Scale** tab (between Body and Presets): **Height** under *Overall*, and *Proportions*: **Head size**, **Neck length**, **Shoulder width**, **Torso length**, **Arm length**, **Hand size**, **Leg length**, **Foot size** (0.5× to 2×)
+* Height scales the whole pose from the mesh origin (the feet on most characters), so the character stays on the ground; every mesh of the character scales with it
+* Proportions sit on top of the Body and Advanced sliders (they multiply, nothing is overwritten). Lengths stretch the limb bones only, so hands, feet and the head keep their size
+* Saved per character like the other sliders (session, NPC memory) and in presets as an optional `"proportions"` section; older builds ignore it
 
 ### V2.7.0 - Changelogs
 * New window look: flat slate-navy theme with sharp corners, flush text tabs (**Body**, **Presets**, **Advanced**, **Status**) and 1px bordered groups
@@ -101,6 +105,8 @@ https://github.com/user-attachments/assets/4e4372bc-8a64-4255-b8ae-a33645ce187e
     * A morph you move **replaces** the game's own value, even at 0. **Reset** gives it back, and the value the game had before comes back.
     * With **Symmetry lock** on, `…_L`/`…_R` twins move together.
     * A **!** next to a name means the game keeps setting that morph itself (an animation or its own code). UUEPBS puts your value back each time it notices, but it may flicker or not stick.
+* **Character Scale** tab: **Height** (whole character, scaled from the feet) and broad proportions (head size, neck, shoulders, torso, arm and leg length, hands, feet).
+  They apply on top of the Body and Advanced sliders and use the Body tab's bone groups, so a slider only appears when the skeleton has those bones. Collision and the camera don't change.
 * **Presets** tab: save, load (or double-click), delete and open the folder. Clicking a preset once shows what it changes next to the list:
   body parts with their size (and whether they are rotated or moved), other bones, morphs with their weights, and anything the current character doesn't have. Presets are JSON files in **`<Win64>\UUEPBS Presets`** and hold bones and morphs.
   The current sliders auto-save to `_last_session.json` and come back next time.
@@ -231,9 +237,12 @@ If a game update moves things, the check fails, the log says so, and you delete 
     "thigh_l": { "length": 1,    "width": 1.12, "depth": 1.12, "children": "keep_size" },
     "head":    { "length": 1, "width": 1, "depth": 1, "rotate": [0, 0, 10], "move": [0, 0, 1.5], "children": "scale_too" }
   },
-  "morphs": { "BreastSize": 0.8, "Belly": 0 }
+  "morphs": { "BreastSize": 0.8, "Belly": 0 },
+  "proportions": { "height": 1.05, "leg_length": 1.1 }
 }
 ```
+* `proportions` (optional) holds the Character Scale sliders, 1 = unchanged: `height`, `head`, `neck`, `shoulders`, `torso`, `arm_length`, `hands`, `leg_length`, `feet`.
+  A preset without it resets them when loaded. The file version does not change, and older builds ignore the section.
 * `length`/`width`/`depth` are X/Y/Z scale. `rotate` is in degrees and `move` in cm, both optional.
 * `morphs` (optional) holds morph weights. A listed morph replaces the game's value, even at 0. Loading a preset without `morphs` gives every morph back to the game. Presets without morphs are still written as version 2, so older builds read them unchanged.
 * `children` is `scale_too`, `keep_size` or `this_bone_only`.

@@ -1,5 +1,6 @@
 #include "changes.hpp"
 
+#include "proportions.hpp"
 #include "rig_names.hpp"
 
 #include <map>
@@ -73,6 +74,16 @@ namespace uuepbs
         {
             if (entry.edit.is_neutral())
             {
+                continue;
+            }
+            if (is_scale_key(key))
+            {
+                // Character Scale value (a pseudo entry, not a bone): listed by its slider name.
+                const ScaleSlider* sl = find_scale_slider(scale_id_of(key));
+                PartChange scale;
+                scale.title = sl ? std::string(sl->title) : scale_id_of(key);
+                note_bone(scale, entry);
+                out.other_bones.push_back(std::move(scale));
                 continue;
             }
             ++out.bones;

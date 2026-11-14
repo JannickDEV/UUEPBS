@@ -2,6 +2,7 @@
 
 #include "json.hpp"
 #include "presets.hpp"
+#include "proportions.hpp"
 
 #include <array>
 #include <cmath>
@@ -210,9 +211,9 @@ namespace uuepbs::share
         {
             BoneEdit e = entry.edit;
             e.clamp();
-            if (e.is_neutral())
+            if (e.is_neutral() || is_scale_key(key))
             {
-                continue;
+                continue; // Character Scale values go under "proportions" below
             }
             out += first ? "" : ",";
             first = false;
@@ -250,6 +251,23 @@ namespace uuepbs::share
             out += fields + "}";
         }
         out += "}";
+        if (has_proportions(bones))
+        {
+            out += ",\"proportions\":{";
+            bool first_scale = true;
+            for (const ScaleSlider& sl : scale_sliders())
+            {
+                const auto it = bones.find(scale_key(sl.id));
+                if (it == bones.end() || std::fabs(it->second.edit.axis[0] - 1.0) < kScaleNeutralEps)
+                {
+                    continue;
+                }
+                out += first_scale ? "" : ",";
+                first_scale = false;
+                out += escape(sl.id) + ":" + number(it->second.edit.axis[0]);
+            }
+            out += "}";
+        }
         if (with_morphs)
         {
             out += ",\"morphs\":{";

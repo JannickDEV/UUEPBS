@@ -3,6 +3,7 @@
 #include "core/changes.hpp"
 #include "core/history.hpp"
 #include "core/presets.hpp"
+#include "core/proportions.hpp"
 #include "core/rig_names.hpp"
 
 #include <algorithm>
@@ -232,6 +233,13 @@ static void test_changes()
     CHECK(PresetShelf::parse(R"({"bones": {"pelvis": {"scale": 1.1}}})", only, msg, &none));
     const EditSummary b = summarize_edits(only, none, body, morph_groups, skeleton, morph_names);
     CHECK(b.morphs.empty() && b.parts.size() == 1 && b.parts[0].title == "Hips");
+
+    // Character Scale values are listed by their slider name, never as missing bones.
+    EditBook scaled = only;
+    set_scale_value(scaled, "height", 1.1);
+    const EditSummary sc = summarize_edits(scaled, none, body, morph_groups, skeleton, morph_names);
+    CHECK(sc.bones == 1 && sc.missing.empty() && sc.other_bones.size() == 1);
+    CHECK(!sc.other_bones.empty() && sc.other_bones[0].title == "Height" && std::fabs(sc.other_bones[0].scale - 1.1) < 1e-9);
 }
 
 int main()

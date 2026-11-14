@@ -14,6 +14,7 @@
 #include "../core/morphs.hpp"
 #include "../core/preset_library.hpp"
 #include "../core/presets.hpp"
+#include "../core/proportions.hpp"
 #include "../core/share_code.hpp"
 #include "../core/registry.hpp"
 #include "../core/symmetry.hpp"
@@ -104,7 +105,8 @@ namespace uuepbs::ui
             Simplified, // was "Body" before 2.2
             Detailed,   // was "Bones" before 2.2
             Presets,
-            Status
+            Status,
+            Scale, // Character Scale (2.8), drawn after Body
         };
         enum class Detail
         {
@@ -118,6 +120,7 @@ namespace uuepbs::ui
         void focus_detail(Detail d) { m_focus_detail = static_cast<int>(d); }
         void select_bone(const std::string& bone) { m_selected = bone; }
         void focus_category(const std::string& name) { m_category = name; }
+        void focus_scale_section(const std::string& name) { m_scale_section = name; }
         // Opens (true) or closes (false) the "Choose character" grid on the next frame.
         void show_character_chooser(bool show) { (show ? m_choose_open : m_choose_close) = true; }
         void pick_preset(const std::string& name) { m_picked = name; } // shows its details in the Presets tab
@@ -151,6 +154,14 @@ namespace uuepbs::ui
         };
         std::vector<Category> categories() const;
         void draw_category_rail(const std::vector<Category>& cats, float width);
+        // The left column of the Body and Character Scale tabs: a heading, one row per entry, a note.
+        void draw_rail(const char* id, const char* heading, const std::vector<Category>& cats, float width, std::string& picked_name,
+                       const char* note);
+        // Character Scale tab (height and proportions, see core/proportions.hpp).
+        void draw_scale();
+        std::vector<Category> scale_categories() const;
+        bool scale_available(const ScaleSlider& sl) const;
+        void write_scale(const ScaleSlider& sl, double value);
         void draw_category(const Category& cat);
         // One slider row:  label | hairline track | number box (click to type) | [XYZ] | Reset.
         struct RowResult
@@ -290,6 +301,7 @@ namespace uuepbs::ui
 
         std::map<std::string, bool> m_group_open{};
         std::string m_category{}; // Simplified Panel category shown on the right
+        std::string m_scale_section{}; // Character Scale section shown on the right
         std::map<std::string, Spread> m_spread_hint{};
         char m_filter[64]{};
         bool m_only_edited{false};

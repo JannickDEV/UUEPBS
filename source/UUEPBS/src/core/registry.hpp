@@ -9,6 +9,7 @@
 // while they have some (Lua is told which through edited_actors()).
 #pragma once
 
+#include "body_groups.hpp"
 #include "compare.hpp"
 #include "mirror.hpp"
 #include "morphs.hpp"
@@ -230,6 +231,10 @@ namespace uuepbs
             uint64_t frames{};
             std::vector<Xform> reference; // parent-relative reference pose, when Lua could read it
             RigSculptor sculptor;
+            // Body groups of this rig's own skeleton, for the Character Scale sliders (resolved on demand).
+            BodyMap body;
+            uint64_t body_revision{0};  // BodyMapSource revision `body` was resolved from (0 = never)
+            uint64_t bound_body{0};     // BodyMapSource revision the sculptor was last bound with
             std::vector<Xform> scratch; // float poses are converted here
             std::vector<int32_t> inputs; // bones converted for the current frame
         };

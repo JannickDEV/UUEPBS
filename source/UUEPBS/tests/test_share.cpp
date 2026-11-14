@@ -2,6 +2,7 @@
 //   g++ -std=c++23 -I../src test_share.cpp ../src/core/*.cpp -o test_share && ./test_share
 #include "core/preset_cycle.hpp"
 #include "core/presets.hpp"
+#include "core/proportions.hpp"
 #include "core/share_code.hpp"
 
 #include <cmath>
@@ -219,10 +220,31 @@ static void test_cycle()
     CHECK(c.current("someone").empty());
 }
 
+// Character Scale values ("@scale:" entries) travel in a "proportions" object, never as bones.
+static void test_proportions()
+{
+    EditBook book = sample_book();
+    set_scale_value(book, "height", 1.1);
+    set_scale_value(book, "leg_length", 0.9);
+    const MorphBook morphs = sample_morphs();
+    const std::string code = share::encode(book, &morphs, "tall");
+    share::Decoded d;
+    std::string msg;
+    CHECK(share::decode(code, d, msg));
+    CHECK(bone_entry_count(d.bones) == 4);
+    CHECK(near(scale_value(d.bones, "height"), 1.1));
+    CHECK(near(scale_value(d.bones, "leg_length"), 0.9));
+    // a code holding only proportions is not empty
+    EditBook only;
+    set_scale_value(only, "height", 0.95);
+    CHECK(share::decode(share::encode(only, nullptr), d, msg) && near(scale_value(d.bones, "height"), 0.95));
+}
+
 int main()
 {
     test_base64_and_crc();
     test_round_trip();
+    test_proportions();
     test_rejects();
     test_cycle();
     if (g_fail)

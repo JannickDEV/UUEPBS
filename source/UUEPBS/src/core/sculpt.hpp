@@ -72,7 +72,10 @@ namespace uuepbs
         int32_t find(std::string_view bone) const;
 
         // Re-plans which bones must be rebuilt. Call whenever the edit book changes.
-        void bind(const EditBook& book, uint64_t revision);
+        // `world` scales the whole pose about the component origin (Character Scale > Height);
+        // 1 = unchanged. Every bone is rebuilt while it is not 1.
+        void bind(const EditBook& book, uint64_t revision, double world = 1.0);
+        double world_scale() const { return m_world; }
         uint64_t bound_revision() const { return m_revision; }
         size_t planned_bones() const { return m_plan.size(); }
 
@@ -120,6 +123,7 @@ namespace uuepbs
 
         // plan
         uint64_t m_revision{~0ull};
+        double m_world{1.0};
         std::vector<int32_t> m_plan;      // ascending bone indices to rebuild
         std::vector<int32_t> m_edit_slot; // bone -> index into m_scales or -1
         std::vector<BoneEdit> m_scales;
