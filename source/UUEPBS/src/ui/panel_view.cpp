@@ -2,6 +2,7 @@
 
 #include "../core/character_names.hpp"
 #include "../core/rig_names.hpp"
+#include "portraits.hpp"
 #include "skin.hpp"
 
 #include <algorithm>
@@ -51,6 +52,55 @@ namespace uuepbs::ui
         const float delta = (io.KeyShift ? fine : step) * (io.MouseWheel > 0.0f ? 1.0f : -1.0f);
         v = std::min(hi, std::max(lo, v + delta));
         return true;
+    }
+
+    // Portrait lookup order: key ("player" / identity), the user's name, the game name, the engine name.
+    ImTextureData* PanelView::portrait_for(const std::string& key, const std::string& identity, const std::string& label, const std::string& engine)
+    {
+        std::string game = label;
+        static const std::string tag = " (player)";
+        if (game.size() > tag.size() && game.compare(game.size() - tag.size(), tag.size(), tag) == 0)
+        {
+            game.resize(game.size() - tag.size());
+        }
+        const std::string own = CharacterNames::instance().get(CharacterNames::key_for(key, identity));
+        return portraits().find({CharacterNames::key_for(key, identity), own, game, engine});
+    }
+
+    std::string PanelView::portrait_stem(const std::string& key, const std::string& identity, const std::string& label, const std::string& engine)
+    {
+        (void)key;
+        std::string game = label;
+        static const std::string tag = " (player)";
+        if (game.size() > tag.size() && game.compare(game.size() - tag.size(), tag.size(), tag) == 0)
+        {
+            game.resize(game.size() - tag.size());
+        }
+        // The most stable name first: identity (NPCs), engine object name, then the game name.
+        for (const std::string* s : {&identity, &engine, static_cast<const std::string*>(&game)})
+        {
+            const std::string clean = PresetShelf::clean_name(*s);
+            if (!clean.empty())
+            {
+                return clean;
+            }
+        }
+        return {};
+    }
+
+    ImTextureData* PanelView::portrait_or_request(const std::string& id, const std::string& key, const std::string& identity, const std::string& label,
+                                                  const std::string& engine)
+    {
+        ImTextureData* face = portrait_for(key, identity, label, engine);
+        if (!face && m_targets && !id.empty())
+        {
+            const std::string stem = portrait_stem(key, identity, label, engine);
+            if (!stem.empty())
+            {
+                m_targets->request_portrait(id, stem, false);
+            }
+        }
+        return face;
     }
 
     std::string PanelView::identity_of(const std::string& key)
@@ -470,7 +520,7 @@ namespace uuepbs::ui
         const float title_h = below.y - top.y;
 
         const float box = ImGui::GetFrameHeight() + ImGui::CalcTextSize("Enabled").x + style.ItemInnerSpacing.x;
-        ImGui::SetCursorScreenPos(ImVec2(ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMax().x - box, top.y + (title_h - ImGui::GetFrameHeight()) * 0.5f));
+        ImGui::SetCursorScreenPos(ImVec2(ImGui::GetCursorScreenPos().x + ImGui::GetContentRegionAvail().x - box, top.y + (title_h - ImGui::GetFrameHeight()) * 0.5f));
         bool on = Registry::instance().enabled();
         if (sk.checkbox("Enabled", &on))
         {
@@ -539,17 +589,23 @@ namespace uuepbs::ui
         const std::string identity = identity_of(m_target.key);
         const std::string name = m_target.label.empty() ? std::string("No character yet")
                                                         : CharacterNames::instance().shown(m_target.label, m_target.key, identity);
-        // Portrait frame (monogram until portraits exist for this character).
+        // Portrait frame: the character's image when there is one, else its monogram.
         const ImVec2 p = ImGui::GetCursorScreenPos();
-        monogram_frame(dl, p, ImVec2(p.x + portrait, p.y + portrait), m_target.label.empty() ? std::string("?") : monogram(name),
+        ImTextureData* face =
+            m_target.label.empty() ? nullptr : portrait_or_request(m_target.id, m_target.key, identity, m_target.label, m_target.engine);
+        monogram_frame(dl, p, ImVec2(p.x + portrait, p.y + portrait), face || m_target.label.empty() ? std::string(face ? "" : "?") : monogram(name),
                        base * style.FontScaleDpi * 1.35f, u32(ImGui::GetStyleColorVec4(ImGuiCol_FrameBg)), u32(sk.color(Role::Border)),
                        u32(sk.color(Role::Title)));
+        if (face)
+        {
+            Portraits::draw(dl, face, ImVec2(p.x + 1.0f, p.y + 1.0f), ImVec2(p.x + portrait - 1.0f, p.y + portrait - 1.0f));
+        }
         ImGui::Dummy(ImVec2(portrait, portrait));
         ImGui::SameLine(0.0f, dpi_px(16.0f));
 
         // Right column first (its width limits the text column): Change character, then note + Rename.
         const float change_w = sk.button_width("Change character    ");
-        const float right_x = ImGui::GetWindowContentRegionMax().x;
+        const float right_x = ImGui::GetCursorPos().x + ImGui::GetContentRegionAvail().x; // GetWindowContentRegionMax() is gone under IMGUI_DISABLE_OBSOLETE_FUNCTIONS
         std::string note;
         std::string others;
         size_t n_others = 0;
@@ -736,7 +792,7 @@ namespace uuepbs::ui
         ImGui::TextColored(muted(), "Every character loaded right now, nearest first. Each one keeps its own sliders.");
         ImGui::PopFont();
         const ImVec2 after = ImGui::GetCursorPos();
-        const float right_x = ImGui::GetWindowContentRegionMax().x;
+        const float right_x = ImGui::GetCursorPos().x + ImGui::GetContentRegionAvail().x; // GetWindowContentRegionMax() is gone under IMGUI_DISABLE_OBSOLETE_FUNCTIONS
         ImGui::SetCursorPos(ImVec2(right_x - close_w - refresh_w - style.ItemSpacing.x, top.y));
         if (sk.button("Refresh"))
         {
@@ -762,7 +818,7 @@ namespace uuepbs::ui
         ImGui::Separator();
         ImGui::Dummy(ImVec2(0.0f, dpi_px(8.0f)));
 
-        const float footer = ImGui::GetTextLineHeightWithSpacing() * 1.6f;
+        const float footer = ImGui::GetTextLineHeightWithSpacing() * 3.0f;
         ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0, 0, 0, 0));
         ImGui::BeginChild("##grid", ImVec2(0, -footer), ImGuiChildFlags_None);
         ImGui::PopStyleColor();
@@ -777,7 +833,8 @@ namespace uuepbs::ui
         int index = 0;
         std::string picked_id;
         std::string picked_name;
-        auto tile = [&](const std::string& id, const std::string& name, const std::string& sub, const std::string& letters, bool selected, bool edited) {
+        auto tile = [&](const std::string& id, const std::string& name, const std::string& sub, const std::string& letters, bool selected, bool edited,
+                        ImTextureData* face) {
             ImGui::PushID(id.c_str());
             if (index % cols != 0)
             {
@@ -802,6 +859,11 @@ namespace uuepbs::ui
             monogram_frame(dl, a, img_b, letters, base * style.FontScaleDpi * 1.6f,
                            u32(hovered ? ImGui::GetStyleColorVec4(ImGuiCol_FrameBgHovered) : sk.color(Role::Section)), border,
                            u32(ImVec4(sk.color(Role::Title).x, sk.color(Role::Title).y, sk.color(Role::Title).z, 0.85f)));
+            if (face)
+            {
+                Portraits::draw(dl, face, ImVec2(a.x + 1.0f, a.y + 1.0f), ImVec2(img_b.x - 1.0f, img_b.y));
+                dl->AddRect(a, img_b, border, 0.0f, 0, 1.0f);
+            }
             dl->AddRectFilled(ImVec2(a.x, img_b.y), b, u32(selected ? accent_dim() : ImGui::GetStyleColorVec4(ImGuiCol_FrameBg)));
             dl->AddRect(a, b, border, 0.0f, 0, 1.0f);
             // Footer: (bullet) name, then the engine name / id.
@@ -822,18 +884,20 @@ namespace uuepbs::ui
             ++index;
         };
 
-        tile("auto", "Automatic", "the character you control", "AUTO", m_target.id == "auto", is_edited(kPlayerActor));
+        tile("auto", "Automatic", "the character you control", "AUTO", m_target.id == "auto", is_edited(kPlayerActor), nullptr);
         for (const TargetChoice& t : m_target_list)
         {
             const std::string identity = identity_of(t.key);
             const std::string name = CharacterNames::instance().shown(t.label, t.key, identity);
             const std::string sub = !t.engine.empty() ? t.engine : !identity.empty() ? identity : std::string();
-            tile(t.id, name, sub, monogram(name), t.id == m_target.id, is_edited(t.key));
+            ImTextureData* face = portrait_or_request(t.id, t.key, identity, t.label, t.engine);
+            tile(t.id, name, sub, face ? std::string() : monogram(name), t.id == m_target.id, is_edited(t.key), face);
         }
         ImGui::EndChild();
         ImGui::PushTextWrapPos(0.0f);
         ImGui::PushFont(nullptr, base * 0.86f);
-        ImGui::TextColored(muted(), "A square marks a character with edited sliders. Characters without a portrait get a name tile. "
+        ImGui::TextColored(muted(), "A square marks a character with edited sliders. Characters without a portrait get a name tile; "
+                                    "put PNG/JPG portraits named after the character in the presets folder's _portraits folder. "
                                     "Refresh searches the whole level.");
         ImGui::PopFont();
         ImGui::PopTextWrapPos();
@@ -895,6 +959,22 @@ namespace uuepbs::ui
             apply("");
         }
         ImGui::EndDisabled();
+        ImGui::SameLine();
+        ImGui::BeginDisabled(!m_targets);
+        if (sk.button("Retake portrait"))
+        {
+            const std::string identity = identity_of(m_target.key);
+            const std::string stem = portrait_stem(m_target.key, identity, m_target.label, m_target.engine);
+            if (!stem.empty())
+            {
+                m_targets->request_portrait(m_target.id, stem, true);
+                set_message("Taking a new portrait...");
+            }
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndDisabled();
+        tooltip("Takes a new picture of this character in the game (saved in the presets folder's _portraits folder).\n"
+                "A PNG/JPG of your own named after the character always wins over taken pictures.");
         ImGui::SameLine();
         if (sk.button("Cancel") || ImGui::IsKeyPressed(ImGuiKey_Escape))
         {

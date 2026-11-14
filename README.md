@@ -12,6 +12,7 @@ https://github.com/user-attachments/assets/4e4372bc-8a64-4255-b8ae-a33645ce187e
 * Thin sliders whose value sits in a box next to them (click it to type), so the grab never covers the number
 * Character banner at the top (monogram, name, engine name, live state) with **Change character**, which opens a grid of every loaded character
 * **Rename** a character: your name for it is shown everywhere in the window and saved in `UUEPBS Presets\_characters\_names.txt`; the game and engine names stay in tooltips and on the Status tab
+* Character portraits in the banner and the grid: your own PNG/JPG in `UUEPBS Presets\_portraits`, or taken automatically in the game (the game's own portrait when the profile names it, else a head shot). **Retake portrait** in the Rename window. `AutoPortraits = false` in `config.lua` turns the automatic part off
 * Bone tree and morph list moved to the **Advanced** tab (was the Detailed Panel). Skins keep working; tabs no longer show icons
 * Added Undo / Redo for slider edits (buttons in the character banner, **Ctrl+Z** / **Ctrl+Y** or **Ctrl+Shift+Z**), kept per character
 * Added a "Changed only" filter to the Body tab
@@ -54,6 +55,10 @@ https://github.com/user-attachments/assets/4e4372bc-8a64-4255-b8ae-a33645ce187e
   **Change character** opens a grid of every `Character` loaded in the level (nearest first). *Automatic* picks the game profile's character, or otherwise the pawn you control.
   A small square marks characters with edited sliders. The list is only built while the window is open. **Refresh** (in the grid) rescans all actors within the current level.
   **Rename** gives the character a name of your own. It is saved in `UUEPBS Presets\_characters\_names.txt` (for the player and for NPCs the mod recognises after a reload; other characters keep it for the visit).
+* **Portraits:** the banner and the grid show a picture of each character when there is one, else three letters of its name.
+  * Your own: put a PNG or JPG in **`UUEPBS Presets\_portraits\`** named after the character: its remembered name (identity), the name you gave it, its game name or its engine name, e.g. `Anca.png` or `BP_Rokuv3_C_0.jpg`. Case does not matter. Your images always win.
+  * Automatic (while the window is open, one every 1.5 s at most): the script saves `<name>.auto.png` in the same folder. If the game profile names the character's own portrait texture, that one is used, e.g. `"PortraitTexture": ["CharacterData.FaceIcon"]` (property path from the character actor; a list tries each). Otherwise a small camera takes a head shot of only that character, tuned with `"PortraitBone"` (default: `head` and common variants), `"PortraitDistance"` (cm, default 60) and `"PortraitFov"` (degrees, default 30).
+  * **Retake portrait** (in the Rename window) takes a new one. Delete a `.auto.png` to have it taken again next time. `AutoPortraits = false` in `config.lua` keeps only your own images.
 * **Body** tab (called the Simplified Panel in 2.2–2.6): pick a category on the left (Head & Neck, Torso, Chest, Hips & Legs, Arms...), then use its curated sliders for the head, neck, rib cage, waist, hips, shoulders, breasts, butt, thighs, calves, arms and so on.
   A slider only appears when the skeleton has matching bones. Hover a slider's name to see which bones it drives.
   Left/right pairs and twist/roll/jiggle helper bones move together. **XYZ** splits the size into Length (X, along the bone), Width (Y) and Depth (Z).
