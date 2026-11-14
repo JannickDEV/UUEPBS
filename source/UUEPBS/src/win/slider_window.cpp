@@ -3,6 +3,7 @@
 #include "../core/presets.hpp"
 #include "../core/registry.hpp"
 #include "../ui/panel_view.hpp"
+#include "../ui/portraits.hpp"
 #include "../ui/skin.hpp"
 #include "../ui/soft_raster.hpp"
 #include "pose_hook.hpp"
@@ -455,6 +456,7 @@ namespace uuepbs::ui
                 }
                 ImGui_ImplWin32_Shutdown();
                 skin().shutdown(); // after the backend released the textures, before the context goes
+                portraits().shutdown();
                 ImGui::DestroyContext(m_imgui);
                 m_imgui = nullptr;
                 destroy_device();
@@ -467,6 +469,7 @@ namespace uuepbs::ui
             {
                 const std::string before = skin().status();
                 m_skin_dirty = skin().update() || m_skin_dirty;
+                portraits().update(ImGui::GetTime()); // picks up new/changed portrait files, frees replaced ones
                 if (m_skin_dirty && skin().status() != before)
                 {
                     m_view.set_message("Window skin: " + skin().status());

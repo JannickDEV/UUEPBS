@@ -16,7 +16,11 @@ Host-side tests (Linux/macOS/WSL with g++ 13+ or clang 17+). None of them need W
     # hook finder against a real game exe on disk (expects GON's slot 374, +0x644/+0x648)
     g++ -std=c++23 -O2 -I$S test_resolver.cpp $S/core/*.cpp -o test_resolver && ./test_resolver path/to/Roku3-Win64-Shipping.exe
 
-    # names given to characters in the window (_characters/_names.txt)
+    # portraits taken in the game (Scripts/uuepbs_portraits.lua) against a mocked engine: request file,
+    # head-shot calls, game-portrait path, PNG read-back fallback, giving up
+    lua portraits_test.lua ../../../mod/UUEPBS/Scripts /tmp/uuepbs_portraits
+
+    # names given to characters in the window (_characters/_names.txt) and portrait requests
     g++ -std=c++23 -I$S test_names.cpp $S/core/*.cpp -o test_names && ./test_names
 
     # Lua <-> DLL file bridge

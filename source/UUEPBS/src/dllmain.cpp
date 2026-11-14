@@ -11,6 +11,8 @@
 #include "core/body_groups.hpp"
 #include "core/character_memory.hpp"
 #include "core/character_names.hpp"
+#include "core/portrait_requests.hpp"
+#include "ui/portraits.hpp"
 #include "core/bridge.hpp"
 #include "core/json.hpp"
 #include "core/morphs.hpp"
@@ -228,6 +230,15 @@ namespace
             ++m_out.rescan;
             m_out_dirty = true;
             m_retry_hook = true; // a refused hook gets another try right away
+        }
+
+        void request_portrait(const std::string& id, const std::string& stem, bool retake) override
+        {
+            std::lock_guard guard(m_portrait_lock);
+            if (m_portrait_requests.add(id, stem, retake) && !m_portrait_requests.write(m_folder / L"portrait_requests.txt"))
+            {
+                g_log.line("could not write portrait_requests.txt");
+            }
         }
 
         std::string identity_of(const std::string& key) override
@@ -767,6 +778,7 @@ namespace
                 m_shelf.set_folder(dir);
                 m_characters.set_folder(dir / L"_characters"); // remembered NPC sliders, one file per identity
                 uuepbs::CharacterNames::instance().set_file(dir / L"_characters" / uuepbs::CharacterNames::kFileName); // names given in the window
+                uuepbs::ui::portraits().set_folder(dir / L"_portraits"); // character portraits (yours, or taken by the script)
                 m_characters.set_log([](const std::string& t) { g_log.line(t); });
                 m_shelf_source = folder;
                 g_log.line("presets folder: " + uuepbs::path_to_utf8(m_shelf.folder()));
@@ -1360,6 +1372,8 @@ namespace
         bool m_in_retry{};
 
         std::mutex m_lock; // guards m_state, m_out
+        std::mutex m_portrait_lock;
+        uuepbs::PortraitRequests m_portrait_requests; // portraits the window asked the script to take
         uuepbs::bridge::LuaState m_state;
         uuepbs::bridge::DllState m_out;
         bool m_out_dirty{true};

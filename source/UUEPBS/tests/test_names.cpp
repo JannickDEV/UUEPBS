@@ -1,6 +1,7 @@
 // Names given to characters in the window (core/character_names.cpp): cleaning, file format,
 // which key a name is stored under, and that session-only names never reach the file.
 #include "core/character_names.hpp"
+#include "core/portrait_requests.hpp"
 #include "core/registry.hpp"
 
 #include <cstdio>
@@ -101,6 +102,25 @@ int main()
     CHECK(file.extension() != ".json" && file.extension() != ".rbs");
 
     std::filesystem::remove_all(dir);
+
+    // Portrait requests (window -> script): asked once, again on retake, bad text refused.
+    {
+        PortraitRequests req;
+        CHECK(req.add("auto", "BP_Rokuv3_C_0", false));
+        CHECK(!req.add("auto", "BP_Rokuv3_C_0", false)); // already asked
+        CHECK(req.add("auto", "BP_Rokuv3_C_0", true));   // retake: new nonce
+        CHECK(req.add("4D5E6F", "Anca", false));
+        CHECK(!req.add("bad\tid", "x", false));
+        CHECK(!req.add("id", "", false));
+        const std::string text = req.serialize();
+        CHECK(text.rfind(std::string(PortraitRequests::kHeader) + "\n", 0) == 0);
+        CHECK(text.find("auto\tBP_Rokuv3_C_0\t2\n") != std::string::npos);
+        CHECK(text.find("4D5E6F\tAnca\t3\n") != std::string::npos);
+        for (int i = 0; i < 300; ++i)
+            req.add("a" + std::to_string(i), "s", false);
+        CHECK(req.size() == PortraitRequests::kMaxEntries);
+    }
+
     std::printf(failures ? "%d failure(s)\n" : "names: all checks passed\n", failures);
     return failures ? 1 : 0;
 }

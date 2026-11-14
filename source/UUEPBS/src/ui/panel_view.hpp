@@ -65,6 +65,14 @@ namespace uuepbs::ui
         // Who an actor key is across reloads (character_memory.hpp), "" when unknown. Renames are
         // stored under it, so they survive reloads.
         virtual std::string identity_of(const std::string& key) { (void)key; return {}; }
+        // Ask the script for a portrait of character `id` ("auto" or an address), saved as
+        // "<presets>\_portraits\<stem>.auto.png". `retake` takes a new one even if it has one.
+        virtual void request_portrait(const std::string& id, const std::string& stem, bool retake)
+        {
+            (void)id;
+            (void)stem;
+            (void)retake;
+        }
     };
 
 
@@ -162,6 +170,11 @@ namespace uuepbs::ui
         void draw_character_chooser();
         void draw_rename_popup();
         std::string identity_of(const std::string& key);
+        ImTextureData* portrait_for(const std::string& key, const std::string& identity, const std::string& label, const std::string& engine);
+        // Same lookup; when there is no image, asks the script to take one (once per character).
+        ImTextureData* portrait_or_request(const std::string& id, const std::string& key, const std::string& identity, const std::string& label,
+                                           const std::string& engine);
+        static std::string portrait_stem(const std::string& key, const std::string& identity, const std::string& label, const std::string& engine);
         void draw_detailed();
         void draw_detailed_bones();
         void draw_detailed_morphs();
