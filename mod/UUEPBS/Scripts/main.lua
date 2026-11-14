@@ -2901,6 +2901,45 @@ local function schedule_scan(delayMs, full)
     scanFull = scanFull or full == true
 end
 
+-- Portraits for the window (uuepbs_portraits.lua): taken on request, one at a time.
+-- Kept in `late` (main.lua is at Lua's limit of 200 locals).
+-- The same module takes preset thumbnails (PresetThumbnails in config.lua).
+if Config.AutoPortraits ~= false or Config.PresetThumbnails ~= false then
+    local okP, mod = pcall(require, "uuepbs_portraits")
+    if okP and type(mod) == "table" then
+        late.portraits = mod
+        mod.setup({
+            say = say,
+            chatter = chatter,
+            portraits = Config.AutoPortraits ~= false,
+            folder = presetFolder .. "\\_portraits",
+            request_file = nativeDir .. "\\portrait_requests.txt",
+            thumb_folder = Config.PresetThumbnails ~= false and (presetFolder .. "\\_library") or nil,
+            thumb_request_file = nativeDir .. "\\thumbnail_requests.txt",
+            profile = function()
+                return Profile
+            end,
+            find_actor = function(id)
+                if id == "auto" or id == PLAYER_KEY then
+                    local d = cheap_default()
+                    return (d and alive(d)) and d or nil
+                end
+                for _, c in ipairs(candidates) do
+                    if c.id == id and alive(c.actor) then
+                        return c.actor
+                    end
+                end
+                if target and alive(target) and address_of(target) == id then
+                    return target
+                end
+                return nil
+            end,
+        })
+    else
+        say("portraits off: %s", tostring(mod))
+    end
+end
+
 local function tick()
     local ok, err = pcall(function()
         if pendingProfileText then
@@ -2961,6 +3000,9 @@ local function tick()
             watch_morphs()
         end
         write_state()
+        if late.portraits and windowOpen then
+            late.portraits.tick(now_ms())
+        end
     end)
     if not ok then
         say("tick error: %s", tostring(err))

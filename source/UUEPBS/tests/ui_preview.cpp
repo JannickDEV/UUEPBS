@@ -1,10 +1,13 @@
 // Headless run of the slider window contents with a tiny software rasterizer,
 // so the layout can be checked (and asserts caught) without Windows.
 #include "core/body_groups.hpp"
+#include "core/character_names.hpp"
 #include "core/mirror.hpp"
+#include "core/preset_library.hpp"
 #include "core/presets.hpp"
 #include "core/registry.hpp"
 #include "ui/panel_view.hpp"
+#include "ui/portraits.hpp"
 #include "ui/skin.hpp"
 #include "ui/soft_raster.hpp"
 
@@ -16,6 +19,7 @@
 #include <cstdio>
 #include <cstring>
 #include <fstream>
+#include <map>
 #include <sstream>
 #include <vector>
 
@@ -33,15 +37,93 @@ struct FakeTargets : ui::TargetSource
 {
     std::vector<ui::TargetChoice> targets() override
     {
-        return {{"1A2B3C", "BP_Rokuv3_C_0 (player)", "player"}, {"4D5E6F", "BP_NPC_Guard_C_2", "4D5E6F"}, {"778899", "BP_NPC_Vendor_C_1", "778899"}};
+        return {{"1A2B3C", "Roku (player)", "player", "BP_Rokuv3_C_0"}, {"4D5E6F", "Anca", "4D5E6F", "BP_NPC_Guard_C_2"}, {"778899", "Vendor", "778899", "BP_NPC_Vendor_C_1"}};
     }
-    ui::TargetChoice current_target() override { return {"auto", "BP_Rokuv3_C_0 (player)", "player"}; }
+    ui::TargetChoice current_target() override { return {"auto", "Roku (player)", "player", "BP_Rokuv3_C_0"}; }
+    std::string identity_of(const std::string& key) override { return key == "4D5E6F" ? "Anca" : ""; }
+    std::map<std::string, std::string> asked; // portrait requests: id -> file stem
+    void request_portrait(const std::string& id, const std::string& stem, bool) override { asked[id] = stem; }
+    std::map<std::string, std::string> thumbs; // thumbnail requests: preset -> character id
+    void request_thumbnail(const std::string& id, const std::string& preset) override { thumbs[preset] = id; }
     void pick_target(const std::string&) override {}
     void refresh_targets() override {}
     void request_rescan() override {}
     std::string link_text() override { return "connected, script v2.0.0, 2 rigs"; }
     std::string hotkey_text() override { return "F6"; }
 };
+
+// A stand-in preset thumbnail: a simple figure on a dark backdrop, written as an (uncompressed) PNG.
+static void write_figure_png(const std::filesystem::path& file, float hips, float chest, float legs, uint32_t tint)
+{
+    const int W = 192, H = 256;
+    std::vector<uint8_t> raw;
+    raw.reserve(size_t(H) * (W * 4 + 1));
+    const float r0 = ((tint >> 16) & 255) / 255.0f, g0 = ((tint >> 8) & 255) / 255.0f, b0 = (tint & 255) / 255.0f;
+    auto ell = [](float x, float y, float cx, float cy, float rx, float ry) {
+        const float dx = (x - cx) / rx, dy = (y - cy) / ry;
+        return dx * dx + dy * dy <= 1.0f;
+    };
+    for (int y = 0; y < H; ++y)
+    {
+        raw.push_back(0);
+        for (int x = 0; x < W; ++x)
+        {
+            const float fx = float(x), fy = float(y);
+            const float cx = W * 0.5f;
+            const float leg_top = 150.0f, leg_bot = 150.0f + 92.0f * legs;
+            const bool body = ell(fx, fy, cx, 34, 15, 18) ||                                     // head
+                              (fy > 50 && fy < 58 && std::fabs(fx - cx) < 6) ||                  // neck
+                              ell(fx, fy, cx, 92, 26 + 4 * chest, 40) ||                         // torso
+                              ell(fx, fy, cx - 14 * chest, 84, 12 * chest, 11 * chest) ||        // chest
+                              ell(fx, fy, cx + 14 * chest, 84, 12 * chest, 11 * chest) ||
+                              ell(fx, fy, cx, 138, 30 * hips, 24) ||                             // hips
+                              (fy > leg_top && fy < leg_bot && (std::fabs(fx - (cx - 13 * hips)) < 9 * hips || std::fabs(fx - (cx + 13 * hips)) < 9 * hips)) ||
+                              (fy > 62 && fy < 140 && (std::fabs(fx - (cx - 42)) < 5 || std::fabs(fx - (cx + 42)) < 5)); // arms
+            const float shade = 0.55f + 0.45f * (1.0f - fy / H);
+            const float bg = 0.07f + 0.05f * (fy / H);
+            const float r = body ? r0 * shade : bg * 0.8f, g = body ? g0 * shade : bg * 1.1f, b = body ? b0 * shade : bg * 1.5f;
+            raw.push_back(uint8_t(std::lround(std::min(1.0f, r) * 255)));
+            raw.push_back(uint8_t(std::lround(std::min(1.0f, g) * 255)));
+            raw.push_back(uint8_t(std::lround(std::min(1.0f, b) * 255)));
+            raw.push_back(255);
+        }
+    }
+    auto crc = [](const std::string& s) {
+        uint32_t c = 0xFFFFFFFFu;
+        for (unsigned char ch : s)
+        {
+            c ^= ch;
+            for (int k = 0; k < 8; ++k)
+                c = (c & 1) ? 0xEDB88320u ^ (c >> 1) : c >> 1;
+        }
+        return c ^ 0xFFFFFFFFu;
+    };
+    auto be32 = [](uint32_t v) { return std::string{char(v >> 24), char(v >> 16), char(v >> 8), char(v)}; };
+    auto chunk = [&](const std::string& kind, const std::string& data) { return be32(uint32_t(data.size())) + kind + data + be32(crc(kind + data)); };
+    std::string z = "\x78\x01";
+    for (size_t i = 0; i < raw.size(); i += 65535)
+    {
+        const size_t n = std::min<size_t>(65535, raw.size() - i);
+        z += char(i + n >= raw.size() ? 1 : 0);
+        z += char(n & 255);
+        z += char(n >> 8);
+        z += char(~n & 255);
+        z += char((~n >> 8) & 255);
+        z.append(reinterpret_cast<const char*>(raw.data() + i), n);
+    }
+    uint32_t a = 1, b = 0;
+    for (uint8_t v : raw)
+    {
+        a = (a + v) % 65521;
+        b = (b + a) % 65521;
+    }
+    z += be32((b << 16) | a);
+    std::string png = "\x89PNG\r\n\x1a\n";
+    png += chunk("IHDR", be32(W) + be32(H) + std::string{8, 6, 0, 0, 0});
+    png += chunk("IDAT", z);
+    png += chunk("IEND", "");
+    std::ofstream(file, std::ios::binary).write(png.data(), std::streamsize(png.size()));
+}
 
 struct Canvas
 {
@@ -303,6 +385,10 @@ int main(int argc, char** argv)
     reg.set_morph("Face_Smile", 1.0);
     reg.set_animated_morphs({"face_smile"});
 
+    // A name the user gave a remembered NPC (shown in the picker and Status > Edited characters).
+    CharacterNames::instance().set_file("/tmp/claude-uuepbs-preview/UUEPBS Presets/_characters/_names.txt");
+    CharacterNames::instance().set("Anca", "Anca the Guard", true);
+
     PresetShelf shelf;
     shelf.set_folder("/tmp/claude-uuepbs-preview/UUEPBS Presets");
     {
@@ -311,6 +397,28 @@ int main(int argc, char** argv)
     }
     shelf.save("Petite", EditBook{}, msg);
     shelf.save("Tall legs", reg.edits(), msg);
+    shelf.save("Athletic", reg.edits(), msg);
+    shelf.save("Soft curves", reg.edits(), msg);
+    shelf.save("Heroic", reg.edits(), msg);
+
+    // Preset browser: tags in _library/presets.json, thumbnails next to it (one hand-made, the rest automatic,
+    // "Petite" without a picture so its tile shows the monogram).
+    const std::filesystem::path library_dir = "/tmp/claude-uuepbs-preview/UUEPBS Presets/_library";
+    std::filesystem::remove_all(library_dir);
+    {
+        PresetLibrary lib;
+        lib.set_presets_folder(shelf.folder());
+        lib.set_tags("Curvy", {"curvy", "roku"});
+        lib.set_tags("Tall legs", {"legs", "roku"});
+        lib.set_tags("Athletic", {"fit"});
+        lib.set_tags("Soft curves", {"curvy"});
+        lib.set_tags("Heroic", {"fit", "roku", "tall"});
+        write_figure_png(library_dir / "Curvy.png", 1.35f, 1.3f, 0.95f, 0xC9A48Bu);
+        write_figure_png(library_dir / "Tall legs.auto.png", 1.0f, 1.0f, 1.15f, 0xB98F78u);
+        write_figure_png(library_dir / "Athletic.auto.png", 1.05f, 0.95f, 1.0f, 0xA77D66u);
+        write_figure_png(library_dir / "Soft curves.auto.png", 1.25f, 1.15f, 0.95f, 0xD8B39Au);
+        write_figure_png(library_dir / "Heroic.auto.png", 1.0f, 1.1f, 1.1f, 0x9C7460u);
+    }
 
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
@@ -328,24 +436,49 @@ int main(int argc, char** argv)
     ui::skin().update();
     ui::PanelView::apply_theme(dpi);
 
+    // Portraits: a hand-made one for Anca (by identity), an automatic one for the vendor (by game name).
+    const std::filesystem::path portrait_dir = "/tmp/claude-uuepbs-preview/UUEPBS Presets/_portraits";
+    std::filesystem::remove_all(portrait_dir);
+    std::filesystem::create_directories(portrait_dir);
+    {
+        const auto example = ui::Skin::list(skins);
+        const std::filesystem::path bg = skins / (example.empty() ? std::string() : example.front()) / "background.jpg";
+        std::error_code ec;
+        std::filesystem::copy_file(bg, portrait_dir / "Anca.jpg", ec);
+        std::filesystem::copy_file(bg, portrait_dir / "vendor.auto.jpg", ec);
+        if (ec)
+            std::printf("  note: no example image to use as a portrait (%s)\n", ec.message().c_str());
+    }
+    ui::portraits().set_folder(portrait_dir);
+    if (ui::Portraits::file_key("Anca: the Guard?") != "anca the guard")
+    {
+        std::printf("  FAIL: portrait file key\n");
+    }
+
     FakeHost host;
     FakeTargets targets;
     ui::PanelView view;
     view.configure(&shelf, &host, &targets, "v2.4.0", true);
     view.refresh_presets();
     view.set_message("Loaded 'Curvy' (7 bone(s), 4 morph(s))");
+    view.pick_preset("Curvy");
 
     struct Shot
     {
         ui::PanelView::Tab tab;
         int detail; // -1, or a PanelView::Detail
         const char* file;
+        bool chooser{false}; // with the "Choose character" grid open
+        int presets{0};      // Presets tab: 0 grid, 1 list, 2 grid searched for "#roku" with the "fit" tag on
     };
     const Shot shots[] = {{ui::PanelView::Tab::Simplified, -1, "preview_simplified.ppm"},
                           {ui::PanelView::Tab::Detailed, 0, "preview_detailed.ppm"},
                           {ui::PanelView::Tab::Detailed, 1, "preview_morphs.ppm"},
                           {ui::PanelView::Tab::Presets, -1, "preview_presets.ppm"},
-                          {ui::PanelView::Tab::Status, -1, "preview_status.ppm"}};
+                          {ui::PanelView::Tab::Presets, -1, "preview_presets_list.ppm", false, 1},
+                          {ui::PanelView::Tab::Presets, -1, "preview_presets_search.ppm", false, 2},
+                          {ui::PanelView::Tab::Status, -1, "preview_status.ppm"},
+                          {ui::PanelView::Tab::Simplified, -1, "preview_chooser.ppm", true}};
 
     ui::SoftRenderer soft;
     int failures = 0;
@@ -369,14 +502,43 @@ int main(int argc, char** argv)
                 view.focus_detail(static_cast<ui::PanelView::Detail>(shot.detail));
             if (shot.tab == ui::PanelView::Tab::Detailed)
                 view.select_bone("boob_l");
+            view.focus_category("Hips & Legs");
+            view.show_character_chooser(shot.chooser);
+            view.show_preset_list(shot.presets == 1);
+            if (shot.presets == 2)
+                view.search_presets("#roku", {"fit"});
+            else
+                view.search_presets("");
             for (int frame = 0; frame < 4; ++frame)
             {
                 if (ui::skin().update())
                     ui::PanelView::apply_theme(dpi);
+                ui::portraits().update(ImGui::GetTime());
+                ui::preset_thumbnails().update(ImGui::GetTime());
                 ImGui::NewFrame();
                 view.draw();
                 ImGui::Render();
                 handle_textures(ImGui::GetDrawData());
+            }
+            if (shot.chooser && (targets.asked.count("1A2B3C") == 0 || targets.asked["1A2B3C"] != "BP_Rokuv3_C_0" || targets.asked.count("4D5E6F")))
+            {
+                std::printf("  FAIL: portrait requests (want one for the player's engine name, none for Anca who has a picture)\n");
+                failures++;
+            }
+            if (shot.tab == ui::PanelView::Tab::Presets && shot.presets == 0 && ui::preset_thumbnails().loaded() < 5)
+            {
+                std::printf("  FAIL: preset thumbnails not shown in the browser (%zu loaded)\n", ui::preset_thumbnails().loaded());
+                failures++;
+            }
+            if (shot.tab == ui::PanelView::Tab::Presets && view.preset_library().tags("heroic").size() != 3)
+            {
+                std::printf("  FAIL: preset tags not read from _library/presets.json\n");
+                failures++;
+            }
+            if (shot.chooser && ui::portraits().loaded() < 2)
+            {
+                std::printf("  FAIL: portraits not shown in the character grid (%zu loaded)\n", ui::portraits().loaded());
+                failures++;
             }
             if (pass == 1 && &shot == &shots[0])
             {
@@ -461,7 +623,9 @@ int main(int argc, char** argv)
         handle_textures(ImGui::GetDrawData());
     }
     ui::skin().update();
-    const int user_textures = ImGui::GetPlatformIO().Textures.Size - ImGui::GetIO().Fonts->TexList.Size;
+    const int user_textures =
+        ImGui::GetPlatformIO().Textures.Size - ImGui::GetIO().Fonts->TexList.Size - static_cast<int>(ui::portraits().loaded()) -
+        static_cast<int>(ui::preset_thumbnails().loaded()); // portraits and thumbnails are not the skin's
     std::printf("skin textures left after switching back: %d\n", user_textures);
     if (ui::skin().name() != "" || user_textures != 0)
     {
@@ -469,6 +633,8 @@ int main(int argc, char** argv)
         failures++;
     }
     ui::skin().shutdown();
+    ui::portraits().shutdown();
+    ui::preset_thumbnails().shutdown();
     ImGui::DestroyContext();
     return failures;
 }
