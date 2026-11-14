@@ -8,6 +8,11 @@ return {
     -- Handy in games that finish setting the character up late. "" turns it off.
     RefreshKey = "F7",
 
+    -- Hold to compare: while this key is down the game shows the character's original body,
+    -- and your sliders come back when you let go (nothing is changed or saved). The window's
+    -- Before / After switch does the same with a click. "" turns the key off.
+    CompareKey = "F8",
+
     -- Presets go to <Win64>\<PresetFolderName> (the folder that holds the game exe).
     -- Set PresetFolder to an absolute path to use somewhere else instead.
     -- Presets from an older "RBS Presets" folder next to it are copied over the first time.

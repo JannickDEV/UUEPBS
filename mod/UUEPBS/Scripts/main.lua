@@ -2644,6 +2644,7 @@ local function build_state()
         "fps=" .. tostring(Config.WindowFps or 30),
         "key=" .. clean(Config.MenuKey or "F6"),
         "refresh_key=" .. clean(Config.RefreshKey == nil and "F7" or Config.RefreshKey),
+        "compare_key=" .. clean(Config.CompareKey == nil and "F8" or Config.CompareKey),
         "game=" .. clean(projectName),
         "profile=" .. clean(Profile.name),
         "mkdir=" .. (needProfileFolder and clean(profileDir) or ""),
@@ -3099,7 +3100,7 @@ local function rest_of(params, first)
     return table.concat(parts, " ")
 end
 
-local usage = "uuepbs (or ubs) ui | status | rescan | list | load <name> | save <name> | on | off | reset [all] | diag | skin [name] | morph <name> [weight]"
+local usage = "uuepbs (or ubs) ui | status | rescan | list | load <name> | save <name> | on | off | compare [on|off] | reset [all] | diag | skin [name] | morph <name> [weight]"
 
 local function console(_, params, out)
     local verb = string.lower(params[1] or "")
@@ -3121,7 +3122,7 @@ local function console(_, params, out)
             projectName, Profile.name, targetInfo.label, math.max(0, #keptOrder - (keptSet[targetInfo.key] and 1 or 0)), #rigs, hookState))
         reply(scan_status())
         send_command("status", "", true)
-    elseif verb == "load" or verb == "save" or verb == "skin" or verb == "morph" or verb == "reset" then
+    elseif verb == "load" or verb == "save" or verb == "skin" or verb == "morph" or verb == "reset" or verb == "compare" then
         send_command(verb, rest_of(params, 2), true)
     elseif verb == "list" or verb == "on" or verb == "off" or verb == "diag" then
         send_command(verb, "", true)
