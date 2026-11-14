@@ -44,6 +44,7 @@ namespace uuepbs::ui
         std::string id;
         std::string label;
         std::string key{"player"}; // actor key: "player" for the default character, else its address
+        std::string engine; // engine object name, e.g. BP_Rokuv3_C_0 (empty from older scripts)
     };
 
     // Characters the user can switch the sliders to (fed by the Lua script).
@@ -61,7 +62,11 @@ namespace uuepbs::ui
         virtual std::string hotkey_text() = 0; // e.g. "F6"
         virtual std::string write_diagnostics() { return {}; } // returns where it was written
         virtual std::string refresh_hotkey_text() { return {}; } // e.g. "F7", empty = no hotkey
+        // Who an actor key is across reloads (character_memory.hpp), "" when unknown. Renames are
+        // stored under it, so they survive reloads.
+        virtual std::string identity_of(const std::string& key) { (void)key; return {}; }
     };
+
 
     class PanelView
     {
@@ -130,6 +135,8 @@ namespace uuepbs::ui
         static bool compact_button(const char* label, const char* icon_key);
         static float compact_button_width(const char* label, const char* icon_key);
         void draw_live_badge();
+        void draw_rename_popup();
+        std::string identity_of(const std::string& key);
         void draw_detailed();
         void draw_detailed_bones();
         void draw_detailed_morphs();
@@ -150,6 +157,11 @@ namespace uuepbs::ui
         // While the character list is open it takes the fresh nearest-first order that opening it asked for,
         // then stays put, so entries don't move under the mouse.
         bool m_target_combo_open{false};
+        char m_rename_buf[96]{};
+        std::string m_rename_key{};      // CharacterNames key being renamed
+        bool m_rename_stable{false};
+        std::string m_rename_label{};    // the game's name, shown in the rename popup
+        std::map<std::string, std::string> m_identity_cache{}; // actor key -> identity (refreshed with the list)
         Clock::time_point m_target_combo_since{};
         BodyMap m_body{};
         uint64_t m_body_revision{0};

@@ -16,6 +16,9 @@ Host-side tests (Linux/macOS/WSL with g++ 13+ or clang 17+). None of them need W
     # hook finder against a real game exe on disk (expects GON's slot 374, +0x644/+0x648)
     g++ -std=c++23 -O2 -I$S test_resolver.cpp $S/core/*.cpp -o test_resolver && ./test_resolver path/to/Roku3-Win64-Shipping.exe
 
+    # names given to characters in the window (_characters/_names.txt)
+    g++ -std=c++23 -I$S test_names.cpp $S/core/*.cpp -o test_names && ./test_names
+
     # Lua <-> DLL file bridge
     g++ -std=c++23 -I$S bridge_peer.cpp $S/core/*.cpp -o bridge_peer
     g++ -std=c++23 -I$S test_bridge.cpp $S/core/*.cpp -o test_bridge

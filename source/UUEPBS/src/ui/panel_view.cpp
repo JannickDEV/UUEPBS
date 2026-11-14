@@ -1,5 +1,6 @@
 #include "panel_view.hpp"
 
+#include "../core/character_names.hpp"
 #include "../core/rig_names.hpp"
 #include "skin.hpp"
 
@@ -50,6 +51,28 @@ namespace uuepbs::ui
         const float delta = (io.KeyShift ? fine : step) * (io.MouseWheel > 0.0f ? 1.0f : -1.0f);
         v = std::min(hi, std::max(lo, v + delta));
         return true;
+    }
+
+    std::string PanelView::identity_of(const std::string& key)
+    {
+        if (key == kPlayerActor)
+        {
+            return {};
+        }
+        for (const ActorSummary& a : m_edited)
+        {
+            if (a.key == key && !a.identity.empty())
+            {
+                return a.identity;
+            }
+        }
+        if (const auto it = m_identity_cache.find(key); it != m_identity_cache.end())
+        {
+            return it->second;
+        }
+        std::string id = m_targets ? m_targets->identity_of(key) : std::string();
+        m_identity_cache[key] = id;
+        return id;
     }
 
     void PanelView::configure(const PresetShelf* shelf, PanelHost* host, TargetSource* targets, std::string version, bool topmost)
@@ -151,6 +174,7 @@ namespace uuepbs::ui
             }
             m_target = m_targets->current_target();
             m_target_time = now;
+            m_identity_cache.clear();
         }
     }
 
@@ -542,12 +566,12 @@ namespace uuepbs::ui
         {
             return;
         }
-        Skin& sk = skin();
         const ImGuiStyle& style = ImGui::GetStyle();
         const float refresh_w = compact_button_width("Refresh", "refresh");
         const float rename_w = compact_button_width("Rename", "rename");
         ImGui::SetNextItemWidth(std::max(120.0f, ImGui::GetContentRegionAvail().x - refresh_w - rename_w - style.ItemSpacing.x * 2));
-        const std::string shown = m_target.label.empty() ? std::string("(searching...)") : m_target.label;
+        const std::string shown =
+            m_target.label.empty() ? std::string("(searching...)") : CharacterNames::instance().shown(m_target.label, m_target.key, identity_of(m_target.key));
         const bool was_open = m_target_combo_open;
         m_target_combo_open = ImGui::BeginCombo("##target", shown.c_str(), ImGuiComboFlags_HeightLarge);
         if (m_target_combo_open && !was_open)
@@ -576,11 +600,18 @@ namespace uuepbs::ui
                 {
                     ImGui::PushStyleColor(ImGuiCol_Text, accent());
                 }
-                const std::string label = t.label + (edited ? "   - edited" : "");
+                const std::string name = CharacterNames::instance().shown(t.label, t.key, identity_of(t.key));
+                const std::string label = name + (edited ? "   - edited" : "");
                 if (ImGui::Selectable(label.c_str(), t.id == m_target.id))
                 {
                     m_targets->pick_target(t.id);
-                    set_message("Switching to " + t.label);
+                    set_message("Switching to " + name);
+                }
+                if (name != t.label || !t.engine.empty())
+                {
+                    std::string tip = name != t.label ? "Game name: " + t.label : std::string();
+                    tip += t.engine.empty() ? "" : (tip.empty() ? "" : "\n") + std::string("Engine name: ") + t.engine;
+                    tooltip(tip.c_str());
                 }
                 if (edited)
                 {
@@ -593,12 +624,21 @@ namespace uuepbs::ui
         {
             std::string tip = "Whose body the sliders edit. The list shows characters currently loaded in the level, nearest first.\n"
                               "Characters you have edited are always listed and keep their sliders while you edit someone else.";
+            const std::string name = CharacterNames::instance().shown(m_target.label, m_target.key, identity_of(m_target.key));
+            if (name != m_target.label && !m_target.label.empty())
+            {
+                tip += "\n\nGame name: " + m_target.label;
+            }
+            if (!m_target.engine.empty())
+            {
+                tip += (name != m_target.label ? "\n" : "\n\n") + std::string("Engine name: ") + m_target.engine;
+            }
             std::string others;
             for (const ActorSummary& a : m_edited)
             {
                 if (!a.active)
                 {
-                    others += (others.empty() ? "" : ", ") + a.label;
+                    others += (others.empty() ? "" : ", ") + CharacterNames::instance().shown(a.label, a.key, a.identity);
                 }
             }
             if (!others.empty())
@@ -608,8 +648,18 @@ namespace uuepbs::ui
             tooltip(tip.c_str());
         }
         ImGui::SameLine();
-        compact_button("Rename", "rename");
-        tooltip("Give this character your own name (only shown here; saved with your presets).");
+        ImGui::BeginDisabled(m_target.label.empty());
+        if (compact_button("Rename", "rename"))
+        {
+            const std::string identity = identity_of(m_target.key);
+            m_rename_key = CharacterNames::key_for(m_target.key, identity, &m_rename_stable);
+            m_rename_label = m_target.label;
+            std::snprintf(m_rename_buf, sizeof(m_rename_buf), "%s", CharacterNames::instance().get(m_rename_key).c_str());
+            ImGui::OpenPopup("Rename character");
+        }
+        ImGui::EndDisabled();
+        tooltip("Give this character your own name. It is only shown in this window and saved next to your presets.");
+        draw_rename_popup();
         ImGui::SameLine();
         if (compact_button("Refresh", "refresh"))
         {
@@ -623,6 +673,63 @@ namespace uuepbs::ui
                                     (key.empty() ? std::string() : "\nHotkey: " + key + " (works in game too).");
             tooltip(tip.c_str());
         }
+    }
+
+    void PanelView::draw_rename_popup()
+    {
+        Skin& sk = skin();
+        if (!ImGui::BeginPopupModal("Rename character", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+        {
+            return;
+        }
+        ImGui::TextColored(muted(), "Game name: %s", m_rename_label.c_str());
+        if (!m_target.engine.empty())
+        {
+            ImGui::TextColored(muted(), "Engine name: %s", m_target.engine.c_str());
+        }
+        if (ImGui::IsWindowAppearing())
+        {
+            ImGui::SetKeyboardFocusHere();
+        }
+        ImGui::SetNextItemWidth(ImGui::GetFontSize() * 18.0f);
+        const bool enter = ImGui::InputTextWithHint("##rename", "Your name for this character", m_rename_buf, sizeof(m_rename_buf),
+                                                    ImGuiInputTextFlags_EnterReturnsTrue);
+        if (!m_rename_stable)
+        {
+            ImGui::PushTextWrapPos(ImGui::GetFontSize() * 18.0f);
+            ImGui::TextColored(warn(), "This character has no stable name to recognise it by after a reload, so this name lasts for this visit only.");
+            ImGui::PopTextWrapPos();
+        }
+        auto apply = [&](const std::string& name) {
+            const std::string clean = CharacterNames::clean(name);
+            const bool saved = CharacterNames::instance().set(m_rename_key, clean, m_rename_stable);
+            if (!saved)
+            {
+                set_message("Could not save the name (kept for this session)");
+            }
+            else
+            {
+                set_message(clean.empty() ? "Using the game's name again" : "Renamed to " + clean);
+            }
+            ImGui::CloseCurrentPopup();
+        };
+        if (sk.button("Save", "save") || enter)
+        {
+            apply(m_rename_buf);
+        }
+        ImGui::SameLine();
+        ImGui::BeginDisabled(CharacterNames::instance().get(m_rename_key).empty());
+        if (sk.button("Use game name", "reset"))
+        {
+            apply("");
+        }
+        ImGui::EndDisabled();
+        ImGui::SameLine();
+        if (sk.button("Cancel") || ImGui::IsKeyPressed(ImGuiKey_Escape))
+        {
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
     }
 
     bool PanelView::is_edited(const std::string& key) const
@@ -668,13 +775,19 @@ namespace uuepbs::ui
                 ImGui::TableNextRow();
                 ImGui::TableNextColumn();
                 ImGui::AlignTextToFramePadding();
+                const std::string name = CharacterNames::instance().shown(a.label, a.key, a.identity);
                 if (a.active)
                 {
-                    ImGui::TextColored(accent(), "%s (selected)", a.label.c_str());
+                    ImGui::TextColored(accent(), "%s (selected)", name.c_str());
                 }
                 else
                 {
-                    ImGui::TextUnformatted(a.label.c_str());
+                    ImGui::TextUnformatted(name.c_str());
+                }
+                if (name != a.label)
+                {
+                    const std::string tip = "Game name: " + a.label;
+                    tooltip(tip.c_str());
                 }
                 if (a.key == kPlayerActor)
                 {
@@ -706,7 +819,7 @@ namespace uuepbs::ui
                 if (sk.button("Select"))
                 {
                     m_targets->pick_target(a.pick_id);
-                    set_message("Switching to " + a.label);
+                    set_message("Switching to " + name);
                 }
                 ImGui::EndDisabled();
                 ImGui::SameLine();
@@ -1539,7 +1652,8 @@ namespace uuepbs::ui
         }
         if (ImGui::BeginPopupModal("Reset all sliders?", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
         {
-            const std::string who = m_target.label.empty() ? std::string("this character") : m_target.label;
+            const std::string who =
+                m_target.label.empty() ? std::string("this character") : CharacterNames::instance().shown(m_target.label, m_target.key, identity_of(m_target.key));
             ImGui::Text(m_morph_names.empty() ? "Set every bone of %s back to 1.0x?" : "Set every bone of %s back to 1.0x and give every morph back to the game?",
                         who.c_str());
             if (m_edited.size() > (is_edited(m_target.key) ? 1u : 0u))
@@ -1660,6 +1774,22 @@ namespace uuepbs::ui
         if (m_targets)
         {
             ImGui::TextColored(muted(), "Lua link: %s", m_targets->link_text().c_str());
+            if (!m_target.label.empty())
+            {
+                const std::string identity = identity_of(m_target.key);
+                const std::string name = CharacterNames::instance().shown(m_target.label, m_target.key, identity);
+                std::string line = "Character: " + name;
+                if (name != m_target.label)
+                {
+                    line += " (game name: " + m_target.label + ")";
+                }
+                line += "; engine name: " + (m_target.engine.empty() ? std::string("not reported by the script") : m_target.engine);
+                if (!identity.empty())
+                {
+                    line += "; remembered as: " + identity;
+                }
+                ImGui::TextColored(muted(), "%s", line.c_str());
+            }
         }
         ImGui::TextColored(muted(), "Mirroring: %s", m_mirror_text.c_str());
         ImGui::TextColored(muted(), "Simplified Panel: %zu group(s)%s; %s", m_body.groups.size(),

@@ -1,6 +1,7 @@
 // Headless run of the slider window contents with a tiny software rasterizer,
 // so the layout can be checked (and asserts caught) without Windows.
 #include "core/body_groups.hpp"
+#include "core/character_names.hpp"
 #include "core/mirror.hpp"
 #include "core/presets.hpp"
 #include "core/registry.hpp"
@@ -33,9 +34,10 @@ struct FakeTargets : ui::TargetSource
 {
     std::vector<ui::TargetChoice> targets() override
     {
-        return {{"1A2B3C", "Roku (player)", "player"}, {"4D5E6F", "Anca", "4D5E6F"}, {"778899", "Vendor", "778899"}};
+        return {{"1A2B3C", "Roku (player)", "player", "BP_Rokuv3_C_0"}, {"4D5E6F", "Anca", "4D5E6F", "BP_NPC_Guard_C_2"}, {"778899", "Vendor", "778899", "BP_NPC_Vendor_C_1"}};
     }
-    ui::TargetChoice current_target() override { return {"auto", "Roku (player)", "player"}; }
+    ui::TargetChoice current_target() override { return {"auto", "Roku (player)", "player", "BP_Rokuv3_C_0"}; }
+    std::string identity_of(const std::string& key) override { return key == "4D5E6F" ? "Anca" : ""; }
     void pick_target(const std::string&) override {}
     void refresh_targets() override {}
     void request_rescan() override {}
@@ -302,6 +304,10 @@ int main(int argc, char** argv)
     reg.set_morph("Breast_R_Lift", 0.3);
     reg.set_morph("Face_Smile", 1.0);
     reg.set_animated_morphs({"face_smile"});
+
+    // A name the user gave a remembered NPC (shown in the picker and Status > Edited characters).
+    CharacterNames::instance().set_file("/tmp/claude-uuepbs-preview/UUEPBS Presets/_characters/_names.txt");
+    CharacterNames::instance().set("Anca", "Anca the Guard", true);
 
     PresetShelf shelf;
     shelf.set_folder("/tmp/claude-uuepbs-preview/UUEPBS Presets");

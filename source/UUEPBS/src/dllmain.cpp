@@ -10,6 +10,7 @@
 // that runs Lua mods.
 #include "core/body_groups.hpp"
 #include "core/character_memory.hpp"
+#include "core/character_names.hpp"
 #include "core/bridge.hpp"
 #include "core/json.hpp"
 #include "core/morphs.hpp"
@@ -227,6 +228,23 @@ namespace
             ++m_out.rescan;
             m_out_dirty = true;
             m_retry_hook = true; // a refused hook gets another try right away
+        }
+
+        std::string identity_of(const std::string& key) override
+        {
+            std::lock_guard guard(m_lock);
+            if (m_state.target.key == key && !m_state.target.identity.empty())
+            {
+                return m_state.target.identity;
+            }
+            for (const auto& n : m_state.npcs)
+            {
+                if (n.key == key)
+                {
+                    return n.identity;
+                }
+            }
+            return {};
         }
 
         std::string refresh_hotkey_text() override
@@ -748,6 +766,7 @@ namespace
                 migrate_presets(dir);
                 m_shelf.set_folder(dir);
                 m_characters.set_folder(dir / L"_characters"); // remembered NPC sliders, one file per identity
+                uuepbs::CharacterNames::instance().set_file(dir / L"_characters" / uuepbs::CharacterNames::kFileName); // names given in the window
                 m_characters.set_log([](const std::string& t) { g_log.line(t); });
                 m_shelf_source = folder;
                 g_log.line("presets folder: " + uuepbs::path_to_utf8(m_shelf.folder()));
