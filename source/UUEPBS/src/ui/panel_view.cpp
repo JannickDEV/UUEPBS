@@ -3,6 +3,7 @@
 #include "../core/proportions.hpp"
 
 #include "../core/character_names.hpp"
+#include "../core/looks.hpp"
 #include "../core/rig_names.hpp"
 #include "portraits.hpp"
 #include "skin.hpp"
@@ -470,6 +471,11 @@ namespace uuepbs::ui
             if (tab("Character Scale###scale", "scale", Tab::Scale))
             {
                 draw_scale();
+                ImGui::EndTabItem();
+            }
+            if (tab("Looks###looks", "looks", Tab::Looks))
+            {
+                draw_looks();
                 ImGui::EndTabItem();
             }
             if (tab("Presets###presets", "presets", Tab::Presets))
@@ -2201,11 +2207,12 @@ namespace uuepbs::ui
         }
         sk.end_child();
 
-        ImGui::BeginDisabled(m_morphs.empty());
+        ImGui::BeginDisabled(m_morphs.size() == looks::count(m_morphs)); // look:* entries are not morphs
         if (sk.button("Reset all morphs", "reset"))
         {
-            Registry::instance().clear_morphs();
-            m_morphs.clear();
+            // Looks ride along in the morph book (looks.hpp); this button leaves them alone.
+            m_morphs = looks::only_looks(Registry::instance().morphs());
+            Registry::instance().replace_morphs(m_morphs);
             m_morph_revision = Registry::instance().morph_revision();
             set_message("All morphs given back to the game");
         }
@@ -2231,6 +2238,7 @@ namespace uuepbs::ui
         std::string message;
         if (m_shelf && m_shelf->load(name, book, message, &morphs))
         {
+            looks::keep_when_absent(morphs, Registry::instance().morphs());
             Registry::instance().replace_edits(std::move(book));
             Registry::instance().replace_morphs(std::move(morphs));
             std::snprintf(m_preset_name, sizeof(m_preset_name), "%s", name.c_str());
@@ -2501,8 +2509,10 @@ namespace uuepbs::ui
         const std::string apply = "Apply to " + who;
         if (sk.button(apply.c_str(), "load"))
         {
+            MorphBook morphs = m_import->morphs;
+            looks::keep_when_absent(morphs, Registry::instance().morphs()); // a code without looks keeps them, like a preset
             Registry::instance().replace_edits(m_import->bones);
-            Registry::instance().replace_morphs(m_import->morphs);
+            Registry::instance().replace_morphs(std::move(morphs));
             set_message("Applied the pasted code to " + who + " (" + m_import->summary + ")");
         }
         ImGui::SameLine();
@@ -2651,7 +2661,7 @@ namespace uuepbs::ui
         ImGui::TextColored(muted(), "Simplified Panel: %zu group(s)%s; %s", m_body.groups.size(),
                            m_body.style.empty() ? "" : (", " + m_body.style + " rig").c_str(), m_body_status.c_str());
         ImGui::TextColored(muted(), "Morphs: %zu on the meshes%s, %zu set; game profile: %s", m_morph_names.size(),
-                           m_morphs_hidden ? (" (+" + std::to_string(m_morphs_hidden) + " hidden by ExcludeMorphs)").c_str() : "", m_morphs.size(),
+                           m_morphs_hidden ? (" (+" + std::to_string(m_morphs_hidden) + " hidden by ExcludeMorphs)").c_str() : "", m_morphs.size() - looks::count(m_morphs),
                            m_morph_status.c_str());
         const std::string renderer = m_host->renderer_text();
         if (!renderer.empty())

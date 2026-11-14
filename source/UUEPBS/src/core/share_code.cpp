@@ -2,6 +2,7 @@
 
 #include "json.hpp"
 #include "presets.hpp"
+#include "looks.hpp"
 #include "proportions.hpp"
 
 #include <array>
@@ -198,7 +199,9 @@ namespace uuepbs::share
 
     std::string compact_json(const EditBook& bones, const MorphBook* morphs, const std::string& name)
     {
-        const bool with_morphs = morphs && !morphs->empty();
+        // Looks ("look:" entries) get their own object, like in preset files; the rest are morph targets.
+        const size_t look_count = morphs ? looks::count(*morphs) : 0;
+        const bool with_morphs = morphs && morphs->size() > look_count;
         std::string out = "{\"format\":\"UUEPBS preset\",\"version\":";
         out += with_morphs ? "3" : "2";
         if (!name.empty())
@@ -274,9 +277,29 @@ namespace uuepbs::share
             bool first_morph = true;
             for (const auto& [key, m] : *morphs)
             {
+                if (looks::is_look(key))
+                {
+                    continue;
+                }
                 out += first_morph ? "" : ",";
                 first_morph = false;
                 out += escape(m.name) + ":" + number(clamp_morph(m.weight));
+            }
+            out += "}";
+        }
+        if (look_count > 0)
+        {
+            out += ",\"looks\":{";
+            bool first_look = true;
+            for (const auto& [key, m] : *morphs)
+            {
+                if (!looks::is_look(key))
+                {
+                    continue;
+                }
+                out += first_look ? "" : ",";
+                first_look = false;
+                out += escape(looks::id_of(key)) + ":" + number(clamp_morph(m.weight));
             }
             out += "}";
         }

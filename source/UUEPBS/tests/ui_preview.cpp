@@ -2,6 +2,7 @@
 // so the layout can be checked (and asserts caught) without Windows.
 #include "core/body_groups.hpp"
 #include "core/character_names.hpp"
+#include "core/looks.hpp"
 #include "core/mirror.hpp"
 #include "core/preset_library.hpp"
 #include "core/presets.hpp"
@@ -390,6 +391,10 @@ int main(int argc, char** argv)
     reg.set_morph("Breast_R_Lift", 0.3);
     reg.set_morph("Face_Smile", 1.0);
     reg.set_animated_morphs({"face_smile"});
+    // Looks tab: a tan and some sweat, and what the script reported back.
+    reg.set_morph("look:skin.tone", -1.25);
+    reg.set_morph("look:skin.sweat", 1.5);
+    looks::Report::instance().set({{"player", "2 meshes: 4 skin slots changed (tint, roughness); hair: no slots found on these meshes"}});
 
     // A name the user gave a remembered NPC (shown in the picker and Status > Edited characters).
     CharacterNames::instance().set_file("/tmp/claude-uuepbs-preview/UUEPBS Presets/_characters/_names.txt");
@@ -487,6 +492,7 @@ int main(int argc, char** argv)
                           {ui::PanelView::Tab::Presets, -1, "preview_presets_list.ppm", false, 1},
                           {ui::PanelView::Tab::Presets, -1, "preview_presets_search.ppm", false, 2},
                           {ui::PanelView::Tab::Status, -1, "preview_status.ppm"},
+                          {ui::PanelView::Tab::Looks, -1, "preview_looks.ppm"},
                           {ui::PanelView::Tab::Simplified, -1, "preview_chooser.ppm", true}};
 
     ui::SoftRenderer soft;

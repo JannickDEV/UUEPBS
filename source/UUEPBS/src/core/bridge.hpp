@@ -21,6 +21,7 @@
 //     ref <tab> <10 numbers per bone, space separated>   (optional: qx qy qz qw tx ty tz sx sy sz)
 //     morphs <tab> <name> <tab> <name> ...             (optional: the rig's morph targets)
 //     manim <tab> <name> <tab> <name> ...              (optional: morphs something else keeps setting)
+//     looks <tab> <actor key> <tab> <text>             (optional: what the Looks tab changed on that character)
 //     cmd <tab> <id> <tab> <verb> <tab> <argument>
 //     #end <seq>
 //
@@ -111,6 +112,7 @@ namespace uuepbs::bridge
         std::vector<NpcSighting> npcs;            // remembered characters Lua found
         std::string switch_who;                   // Character Switch Watcher: who the player character is (its face mesh)
         std::vector<NpcSighting> party;           // ... and NPCs that are a party member (key, who = face mesh, label)
+        std::map<std::string, std::string> looks; // actor key -> what Looks changed there (looks.hpp)
 
         std::string setting(const std::string& key, const std::string& fallback = {}) const
         {

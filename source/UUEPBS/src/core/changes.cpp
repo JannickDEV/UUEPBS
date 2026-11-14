@@ -1,8 +1,10 @@
 #include "changes.hpp"
 
+#include "looks.hpp"
 #include "proportions.hpp"
 #include "rig_names.hpp"
 
+#include <cctype>
 #include <map>
 #include <set>
 
@@ -131,6 +133,30 @@ namespace uuepbs
             MorphChange c;
             c.name = m.name;
             c.weight = m.weight;
+            if (looks::is_look(key))
+            {
+                // Looks tab value (a "look:" entry, not a morph target): its slider name, always applicable.
+                const looks::Control* ctl = looks::find(looks::id_of(key));
+                if (ctl)
+                {
+                    // "Skin tone" stays; "Hue" becomes "Hair hue"
+                    const std::string cat = ctl->category;
+                    std::string title = ctl->title;
+                    if (title.rfind(cat, 0) != 0)
+                    {
+                        title[0] = static_cast<char>(std::tolower(static_cast<unsigned char>(title[0])));
+                        title = cat + " " + title;
+                    }
+                    c.name = title;
+                }
+                else
+                {
+                    c.name = looks::id_of(key);
+                }
+                c.group = "Looks";
+                out.morphs.push_back(std::move(c));
+                continue;
+            }
             const auto g = group_of.find(key);
             if (g != group_of.end())
             {

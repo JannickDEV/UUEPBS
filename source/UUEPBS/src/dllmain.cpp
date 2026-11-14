@@ -16,6 +16,7 @@
 #include "ui/portraits.hpp"
 #include "core/bridge.hpp"
 #include "core/json.hpp"
+#include "core/looks.hpp"
 #include "core/morphs.hpp"
 #include "core/preset_cycle.hpp"
 #include "core/presets.hpp"
@@ -421,6 +422,7 @@ namespace
             std::string text;
             if (m_shelf.load(name, book, message, &morphs))
             {
+                uuepbs::looks::keep_when_absent(morphs, reg.morphs()); // like "ubs load": a preset without looks keeps them
                 reg.replace_edits(std::move(book));
                 reg.replace_morphs(std::move(morphs));
                 text = "Preset " + uuepbs::PresetCycle::position(names, name) + ": " + name + " (" + message + ")";
@@ -1108,6 +1110,7 @@ namespace
                 }
             }
             reg.set_animated_morphs(std::move(animated));
+            uuepbs::looks::Report::instance().set(state.looks);
         }
 
         Clock::time_point last_publish()
@@ -1368,6 +1371,7 @@ namespace
                     uuepbs::MorphBook morphs;
                     if (m_shelf.load(c.argument, book, message, &morphs))
                     {
+                        uuepbs::looks::keep_when_absent(morphs, reg.morphs());
                         reg.replace_edits(std::move(book));
                         reg.replace_morphs(std::move(morphs));
                     }

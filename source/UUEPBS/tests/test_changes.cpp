@@ -2,6 +2,7 @@
 // Simplified Panel's "Changed only" filter and the preset details (core/changes).
 #include "core/changes.hpp"
 #include "core/history.hpp"
+#include "core/looks.hpp"
 #include "core/presets.hpp"
 #include "core/proportions.hpp"
 #include "core/rig_names.hpp"
@@ -240,6 +241,12 @@ static void test_changes()
     const EditSummary sc = summarize_edits(scaled, none, body, morph_groups, skeleton, morph_names);
     CHECK(sc.bones == 1 && sc.missing.empty() && sc.other_bones.size() == 1);
     CHECK(!sc.other_bones.empty() && sc.other_bones[0].title == "Height" && std::fabs(sc.other_bones[0].scale - 1.1) < 1e-9);
+
+    // Looks are listed under "Looks" by their slider name and are never reported as missing morphs.
+    MorphBook tan;
+    looks::put(tan, *looks::find("skin.tone"), -1.0f);
+    const EditSummary lk = summarize_edits(only, tan, body, morph_groups, skeleton, morph_names);
+    CHECK(lk.morphs.size() == 1 && lk.morphs[0].present && lk.morphs[0].group == "Looks" && lk.morphs[0].name == "Skin tone");
 }
 
 int main()

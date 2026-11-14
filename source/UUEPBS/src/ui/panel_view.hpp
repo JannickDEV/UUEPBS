@@ -4,7 +4,7 @@
 // headless (tests, screenshots) and the host stays small.
 //
 // Tabs: Simplified Panel (curated body-part sliders, plus morph groups from the game
-// profile), Detailed Panel (every bone, and every morph target), Presets, Status.
+// profile), Looks (skin and hair), Detailed Panel (every bone, and every morph target), Presets, Status.
 // Every widget is drawn through ui::skin(), so a window skin can restyle all of it.
 #pragma once
 
@@ -107,6 +107,7 @@ namespace uuepbs::ui
             Presets,
             Status,
             Scale, // Character Scale (2.8), drawn after Body
+            Looks, // skin and hair (looks_view.cpp), drawn after Character Scale
         };
         enum class Detail
         {
@@ -207,6 +208,10 @@ namespace uuepbs::ui
         ImTextureData* portrait_or_request(const std::string& id, const std::string& key, const std::string& identity, const std::string& label,
                                            const std::string& engine);
         static std::string portrait_stem(const std::string& key, const std::string& identity, const std::string& label, const std::string& engine);
+        // Looks tab (looks_view.cpp): skin and hair recoloured through the outfit's own materials.
+        void draw_looks();
+        void draw_looks_rail(float width);
+        void draw_looks_category(const char* category);
         void draw_detailed();
         void draw_detailed_bones();
         void draw_detailed_morphs();
@@ -302,6 +307,7 @@ namespace uuepbs::ui
         std::map<std::string, bool> m_group_open{};
         std::string m_category{}; // Simplified Panel category shown on the right
         std::string m_scale_section{}; // Character Scale section shown on the right
+        std::string m_look_category{"Skin"}; // Looks tab category shown on the right
         std::map<std::string, Spread> m_spread_hint{};
         char m_filter[64]{};
         bool m_only_edited{false};

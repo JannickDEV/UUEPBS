@@ -51,6 +51,7 @@ add_library(UUEPBS SHARED
     src/core/changes.cpp
     src/core/character_memory.cpp
     src/core/history.cpp
+    src/core/looks.cpp
     src/core/bridge.cpp
     src/core/mirror.cpp
     src/core/morphs.cpp
@@ -65,6 +66,7 @@ add_library(UUEPBS SHARED
     src/core/share_code.cpp
     src/core/symmetry.cpp
     src/ui/image_decode.cpp
+    src/ui/looks_view.cpp
     src/ui/panel_view.cpp
     src/ui/portraits.cpp
     src/ui/skin.cpp

@@ -125,7 +125,7 @@ local profileFileName = profileKey:gsub('[<>:"/\\|?*]', "_") .. ".json"
 local profileFile = profileDir .. "\\" .. profileFileName
 local legacyProfileFile = modsDir .. "\\" .. LEGACY_MOD_FOLDER .. "\\Scripts\\GameProfiles\\" .. profileFileName
 local PROFILE_ORDER = { "Project", "Game", "Target", "TargetClassPath", "TargetPrefer", "PrimaryComponent", "IncludeComponents", "ExcludeComponents",
-    "SameSkeletonOnly", "WorldMeshSearch", "BodyGroups", "MorphGroups", "ExcludeMorphs", "Names", "Hook", "_help" }
+    "SameSkeletonOnly", "WorldMeshSearch", "BodyGroups", "MorphGroups", "ExcludeMorphs", "Names", "Looks", "Hook", "_help" }
 local PROFILE_HELP = "Target: actor class to edit (empty = the pawn you control). TargetClassPath: optional full path of that class. "
     .. "TargetPrefer: when several actors of the Target class exist, the default is the one with the lowest value of this "
     .. "number property (e.g. a fighting game's PlayerNumber, 0 = player 1). "
@@ -2678,6 +2678,9 @@ local function build_state()
     if animatedText ~= "" then
         add("manim\t" .. animatedText)
     end
+    if late.looks then
+        add(late.looks.report())
+    end
     for _, c in ipairs(pendingCommands) do
         add("cmd\t" .. c.id .. "\t" .. clean(c.verb) .. "\t" .. clean(c.arg))
     end
@@ -2943,6 +2946,33 @@ if Config.AutoPortraits ~= false or Config.PresetThumbnails ~= false then
     end
 end
 
+-- Looks (uuepbs_looks.lua): skin and hair recoloured through the outfit's own material parameters.
+-- The DLL sends them with the morph weights as "look:<id>" names. Kept in `late` (local limit).
+late.apply_looks = function() end
+if Config.Looks ~= false then
+    local okL, mod = pcall(require, "uuepbs_looks")
+    if okL and type(mod) == "table" then
+        late.looks = mod
+        mod.setup({
+            say = say,
+            chatter = chatter,
+            profile = function()
+                return Profile
+            end,
+        })
+        late.apply_looks = function()
+            local okA, changed = pcall(mod.apply, rigs, morphWanted)
+            if not okA then
+                say("looks: %s", tostring(changed))
+            elseif changed then
+                stateDirty = true
+            end
+        end
+    else
+        say("looks off: %s", tostring(mod))
+    end
+end
+
 local function tick()
     local ok, err = pcall(function()
         if pendingProfileText then
@@ -2999,8 +3029,12 @@ local function tick()
         end
         if morphDirty then
             apply_morphs()
+            late.apply_looks()
         elseif next(morphApplied) ~= nil then
             watch_morphs()
+        end
+        if late.looks and late.looks.active() and late.looks.watch() then
+            late.apply_looks() -- the game re-dressed a recoloured slot
         end
         write_state()
         if late.portraits and windowOpen then
@@ -3024,6 +3058,7 @@ local function morph_tick()
         read_dll_state()
         if morphDirty then
             apply_morphs()
+            late.apply_looks()
         end
     end)
     if not ok then

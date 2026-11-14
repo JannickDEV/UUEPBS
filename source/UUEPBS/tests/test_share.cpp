@@ -1,6 +1,7 @@
 // Preset share codes (core/share_code.*) and the next/previous preset hotkey order (core/preset_cycle.hpp).
 //   g++ -std=c++23 -I../src test_share.cpp ../src/core/*.cpp -o test_share && ./test_share
 #include "core/preset_cycle.hpp"
+#include "core/looks.hpp"
 #include "core/presets.hpp"
 #include "core/proportions.hpp"
 #include "core/share_code.hpp"
@@ -240,11 +241,32 @@ static void test_proportions()
     CHECK(share::decode(share::encode(only, nullptr), d, msg) && near(scale_value(d.bones, "height"), 0.95));
 }
 
+// Looks ("look:" entries in the morph book) travel in a "looks" object, like in preset files.
+static void test_looks()
+{
+    const EditBook book = sample_book();
+    MorphBook morphs = sample_morphs();
+    looks::put(morphs, *looks::find("skin.tone"), -1.5f);
+    looks::put(morphs, *looks::find("hair.lightness"), 0.5f);
+    const std::string code = share::encode(book, &morphs, "tan");
+    share::Decoded d;
+    std::string msg;
+    CHECK(share::decode(code, d, msg));
+    CHECK(looks::count(d.morphs) == 2 && d.morphs.size() == 4);
+    CHECK(near(looks::value_of(d.morphs, *looks::find("skin.tone")), -1.5));
+    CHECK(near(looks::value_of(d.morphs, *looks::find("hair.lightness")), 0.5));
+    // looks only: still a usable code
+    MorphBook only;
+    looks::put(only, *looks::find("skin.sweat"), 1.0f);
+    CHECK(share::decode(share::encode(EditBook{}, &only), d, msg) && looks::count(d.morphs) == 1 && d.morphs.size() == 1);
+}
+
 int main()
 {
     test_base64_and_crc();
     test_round_trip();
     test_proportions();
+    test_looks();
     test_rejects();
     test_cycle();
     if (g_fail)
