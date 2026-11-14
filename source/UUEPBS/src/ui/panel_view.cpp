@@ -278,96 +278,6 @@ namespace uuepbs::ui
         m_morph_revision = reg.morph_revision();
     }
 
-    bool PanelView::size_slider(const char* id, BoneEdit& s, float lo, float hi, const char* format)
-    {
-        const double avg = (s.axis[0] + s.axis[1] + s.axis[2]) / 3.0;
-        float v = static_cast<float>(avg);
-        const bool dragged = skin().slider_float(id, &v, lo, hi, format, ImGuiSliderFlags_Logarithmic);
-        const bool nudged = wheel_nudge(v, 0.01f, 0.001f, lo, hi);
-        if (!dragged && !nudged)
-        {
-            return false;
-        }
-        const bool uniform = std::fabs(s.axis[0] - s.axis[1]) < 1e-6 && std::fabs(s.axis[1] - s.axis[2]) < 1e-6;
-        if (uniform || avg <= 1e-6)
-        {
-            s.axis[0] = s.axis[1] = s.axis[2] = v;
-        }
-        else
-        {
-            const double k = v / avg;
-            for (double& a : s.axis)
-            {
-                a *= k;
-            }
-        }
-        return true;
-    }
-
-    bool PanelView::axis_sliders(BoneEdit& s)
-    {
-        static const char* names[3] = {"Length (X)", "Width (Y)", "Depth (Z)"};
-        bool changed = false;
-        for (int a = 0; a < 3; ++a)
-        {
-            float v = static_cast<float>(s.axis[a]);
-            ImGui::PushID(a);
-            ImGui::SetNextItemWidth(-ImGui::CalcTextSize("Length (X)").x - ImGui::GetStyle().ItemInnerSpacing.x * 2);
-            if (skin().slider_float(names[a], &v, kScaleMin, kScaleMax, "%.3fx", ImGuiSliderFlags_Logarithmic))
-            {
-                s.axis[a] = v;
-                changed = true;
-            }
-            if (wheel_nudge(v, 0.01f, 0.001f, kScaleMin, kScaleMax))
-            {
-                s.axis[a] = v;
-                changed = true;
-            }
-            ImGui::PopID();
-        }
-        return changed;
-    }
-
-    // Shared layout for a labelled three-row slider block.
-    static bool triple_sliders(const char* const labels[3], double (&v)[3], float lo, float hi, const char* format, float step, float fine)
-    {
-        bool changed = false;
-        for (int a = 0; a < 3; ++a)
-        {
-            float f = static_cast<float>(v[a]);
-            ImGui::PushID(labels[a]);
-            ImGui::SetNextItemWidth(-ImGui::CalcTextSize("Length (X)").x - ImGui::GetStyle().ItemInnerSpacing.x * 2);
-            const bool dragged = skin().slider_float(labels[a], &f, lo, hi, format);
-            if (dragged || wheel_nudge(f, step, fine, -BoneEdit::kMaxShift * 10.0f, BoneEdit::kMaxShift * 10.0f))
-            {
-                v[a] = f;
-                changed = true;
-            }
-            ImGui::PopID();
-        }
-        return changed;
-    }
-
-    bool PanelView::turn_sliders(BoneEdit& s)
-    {
-        static const char* const labels[3] = {"Roll (X)", "Pitch (Y)", "Yaw (Z)"};
-        return triple_sliders(labels, s.turn, -180.0f, 180.0f, "%.1f\xC2\xB0", 1.0f, 0.1f);
-    }
-
-    bool PanelView::shift_sliders(BoneEdit& s)
-    {
-        static const char* const labels[3] = {"Along (X)", "Side (Y)", "Up (Z)"};
-        return triple_sliders(labels, s.shift, -20.0f, 20.0f, "%.2f cm", 0.1f, 0.01f);
-    }
-
-    bool PanelView::morph_slider(const char* id, float& v, const char* format)
-    {
-        const bool dragged = skin().slider_float(id, &v, kMorphSliderMin, kMorphSliderMax, format);
-        const bool nudged = wheel_nudge(v, 0.05f, 0.01f, static_cast<float>(kMorphMin), static_cast<float>(kMorphMax));
-        v = static_cast<float>(clamp_morph(v)); // typed values (Ctrl+click) may leave 0..1
-        return dragged || nudged;
-    }
-
     void PanelView::tooltip(const char* text)
     {
         if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort) && text && *text)
@@ -375,6 +285,76 @@ namespace uuepbs::ui
             ImGui::SetTooltip("%s", text);
         }
     }
+
+    namespace
+    {
+        float dpi_px(float v) { return v * ImGui::GetStyle().FontScaleDpi; }
+
+        ImU32 u32(const ImVec4& c) { return ImGui::GetColorU32(c); }
+
+        // Small filled square in front of labels (drawn: fonts may lack the glyph).
+        void square_bullet(ImDrawList* dl, ImVec2 centre, float size, ImU32 col)
+        {
+            const float h = std::floor(size * 0.5f);
+            dl->AddRectFilled(ImVec2(std::floor(centre.x) - h, std::floor(centre.y) - h), ImVec2(std::floor(centre.x) + h, std::floor(centre.y) + h), col);
+        }
+
+        // Up to three letters/digits of the name, upper case ("Roku (player)" -> "ROK").
+        std::string monogram(const std::string& name)
+        {
+            std::string out;
+            for (const char ch : name)
+            {
+                if (ch == '(')
+                {
+                    break;
+                }
+                if ((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9'))
+                {
+                    out.push_back(ch >= 'a' && ch <= 'z' ? static_cast<char>(ch - 'a' + 'A') : ch);
+                    if (out.size() == 3)
+                    {
+                        break;
+                    }
+                }
+            }
+            return out.empty() ? std::string("?") : out;
+        }
+
+        // Text cut to `max_w` with "..." (byte-wise; fine for the names shown here).
+        std::string fit_text(const std::string& text, float max_w)
+        {
+            if (ImGui::CalcTextSize(text.c_str()).x <= max_w)
+            {
+                return text;
+            }
+            const float dots = ImGui::CalcTextSize("...").x;
+            std::string out = text;
+            while (!out.empty() && ImGui::CalcTextSize(out.c_str()).x + dots > max_w)
+            {
+                out.pop_back();
+                while (!out.empty() && (static_cast<unsigned char>(out.back()) & 0xC0) == 0x80)
+                {
+                    out.pop_back(); // whole UTF-8 characters only
+                }
+                if (!out.empty() && (static_cast<unsigned char>(out.back()) & 0xC0) == 0xC0)
+                {
+                    out.pop_back();
+                }
+            }
+            return out + "...";
+        }
+
+        // Monogram frame (portrait stand-in): dark square, 1px border, letters centred.
+        void monogram_frame(ImDrawList* dl, ImVec2 a, ImVec2 b, const std::string& letters, float font_size, ImU32 fill, ImU32 border, ImU32 text)
+        {
+            dl->AddRectFilled(a, b, fill);
+            dl->AddRect(a, b, border, 0.0f, 0, 1.0f);
+            ImFont* font = ImGui::GetFont();
+            const ImVec2 ts = font->CalcTextSizeA(font_size, FLT_MAX, 0.0f, letters.c_str());
+            dl->AddText(font, font_size, ImVec2(std::floor((a.x + b.x - ts.x) * 0.5f), std::floor((a.y + b.y - ts.y) * 0.5f)), text, letters.c_str());
+        }
+    } // namespace
 
     void PanelView::draw()
     {
@@ -393,28 +373,51 @@ namespace uuepbs::ui
         sk.draw_window_background();
 
         draw_header();
-        if (ImGui::BeginTabBar("##tabs"))
+
+        // Flush rectangular tabs on one 1px line; the selected tab is filled and gets a top accent line.
+        const ImGuiStyle& style = ImGui::GetStyle();
+        const ImVec2 tab_pad(dpi_px(22.0f), dpi_px(9.0f));
+        const float tabs_y = ImGui::GetCursorScreenPos().y;
+        const float tab_h = ImGui::GetFontSize() + tab_pad.y * 2.0f;
         {
-            auto tab_flags = [this](Tab tab) {
-                return m_focus_tab == static_cast<int>(tab) ? ImGuiTabItemFlags_SetSelected : ImGuiTabItemFlags_None;
+            const float x0 = ImGui::GetWindowPos().x, x1 = x0 + ImGui::GetWindowWidth();
+            ImGui::GetWindowDrawList()->AddLine(ImVec2(x0, tabs_y + tab_h - 0.5f), ImVec2(x1, tabs_y + tab_h - 0.5f), u32(sk.color(Role::Border)), 1.0f);
+        }
+        ImGui::PushStyleVar(ImGuiStyleVar_TabBarBorderSize, 0.0f);
+        ImGui::PushStyleVar(ImGuiStyleVar_TabBarOverlineSize, dpi_px(2.0f));
+        ImGui::PushStyleVar(ImGuiStyleVar_ItemInnerSpacing, ImVec2(0.0f, style.ItemInnerSpacing.y));
+        const bool tabs = ImGui::BeginTabBar("##tabs", ImGuiTabBarFlags_DrawSelectedOverline);
+        ImGui::PopStyleVar(3);
+        if (tabs)
+        {
+            auto tab = [&](const char* label, const char* icon, Tab t) {
+                ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, tab_pad);
+                (void)icon; // text-only tabs since 2.7 (skins may still define the icon keys; they are ignored here)
+                const bool open = sk.begin_tab_item(label, {}, m_focus_tab == static_cast<int>(t) ? ImGuiTabItemFlags_SetSelected : ImGuiTabItemFlags_None);
+                ImGui::PopStyleVar();
+                if (open)
+                {
+                    ImGui::Dummy(ImVec2(0.0f, dpi_px(6.0f)));
+                }
+                return open;
             };
-            // The ### ids (and icon keys) stay the same as before 2.5 so skins and saved focus keep working.
-            if (sk.begin_tab_item("Body###simplified", "simplified", tab_flags(Tab::Simplified)))
+            // The ### ids (and icon keys) stay as before so skins and saved focus keep working.
+            if (tab("Body###simplified", "simplified", Tab::Simplified))
             {
                 draw_simplified();
                 ImGui::EndTabItem();
             }
-            if (sk.begin_tab_item("Presets###presets", "presets", tab_flags(Tab::Presets)))
+            if (tab("Presets###presets", "presets", Tab::Presets))
             {
                 draw_presets();
                 ImGui::EndTabItem();
             }
-            if (sk.begin_tab_item("Advanced###detailed", "detailed", tab_flags(Tab::Detailed)))
+            if (tab("Advanced###detailed", "detailed", Tab::Detailed))
             {
                 draw_detailed();
                 ImGui::EndTabItem();
             }
-            if (sk.begin_tab_item("Status###status", "status", tab_flags(Tab::Status)))
+            if (tab("Status###status", "status", Tab::Status))
             {
                 draw_status();
                 ImGui::EndTabItem();
@@ -429,114 +432,47 @@ namespace uuepbs::ui
         }
     }
 
-    // Small coloured dot + one or two words; the full sentence is in the tooltip.
-    void PanelView::draw_live_badge()
-    {
-        size_t live = 0;
-        for (const auto& r : m_rigs)
-        {
-            live += (!r.stale && r.frames > 0) ? 1 : 0;
-        }
-        const char* word = "Live";
-        ImVec4 col = good();
-        std::string tip;
-        char buf[256];
-        if (m_skeleton.names.empty())
-        {
-            word = "No character";
-            col = warn();
-            tip = "No character found yet. Pick one in the list or press Refresh.";
-        }
-        else if (!m_host->hook_active())
-        {
-            word = "Waiting";
-            col = warn();
-            std::snprintf(buf, sizeof(buf), "Found %s - waiting for the pose hook (see Status)",
-                          m_skeleton.owner.empty() ? m_skeleton.label.c_str() : m_skeleton.owner.c_str());
-            tip = buf;
-        }
-        else if (live == 0)
-        {
-            word = "Waiting";
-            col = warn();
-            std::snprintf(buf, sizeof(buf), "Tracking %zu mesh%s - waiting for an animated frame", m_rigs.size(), m_rigs.size() == 1 ? "" : "es");
-            tip = buf;
-        }
-        else
-        {
-            std::snprintf(buf, sizeof(buf), "Live on %zu mesh%s - %s, %zu bones, %zu morphs", live, live == 1 ? "" : "es", m_skeleton.label.c_str(),
-                          m_skeleton.names.size(), m_morph_names.size());
-            tip = buf;
-        }
-        const float r = ImGui::GetFontSize() * 0.22f;
-        ImGui::AlignTextToFramePadding();
-        const ImVec2 p = ImGui::GetCursorScreenPos();
-        const float cy = p.y + ImGui::GetFrameHeight() * 0.5f;
-        ImGui::GetWindowDrawList()->AddCircleFilled(ImVec2(p.x + r, cy), r, ImGui::GetColorU32(col));
-        ImGui::Dummy(ImVec2(r * 2.0f, ImGui::GetFrameHeight()));
-        ImGui::SameLine(0.0f, ImGui::GetStyle().ItemInnerSpacing.x);
-        ImGui::AlignTextToFramePadding();
-        ImGui::TextColored(col, "%s", word);
-        tooltip(tip.c_str());
-    }
-
-    // Compact header: title row (logo, version, live badge, Enabled), then the character row.
+    // Title row: "UUEPBS" + version line on the left, Enabled on the right; then the character banner.
     void PanelView::draw_header()
     {
         Skin& sk = skin();
-        const float base = ImGui::GetStyle().FontSizeBase;
-        sk.draw_header_strip(std::max(ImGui::GetFontSize() * 1.18f, ImGui::GetFrameHeight()));
-        if (!sk.logo(ImGui::GetFontSize()))
+        const ImGuiStyle& style = ImGui::GetStyle();
+        const float base = style.FontSizeBase;
+        const ImVec2 top = ImGui::GetCursorScreenPos();
+        sk.draw_header_strip(base * style.FontScaleDpi * 2.4f);
+        ImGui::BeginGroup();
+        if (!sk.logo(ImGui::GetFontSize() * 1.25f))
         {
-            ImGui::PushFont(nullptr, base * 1.18f);
+            ImGui::PushFont(nullptr, base * 1.9f);
             ImGui::PushStyleColor(ImGuiCol_Text, sk.color(Role::Title));
             ImGui::TextUnformatted("UUEPBS");
             ImGui::PopStyleColor();
             ImGui::PopFont();
         }
-        ImGui::SameLine();
-        ImGui::AlignTextToFramePadding();
-        ImGui::TextColored(muted(), "%s", m_version.c_str());
-
-        std::string message;
+        ImGui::PushFont(nullptr, base * 0.72f);
+        std::string sub = m_version + "   \xC2\xB7   BY XTGMODS";
+        for (char& c : sub)
         {
-            std::lock_guard guard(m_message_lock);
-            if (Clock::now() - m_message_time < std::chrono::seconds(6))
-            {
-                message = m_message;
-            }
+            c = (c >= 'a' && c <= 'z') ? static_cast<char>(c - 'a' + 'A') : c;
         }
+        ImGui::TextColored(muted(), "%s", sub.c_str());
+        ImGui::PopFont();
+        ImGui::EndGroup();
+        const ImVec2 below = ImGui::GetCursorScreenPos();
+        const float title_h = below.y - top.y;
 
-        const ImGuiStyle& style = ImGui::GetStyle();
         const float box = ImGui::GetFrameHeight() + ImGui::CalcTextSize("Enabled").x + style.ItemInnerSpacing.x;
-        const float badge = ImGui::GetFontSize() * 0.44f + style.ItemInnerSpacing.x + ImGui::CalcTextSize("No character").x;
-        const float right = box + badge + style.ItemSpacing.x * 2.0f;
-        ImGui::SameLine();
-        const float msg_room = ImGui::GetContentRegionAvail().x - right;
-        if (!message.empty() && msg_room > ImGui::GetFontSize() * 3.0f)
-        {
-            // Latest action ("Loaded 'Curvy'...") between the title and the badge, cut to fit.
-            ImGui::AlignTextToFramePadding();
-            const ImVec2 p = ImGui::GetCursorScreenPos();
-            ImGui::PushClipRect(p, ImVec2(p.x + msg_room, p.y + ImGui::GetFrameHeight()), true);
-            ImGui::TextColored(accent(), "%s", message.c_str());
-            ImGui::PopClipRect();
-            tooltip(message.c_str());
-            ImGui::SameLine();
-        }
-        ImGui::SetCursorPosX(ImGui::GetWindowContentRegionMax().x - right + style.ItemSpacing.x);
-        draw_live_badge();
-        ImGui::SameLine();
-        ImGui::SetCursorPosX(ImGui::GetWindowContentRegionMax().x - box);
+        ImGui::SetCursorScreenPos(ImVec2(ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMax().x - box, top.y + (title_h - ImGui::GetFrameHeight()) * 0.5f));
         bool on = Registry::instance().enabled();
         if (sk.checkbox("Enabled", &on))
         {
             Registry::instance().set_enabled(on);
         }
         tooltip("Turn every slider on or off at once (nothing is lost).");
+        ImGui::SetCursorScreenPos(below);
+        ImGui::Dummy(ImVec2(0.0f, dpi_px(4.0f)));
 
         draw_target_picker();
-        ImGui::Spacing();
     }
 
     bool PanelView::compact_button(const char* label, const char* icon_key)
@@ -560,119 +496,343 @@ namespace uuepbs::ui
         return sk.button_width(label, icon_key);
     }
 
+    // The character banner replaces the old drop-down: who is being edited, and the way to change it.
     void PanelView::draw_target_picker()
+    {
+        draw_character_banner();
+        draw_character_chooser();
+        draw_rename_popup();
+    }
+
+    void PanelView::draw_character_banner()
+    {
+        Skin& sk = skin();
+        const ImGuiStyle& style = ImGui::GetStyle();
+        const float base = style.FontSizeBase;
+        const float portrait = std::floor(dpi_px(64.0f));
+        const float pad = dpi_px(14.0f);
+        float text_h = 0.0f;
+        {
+            ImGui::PushFont(nullptr, base * 1.4f);
+            text_h += ImGui::GetTextLineHeight();
+            ImGui::PopFont();
+            ImGui::PushFont(nullptr, base * 0.86f);
+            text_h += ImGui::GetTextLineHeight() * 2.0f;
+            ImGui::PopFont();
+            text_h += style.ItemSpacing.y * 2.0f;
+        }
+        const float height = std::floor(std::max(portrait, text_h) + pad * 2.0f);
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(pad, pad));
+        sk.begin_child("##banner", ImVec2(0, height), ImGuiChildFlags_Borders | ImGuiChildFlags_AlwaysUseWindowPadding,
+                       ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+        ImGui::PopStyleVar();
+        ImDrawList* dl = ImGui::GetWindowDrawList();
+
+        const std::string identity = identity_of(m_target.key);
+        const std::string name = m_target.label.empty() ? std::string("No character yet")
+                                                        : CharacterNames::instance().shown(m_target.label, m_target.key, identity);
+        // Portrait frame (monogram until portraits exist for this character).
+        const ImVec2 p = ImGui::GetCursorScreenPos();
+        monogram_frame(dl, p, ImVec2(p.x + portrait, p.y + portrait), m_target.label.empty() ? std::string("?") : monogram(name),
+                       base * style.FontScaleDpi * 1.35f, u32(ImGui::GetStyleColorVec4(ImGuiCol_FrameBg)), u32(sk.color(Role::Border)),
+                       u32(sk.color(Role::Title)));
+        ImGui::Dummy(ImVec2(portrait, portrait));
+        ImGui::SameLine(0.0f, dpi_px(16.0f));
+
+        // Right column first (its width limits the text column): Change character, then note + Rename.
+        const float change_w = sk.button_width("Change character    ");
+        const float right_x = ImGui::GetWindowContentRegionMax().x;
+        std::string note;
+        std::string others;
+        size_t n_others = 0;
+        for (const ActorSummary& a : m_edited)
+        {
+            if (!a.active)
+            {
+                others += (others.empty() ? "" : ", ") + CharacterNames::instance().shown(a.label, a.key, a.identity);
+                ++n_others;
+            }
+        }
+        {
+            std::lock_guard guard(m_message_lock);
+            if (Clock::now() - m_message_time < std::chrono::seconds(6))
+            {
+                note = m_message;
+            }
+        }
+        const bool is_message = !note.empty();
+        if (!is_message)
+        {
+            note = n_others == 0 ? "no other characters edited"
+                                 : std::to_string(n_others) + (n_others == 1 ? " other character edited" : " other characters edited");
+        }
+        ImGui::PushFont(nullptr, base * 0.86f);
+        const float rename_w = ImGui::CalcTextSize("Rename").x + style.FramePadding.x * 2.0f;
+        const std::string shown_note = fit_text(note, std::max(dpi_px(60.0f), ImGui::GetContentRegionAvail().x * 0.30f - rename_w));
+        const float note_w = ImGui::CalcTextSize(shown_note.c_str()).x;
+        ImGui::PopFont();
+        const float right_w = std::max(change_w, note_w + rename_w + style.ItemSpacing.x);
+
+        ImGui::BeginGroup();
+        const float text_w = std::max(dpi_px(80.0f), right_x - ImGui::GetCursorPosX() - right_w - style.ItemSpacing.x * 2.0f);
+        ImGui::PushFont(nullptr, base * 1.4f);
+        ImGui::TextUnformatted(fit_text(name, text_w).c_str());
+        ImGui::PopFont();
+        if (name != m_target.label && !m_target.label.empty())
+        {
+            const std::string tip = "Game name: " + m_target.label;
+            tooltip(tip.c_str());
+        }
+
+        size_t live = 0;
+        for (const auto& r : m_rigs)
+        {
+            live += (!r.stale && r.frames > 0) ? 1 : 0;
+        }
+        ImGui::PushFont(nullptr, base * 0.86f);
+        {
+            std::string meta = !m_target.engine.empty() ? m_target.engine : !identity.empty() ? identity : m_skeleton.owner;
+            meta += meta.empty() ? "" : "   \xC2\xB7   ";
+            meta += m_target.id == "auto" || m_target.id.empty() ? "automatic (the character you control)" : "picked";
+            ImGui::TextColored(muted(), "%s", fit_text(meta, text_w).c_str());
+        }
+        {
+            // Live line: dot + state.
+            ImVec4 col = good();
+            std::string line;
+            char buf[160];
+            if (m_skeleton.names.empty())
+            {
+                col = warn();
+                line = "No character mesh found yet - press Change character > Refresh";
+            }
+            else if (!m_host->hook_active())
+            {
+                col = warn();
+                line = "Waiting for the pose hook (see Status)";
+            }
+            else if (live == 0)
+            {
+                col = warn();
+                std::snprintf(buf, sizeof(buf), "Tracking %zu mesh%s - waiting for an animated frame", m_rigs.size(), m_rigs.size() == 1 ? "" : "es");
+                line = buf;
+            }
+            else
+            {
+                std::snprintf(buf, sizeof(buf), "%s   \xC2\xB7   live on %zu mesh%s   \xC2\xB7   %zu bones%s", Registry::instance().enabled() ? "Edits on" : "Edits off",
+                              live, live == 1 ? "" : "es", m_skeleton.names.size(),
+                              m_morph_names.empty() ? "" : ("   \xC2\xB7   " + std::to_string(m_morph_names.size()) + " morphs").c_str());
+                line = buf;
+            }
+            const ImVec2 q = ImGui::GetCursorScreenPos();
+            const float r = std::max(2.0f, ImGui::GetFontSize() * 0.18f);
+            dl->AddCircleFilled(ImVec2(q.x + r, q.y + ImGui::GetTextLineHeight() * 0.5f + 1.0f), r, u32(col));
+            ImGui::SetCursorScreenPos(ImVec2(q.x + r * 2.0f + style.ItemInnerSpacing.x * 1.5f, q.y));
+            ImGui::TextColored(muted(), "%s", fit_text(line, text_w - r * 4.0f).c_str());
+        }
+        ImGui::PopFont();
+        ImGui::EndGroup();
+
+        // Right: Change character (opens the grid), then Rename and a short note.
+        ImGui::SetCursorPos(ImVec2(right_x - change_w, pad));
+        ImGui::BeginDisabled(!m_targets);
+        if (sk.button("Change character    ", {}, ImVec2(change_w, 0.0f)))
+        {
+            m_targets->relist_targets(); // sorted by the current distances (cheap; Refresh searches the world)
+            m_target_combo_since = Clock::now();
+            m_choose_open = true; // opened outside this child, where the modal is drawn
+        }
+        ImGui::EndDisabled();
+        {
+            // Down arrow inside the button's right padding.
+            const ImVec2 b = ImGui::GetItemRectMax();
+            const float s = ImGui::GetFontSize() * 0.32f;
+            const ImVec2 c(b.x - style.FramePadding.x - s, (ImGui::GetItemRectMin().y + b.y) * 0.5f);
+            dl->AddTriangleFilled(ImVec2(c.x - s, c.y - s * 0.5f), ImVec2(c.x + s, c.y - s * 0.5f), ImVec2(c.x, c.y + s * 0.6f), u32(ImGui::GetStyleColorVec4(ImGuiCol_Text)));
+        }
+        tooltip("Whose body the sliders edit: every character loaded right now, nearest first.\n"
+                "Characters you have edited keep their sliders while you edit someone else.");
+
+        ImGui::PushFont(nullptr, base * 0.86f);
+        const float row_y = pad + ImGui::GetFrameHeight() + style.ItemSpacing.y * 0.75f;
+        ImGui::SetCursorPos(ImVec2(right_x - rename_w - style.ItemSpacing.x - note_w, row_y + (ImGui::GetFrameHeight() - ImGui::GetTextLineHeight()) * 0.5f));
+        ImGui::TextColored(is_message ? accent() : muted(), "%s", shown_note.c_str());
+        if (is_message)
+        {
+            tooltip(note.c_str());
+        }
+        else if (n_others > 0)
+        {
+            const std::string tip = "Also keeping sliders on: " + others;
+            tooltip(tip.c_str());
+        }
+        ImGui::SetCursorPos(ImVec2(right_x - rename_w, row_y));
+        ImGui::BeginDisabled(m_target.label.empty());
+        if (sk.button("Rename", {}, ImVec2(rename_w, 0.0f)))
+        {
+            m_rename_key = CharacterNames::key_for(m_target.key, identity, &m_rename_stable);
+            m_rename_label = m_target.label;
+            std::snprintf(m_rename_buf, sizeof(m_rename_buf), "%s", CharacterNames::instance().get(m_rename_key).c_str());
+            m_rename_open = true;
+        }
+        ImGui::EndDisabled();
+        tooltip("Give this character your own name. It is only shown in this window and saved next to your presets.");
+        ImGui::PopFont();
+        sk.end_child();
+        if (m_rename_open)
+        {
+            ImGui::OpenPopup("Rename character");
+            m_rename_open = false;
+        }
+        if (m_choose_open)
+        {
+            ImGui::OpenPopup("##choose");
+            m_choose_open = false;
+        }
+        ImGui::Dummy(ImVec2(0.0f, dpi_px(4.0f)));
+    }
+
+    void PanelView::draw_character_chooser()
     {
         if (!m_targets)
         {
             return;
         }
+        Skin& sk = skin();
         const ImGuiStyle& style = ImGui::GetStyle();
-        const float refresh_w = compact_button_width("Refresh", "refresh");
-        const float rename_w = compact_button_width("Rename", "rename");
-        ImGui::SetNextItemWidth(std::max(120.0f, ImGui::GetContentRegionAvail().x - refresh_w - rename_w - style.ItemSpacing.x * 2));
-        const std::string shown =
-            m_target.label.empty() ? std::string("(searching...)") : CharacterNames::instance().shown(m_target.label, m_target.key, identity_of(m_target.key));
-        const bool was_open = m_target_combo_open;
-        m_target_combo_open = ImGui::BeginCombo("##target", shown.c_str(), ImGuiComboFlags_HeightLarge);
-        if (m_target_combo_open && !was_open)
+        const float base = style.FontSizeBase;
+        const ImGuiViewport* vp = ImGui::GetMainViewport();
+        ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x + vp->WorkSize.x * 0.5f, vp->WorkPos.y + vp->WorkSize.y * 0.5f), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+        ImGui::SetNextWindowSize(ImVec2(vp->WorkSize.x - dpi_px(40.0f), vp->WorkSize.y - dpi_px(56.0f)), ImGuiCond_Always);
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(dpi_px(20.0f), dpi_px(18.0f)));
+        const bool open = ImGui::BeginPopupModal("##choose", nullptr,
+                                                 ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings);
+        ImGui::PopStyleVar();
+        m_target_combo_open = open; // keeps the list from reordering under the mouse
+        if (!open)
         {
-            // Just opened: ask for the list sorted by the current distances (cheap; Refresh searches the world).
-            m_target_combo_since = Clock::now();
-            m_targets->relist_targets();
+            m_choose_close = false;
+            return;
         }
-        if (m_target_combo_open)
-        {
-            const std::string auto_label = std::string("Automatic (player / game default)") + (is_edited(kPlayerActor) ? "   - edited" : "");
-            if (ImGui::Selectable(auto_label.c_str(), m_target.id == "auto"))
-            {
-                m_targets->pick_target("auto");
-                set_message("Switching to the default character");
-            }
-            if (!m_target_list.empty())
-            {
-                ImGui::Separator();
-            }
-            for (const TargetChoice& t : m_target_list)
-            {
-                ImGui::PushID(t.id.c_str());
-                const bool edited = is_edited(t.key);
-                if (edited)
-                {
-                    ImGui::PushStyleColor(ImGuiCol_Text, accent());
-                }
-                const std::string name = CharacterNames::instance().shown(t.label, t.key, identity_of(t.key));
-                const std::string label = name + (edited ? "   - edited" : "");
-                if (ImGui::Selectable(label.c_str(), t.id == m_target.id))
-                {
-                    m_targets->pick_target(t.id);
-                    set_message("Switching to " + name);
-                }
-                if (name != t.label || !t.engine.empty())
-                {
-                    std::string tip = name != t.label ? "Game name: " + t.label : std::string();
-                    tip += t.engine.empty() ? "" : (tip.empty() ? "" : "\n") + std::string("Engine name: ") + t.engine;
-                    tooltip(tip.c_str());
-                }
-                if (edited)
-                {
-                    ImGui::PopStyleColor();
-                }
-                ImGui::PopID();
-            }
-            ImGui::EndCombo();
-        }
-        {
-            std::string tip = "Whose body the sliders edit. The list shows characters currently loaded in the level, nearest first.\n"
-                              "Characters you have edited are always listed and keep their sliders while you edit someone else.";
-            const std::string name = CharacterNames::instance().shown(m_target.label, m_target.key, identity_of(m_target.key));
-            if (name != m_target.label && !m_target.label.empty())
-            {
-                tip += "\n\nGame name: " + m_target.label;
-            }
-            if (!m_target.engine.empty())
-            {
-                tip += (name != m_target.label ? "\n" : "\n\n") + std::string("Engine name: ") + m_target.engine;
-            }
-            std::string others;
-            for (const ActorSummary& a : m_edited)
-            {
-                if (!a.active)
-                {
-                    others += (others.empty() ? "" : ", ") + CharacterNames::instance().shown(a.label, a.key, a.identity);
-                }
-            }
-            if (!others.empty())
-            {
-                tip += "\n\nAlso keeping sliders on: " + others;
-            }
-            tooltip(tip.c_str());
-        }
-        ImGui::SameLine();
-        ImGui::BeginDisabled(m_target.label.empty());
-        if (compact_button("Rename", "rename"))
-        {
-            const std::string identity = identity_of(m_target.key);
-            m_rename_key = CharacterNames::key_for(m_target.key, identity, &m_rename_stable);
-            m_rename_label = m_target.label;
-            std::snprintf(m_rename_buf, sizeof(m_rename_buf), "%s", CharacterNames::instance().get(m_rename_key).c_str());
-            ImGui::OpenPopup("Rename character");
-        }
-        ImGui::EndDisabled();
-        tooltip("Give this character your own name. It is only shown in this window and saved next to your presets.");
-        draw_rename_popup();
-        ImGui::SameLine();
-        if (compact_button("Refresh", "refresh"))
+        // Header: title + subtitle, Refresh and X on the right.
+        const float close_w = sk.button_width("X");
+        const float refresh_w = sk.button_width("Refresh");
+        const ImVec2 top = ImGui::GetCursorPos();
+        ImGui::PushFont(nullptr, base * 1.4f);
+        ImGui::TextUnformatted("Choose character");
+        ImGui::PopFont();
+        ImGui::PushFont(nullptr, base * 0.86f);
+        ImGui::TextColored(muted(), "Every character loaded right now, nearest first. Each one keeps its own sliders.");
+        ImGui::PopFont();
+        const ImVec2 after = ImGui::GetCursorPos();
+        const float right_x = ImGui::GetWindowContentRegionMax().x;
+        ImGui::SetCursorPos(ImVec2(right_x - close_w - refresh_w - style.ItemSpacing.x, top.y));
+        if (sk.button("Refresh"))
         {
             m_targets->refresh_targets();
             m_targets->request_rescan();
+            m_target_combo_since = Clock::now(); // take the fresh list
             set_message("Looking for characters...");
         }
         {
             const std::string key = m_targets->refresh_hotkey_text();
-            const std::string tip = "Rescan the character and its meshes, relist the characters and retry the pose hook." +
+            const std::string tip = "Search the whole level again, rescan the meshes and retry the pose hook." +
                                     (key.empty() ? std::string() : "\nHotkey: " + key + " (works in game too).");
             tooltip(tip.c_str());
         }
+        ImGui::SameLine();
+        if (sk.button("X") || ImGui::IsKeyPressed(ImGuiKey_Escape) || m_choose_close)
+        {
+            ImGui::CloseCurrentPopup();
+        }
+        m_choose_close = false;
+        ImGui::SetCursorPos(after);
+        ImGui::Dummy(ImVec2(0.0f, dpi_px(4.0f)));
+        ImGui::Separator();
+        ImGui::Dummy(ImVec2(0.0f, dpi_px(8.0f)));
+
+        const float footer = ImGui::GetTextLineHeightWithSpacing() * 1.6f;
+        ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0, 0, 0, 0));
+        ImGui::BeginChild("##grid", ImVec2(0, -footer), ImGuiChildFlags_None);
+        ImGui::PopStyleColor();
+        const float gap = dpi_px(10.0f);
+        const float avail = ImGui::GetContentRegionAvail().x;
+        const int cols = std::max(2, static_cast<int>((avail + gap) / (dpi_px(124.0f) + gap)));
+        const float tile_w = std::floor((avail - gap * static_cast<float>(cols - 1)) / static_cast<float>(cols));
+        const float small = base * style.FontScaleDpi * 0.8f;
+        const float foot_h = std::floor(ImGui::GetFontSize() + small + dpi_px(14.0f));
+        const float tile_h = tile_w + foot_h;
+
+        int index = 0;
+        std::string picked_id;
+        std::string picked_name;
+        auto tile = [&](const std::string& id, const std::string& name, const std::string& sub, const std::string& letters, bool selected, bool edited) {
+            ImGui::PushID(id.c_str());
+            if (index % cols != 0)
+            {
+                ImGui::SameLine(0.0f, gap);
+            }
+            const ImVec2 a = ImGui::GetCursorScreenPos();
+            if (ImGui::InvisibleButton("##tile", ImVec2(tile_w, tile_h)))
+            {
+                picked_id = id;
+                picked_name = name;
+            }
+            const bool hovered = ImGui::IsItemHovered();
+            if (!sub.empty() || name.size() > 18)
+            {
+                const std::string tip = sub.empty() ? name : name + "\n" + sub;
+                tooltip(tip.c_str());
+            }
+            ImDrawList* dl = ImGui::GetWindowDrawList();
+            const ImVec2 b(a.x + tile_w, a.y + tile_h);
+            const ImVec2 img_b(b.x, a.y + tile_w);
+            const ImU32 border = u32(selected ? accent() : hovered ? accent_dim() : sk.color(Role::Border));
+            monogram_frame(dl, a, img_b, letters, base * style.FontScaleDpi * 1.6f,
+                           u32(hovered ? ImGui::GetStyleColorVec4(ImGuiCol_FrameBgHovered) : sk.color(Role::Section)), border,
+                           u32(ImVec4(sk.color(Role::Title).x, sk.color(Role::Title).y, sk.color(Role::Title).z, 0.85f)));
+            dl->AddRectFilled(ImVec2(a.x, img_b.y), b, u32(selected ? accent_dim() : ImGui::GetStyleColorVec4(ImGuiCol_FrameBg)));
+            dl->AddRect(a, b, border, 0.0f, 0, 1.0f);
+            // Footer: (bullet) name, then the engine name / id.
+            const float tx = a.x + dpi_px(8.0f);
+            float nx = tx;
+            const float ny = img_b.y + dpi_px(6.0f);
+            if (edited)
+            {
+                const float bs = std::max(3.0f, std::floor(ImGui::GetFontSize() * 0.28f));
+                square_bullet(dl, ImVec2(tx + bs * 0.5f, ny + ImGui::GetFontSize() * 0.55f), bs, u32(ImGui::GetStyleColorVec4(ImGuiCol_Text)));
+                nx += bs + dpi_px(5.0f);
+            }
+            dl->PushClipRect(ImVec2(a.x, img_b.y), ImVec2(b.x - dpi_px(4.0f), b.y), true);
+            dl->AddText(ImVec2(nx, ny), u32(ImGui::GetStyleColorVec4(ImGuiCol_Text)), name.c_str());
+            dl->AddText(ImGui::GetFont(), small, ImVec2(tx, ny + ImGui::GetFontSize() + dpi_px(1.0f)), u32(muted()), sub.c_str());
+            dl->PopClipRect();
+            ImGui::PopID();
+            ++index;
+        };
+
+        tile("auto", "Automatic", "the character you control", "AUTO", m_target.id == "auto", is_edited(kPlayerActor));
+        for (const TargetChoice& t : m_target_list)
+        {
+            const std::string identity = identity_of(t.key);
+            const std::string name = CharacterNames::instance().shown(t.label, t.key, identity);
+            const std::string sub = !t.engine.empty() ? t.engine : !identity.empty() ? identity : std::string();
+            tile(t.id, name, sub, monogram(name), t.id == m_target.id, is_edited(t.key));
+        }
+        ImGui::EndChild();
+        ImGui::PushTextWrapPos(0.0f);
+        ImGui::PushFont(nullptr, base * 0.86f);
+        ImGui::TextColored(muted(), "A square marks a character with edited sliders. Characters without a portrait get a name tile. "
+                                    "Refresh searches the whole level.");
+        ImGui::PopFont();
+        ImGui::PopTextWrapPos();
+        if (!picked_id.empty())
+        {
+            m_targets->pick_target(picked_id);
+            set_message(picked_id == "auto" ? std::string("Switching to the default character") : "Switching to " + picked_name);
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
     }
 
     void PanelView::draw_rename_popup()
@@ -741,7 +901,7 @@ namespace uuepbs::ui
     void PanelView::draw_edited_characters()
     {
         Skin& sk = skin();
-        ImGui::SeparatorText("Edited characters");
+        section_bar("Edited characters");
         if (!m_remembered.empty())
         {
             std::string list;
@@ -875,132 +1035,270 @@ namespace uuepbs::ui
         return out;
     }
 
+    bool PanelView::section_bar(const char* title, const char* button, bool button_enabled, const char* icon_key)
+    {
+        Skin& sk = skin();
+        const ImGuiStyle& style = ImGui::GetStyle();
+        const float pad_x = dpi_px(12.0f);
+        const float h = ImGui::GetFrameHeight() + dpi_px(12.0f);
+        const float w = ImGui::GetContentRegionAvail().x;
+        const ImVec2 a = ImGui::GetCursorScreenPos();
+        const ImVec2 b(a.x + w, a.y + h);
+        ImDrawList* dl = ImGui::GetWindowDrawList();
+        dl->AddRectFilled(a, b, u32(sk.color(Role::Section)));
+        dl->AddRect(a, b, u32(sk.color(Role::Border)), 0.0f, 0, 1.0f);
+        const float size = style.FontSizeBase * style.FontScaleDpi * 1.22f;
+        const ImVec2 ts = ImGui::GetFont()->CalcTextSizeA(size, FLT_MAX, 0.0f, title);
+        dl->AddText(ImGui::GetFont(), size, ImVec2(a.x + pad_x, std::floor(a.y + (h - ts.y) * 0.5f)), u32(ImGui::GetStyleColorVec4(ImGuiCol_Text)), title);
+        ImGui::Dummy(ImVec2(w, h));
+        const ImVec2 after = ImGui::GetCursorScreenPos();
+        bool pressed = false;
+        if (button)
+        {
+            const float bw = sk.button_width(button, icon_key);
+            ImGui::SetCursorScreenPos(ImVec2(b.x - bw - dpi_px(6.0f), a.y + (h - ImGui::GetFrameHeight()) * 0.5f));
+            ImGui::PushID(title);
+            ImGui::BeginDisabled(!button_enabled);
+            pressed = sk.button(button, icon_key);
+            ImGui::EndDisabled();
+            ImGui::PopID();
+            ImGui::SetCursorScreenPos(after);
+        }
+        return pressed;
+    }
+
     void PanelView::draw_category_rail(const std::vector<Category>& cats, float width)
     {
         Skin& sk = skin();
-        sk.begin_child("##categories", ImVec2(width, 0), ImGuiChildFlags_Borders | ImGuiChildFlags_AlwaysUseWindowPadding);
-        const float row_h = ImGui::GetFrameHeight() * 1.45f;
-        const float icon_w = ImGui::GetFontSize();
+        const ImGuiStyle& style = ImGui::GetStyle();
+        ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0, 0, 0, 0));
+        ImGui::BeginChild("##categories", ImVec2(width, 0), ImGuiChildFlags_None);
+        ImGui::PopStyleColor();
+        ImGui::PushFont(nullptr, style.FontSizeBase * 0.78f);
+        ImGui::TextColored(muted(), "BODY");
+        ImGui::PopFont();
+        ImGui::Dummy(ImVec2(0.0f, dpi_px(2.0f)));
+        const float row_h = std::floor(ImGui::GetFrameHeight() * 1.25f);
+        ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(style.ItemSpacing.x, dpi_px(3.0f)));
+        const float small = style.FontSizeBase * style.FontScaleDpi * 0.8f;
         for (const Category& c : cats)
         {
             ImGui::PushID(c.name.c_str());
             const bool picked = c.name == m_category;
-            const ImVec2 p = ImGui::GetCursorScreenPos();
-            if (ImGui::Selectable("##cat", picked, ImGuiSelectableFlags_None, ImVec2(0, row_h)))
+            const ImVec2 a = ImGui::GetCursorScreenPos();
+            const float w = ImGui::GetContentRegionAvail().x;
+            if (ImGui::InvisibleButton("##cat", ImVec2(w, row_h)))
             {
                 m_category = c.name;
             }
-            const ImVec2 q = ImGui::GetItemRectMax();
+            const bool hovered = ImGui::IsItemHovered();
+            const ImVec2 b(a.x + w, a.y + row_h);
             ImDrawList* dl = ImGui::GetWindowDrawList();
-            float x = p.x + ImGui::GetStyle().FramePadding.x * 0.5f;
-            const float text_y = p.y + (row_h - ImGui::GetFontSize()) * 0.5f;
             if (picked)
             {
-                dl->AddRectFilled(ImVec2(p.x, p.y + row_h * 0.18f), ImVec2(p.x + 3.0f, q.y - row_h * 0.18f), ImGui::GetColorU32(accent()), 2.0f);
+                dl->AddRectFilled(a, b, u32(accent_dim()));
+                dl->AddRect(a, b, u32(accent()), 0.0f, 0, 1.0f);
             }
+            else if (hovered)
+            {
+                dl->AddRectFilled(a, b, u32(ImGui::GetStyleColorVec4(ImGuiCol_HeaderHovered)));
+            }
+            float x = a.x + dpi_px(12.0f);
+            const float cy = a.y + row_h * 0.5f;
             if (sk.has_icon("section." + c.name))
             {
-                sk.draw_image(dl, "icon." + fold_case("section." + c.name), ImVec2(x + 4.0f, text_y), ImVec2(x + 4.0f + icon_w, text_y + icon_w));
-                x += icon_w + ImGui::GetStyle().ItemInnerSpacing.x;
+                const float ic = ImGui::GetFontSize();
+                sk.draw_image(dl, "icon." + fold_case("section." + c.name), ImVec2(x, cy - ic * 0.5f), ImVec2(x + ic, cy + ic * 0.5f));
+                x += ic + dpi_px(8.0f);
             }
-            const ImVec4& tc = picked ? sk.color(Role::Title) : ImGui::GetStyleColorVec4(ImGuiCol_Text);
-            dl->AddText(ImVec2(x + 6.0f, text_y), ImGui::GetColorU32(tc), c.name.c_str());
+            else
+            {
+                const float bs = std::max(3.0f, std::floor(ImGui::GetFontSize() * 0.26f));
+                square_bullet(dl, ImVec2(x + bs * 0.5f, cy), bs, u32(picked ? ImGui::GetStyleColorVec4(ImGuiCol_Text) : c.changed ? accent() : muted()));
+                x += bs + dpi_px(9.0f);
+            }
+            dl->AddText(ImVec2(x, std::floor(cy - ImGui::GetFontSize() * 0.5f)), u32(ImGui::GetStyleColorVec4(ImGuiCol_Text)), c.name.c_str());
             if (c.changed > 0)
             {
-                // Pill with the number of changed parts, right-aligned.
-                char n[16];
-                std::snprintf(n, sizeof(n), "%zu", c.changed);
-                const ImVec2 ts = ImGui::CalcTextSize(n);
-                const float ph = ImGui::GetFontSize() * 1.05f;
-                const float pw = std::max(ph, ts.x + ph * 0.6f);
-                const ImVec2 a(q.x - pw - 4.0f, p.y + (row_h - ph) * 0.5f);
-                dl->AddRectFilled(a, ImVec2(a.x + pw, a.y + ph), ImGui::GetColorU32(accent_dim()), ph * 0.5f);
-                dl->AddText(ImVec2(a.x + (pw - ts.x) * 0.5f, a.y + (ph - ts.y) * 0.5f), ImGui::GetColorU32(sk.color(Role::Text)), n);
+                char n[32];
+                std::snprintf(n, sizeof(n), "%zu changed", c.changed);
+                const ImVec2 ts = ImGui::GetFont()->CalcTextSizeA(small, FLT_MAX, 0.0f, n);
+                dl->AddText(ImGui::GetFont(), small, ImVec2(b.x - ts.x - dpi_px(10.0f), std::floor(cy - ts.y * 0.5f)),
+                            u32(picked ? ImGui::GetStyleColorVec4(ImGuiCol_Text) : muted()), n);
             }
             std::string tip = std::to_string(c.parts) + (c.parts == 1 ? " part" : " parts");
-            if (c.changed)
-            {
-                tip += ", " + std::to_string(c.changed) + " changed";
-            }
             tooltip(tip.c_str());
             ImGui::PopID();
         }
-        sk.end_child();
+        ImGui::PopStyleVar();
+        ImGui::Dummy(ImVec2(0.0f, dpi_px(10.0f)));
+        ImGui::PushFont(nullptr, style.FontSizeBase * 0.86f);
+        ImGui::PushTextWrapPos(0.0f);
+        ImGui::TextColored(muted(), "Sliders belong to the character: the player's are saved with the session, NPCs are remembered by name. "
+                                    "Save a preset to reuse a shape.");
+        ImGui::PopTextWrapPos();
+        ImGui::PopFont();
+        ImGui::EndChild();
+        // Divider between the rail and the sliders.
+        const ImVec2 r = ImGui::GetItemRectMax();
+        const float x = r.x + ImGui::GetStyle().ItemSpacing.x;
+        ImGui::GetWindowDrawList()->AddLine(ImVec2(x, ImGui::GetItemRectMin().y), ImVec2(x, r.y), u32(sk.color(Role::Border)), 1.0f);
     }
 
-    int PanelView::part_header(const std::string& title, const std::string& icon_key, bool edited, const char* value, bool value_muted,
-                               const std::string& tip, const char* button1, const char* icon1, bool button1_on, bool button2_enabled)
+    bool PanelView::hairline_slider(const char* id, float* v, float lo, float hi, bool log, float neutral)
+    {
+        Skin& sk = skin();
+        if (sk.has_image("slider_track") || sk.has_image("slider_fill") || sk.has_image("slider_grab"))
+        {
+            return sk.slider_float(id, v, lo, hi, "", log ? ImGuiSliderFlags_Logarithmic : ImGuiSliderFlags_None); // the skin's own slider
+        }
+        const float w = std::max(dpi_px(40.0f), ImGui::CalcItemWidth());
+        const float h = ImGui::GetFrameHeight();
+        const ImVec2 p = ImGui::GetCursorScreenPos();
+        ImGui::InvisibleButton(id, ImVec2(w, h));
+        const bool hovered = ImGui::IsItemHovered();
+        const bool active = ImGui::IsItemActive();
+        const float tw = std::max(3.0f, std::floor(dpi_px(6.0f)));
+        const float th = std::floor(std::min(h, dpi_px(16.0f)));
+        const float x0 = p.x + tw * 0.5f, x1 = p.x + w - tw * 0.5f;
+        auto to_t = [&](float val) {
+            val = std::clamp(val, lo, hi);
+            if (log && lo > 0.0f)
+            {
+                return std::log(val / lo) / std::log(hi / lo);
+            }
+            return hi != lo ? (val - lo) / (hi - lo) : 0.0f;
+        };
+        bool changed = false;
+        if (active && ImGui::IsMouseDown(ImGuiMouseButton_Left) && x1 > x0)
+        {
+            const float t = std::clamp((ImGui::GetIO().MousePos.x - x0) / (x1 - x0), 0.0f, 1.0f);
+            const float nv = (log && lo > 0.0f) ? lo * std::pow(hi / lo, t) : lo + (hi - lo) * t;
+            if (nv != *v)
+            {
+                *v = nv;
+                changed = true;
+            }
+        }
+        ImDrawList* dl = ImGui::GetWindowDrawList();
+        const float cy = std::floor(p.y + h * 0.5f);
+        const float line = std::max(1.0f, std::floor(dpi_px(2.0f)));
+        dl->AddRectFilled(ImVec2(x0, cy - std::floor(line * 0.5f)), ImVec2(x1, cy - std::floor(line * 0.5f) + line), u32(sk.color(Role::Track)));
+        const float nx = std::floor(x0 + (x1 - x0) * to_t(neutral));
+        const float tick = std::floor(dpi_px(5.0f));
+        dl->AddRectFilled(ImVec2(nx, cy - tick), ImVec2(nx + std::max(1.0f, std::floor(dpi_px(1.0f))), cy + tick), u32(muted()));
+        const float tx = std::floor(x0 + (x1 - x0) * to_t(*v));
+        const ImGuiCol grab = active || hovered ? ImGuiCol_SliderGrabActive : ImGuiCol_SliderGrab;
+        dl->AddRectFilled(ImVec2(tx - std::floor(tw * 0.5f), cy - std::floor(th * 0.5f)), ImVec2(tx - std::floor(tw * 0.5f) + tw, cy - std::floor(th * 0.5f) + th),
+                          ImGui::GetColorU32(grab));
+        return changed;
+    }
+
+    PanelView::RowResult PanelView::part_row(const RowSpec& spec, float& v)
     {
         Skin& sk = skin();
         const ImGuiStyle& style = ImGui::GetStyle();
-        int pressed = 0;
-        sk.icon(icon_key, ImGui::GetFontSize());
+        RowResult r;
+        ImGui::PushID(spec.id);
+        // Label with a square bullet (accent when the part is changed).
         ImGui::AlignTextToFramePadding();
-        ImGui::TextColored(edited ? accent() : ImGui::GetStyleColorVec4(ImGuiCol_Text), "%s", title.c_str());
-        tooltip(tip.c_str());
+        const ImVec2 p = ImGui::GetCursorScreenPos();
+        const float bs = std::max(3.0f, std::floor(ImGui::GetFontSize() * 0.26f));
+        square_bullet(ImGui::GetWindowDrawList(), ImVec2(p.x + bs * 0.5f, p.y + ImGui::GetFrameHeight() * 0.5f), bs,
+                      u32(spec.edited ? accent() : ImGui::GetStyleColorVec4(ImGuiCol_Text)));
+        ImGui::SetCursorScreenPos(ImVec2(p.x + bs + dpi_px(9.0f), p.y));
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextColored(spec.edited ? accent() : ImGui::GetStyleColorVec4(ImGuiCol_Text), "%s", spec.title.c_str());
+        tooltip(spec.tip.c_str());
 
-        const float b1 = button1 ? compact_button_width(button1, icon1) + style.ItemSpacing.x : 0.0f;
-        const float b2 = compact_button_width("Reset", "reset");
-        ImGui::PushFont(nullptr, style.FontSizeBase * 1.08f);
-        const float vw = ImGui::CalcTextSize(value).x;
-        ImGui::PopFont();
-        ImGui::SameLine();
-        const float end = ImGui::GetWindowContentRegionMax().x;
-        ImGui::SetCursorPosX(std::max(ImGui::GetCursorPosX(), end - b2 - b1 - vw - style.ItemSpacing.x * 1.5f));
-        ImGui::AlignTextToFramePadding();
-        ImGui::PushFont(nullptr, ImGui::GetStyle().FontSizeBase * 1.08f);
-        ImGui::TextColored(value_muted ? muted() : edited ? sk.color(Role::Title) : ImGui::GetStyleColorVec4(ImGuiCol_Text), "%s", value);
-        ImGui::PopFont();
-        tooltip("Ctrl+click the slider to type a value. Ctrl+wheel nudges it (add Shift for finer steps).");
-        if (button1)
+        const float box_w = std::floor(ImGui::CalcTextSize("0.000").x + style.FramePadding.x * 2.0f);
+        const float xyz_w = spec.has_axes ? compact_button_width("XYZ", "xyz") + style.ItemSpacing.x : 0.0f;
+        const float reset_w = compact_button_width("Reset", "reset");
+        ImGui::SameLine(p.x - ImGui::GetWindowPos().x + ImGui::GetScrollX() + spec.label_w);
+        ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - box_w - xyz_w - reset_w - style.ItemSpacing.x * 2.0f - dpi_px(6.0f));
+        if (hairline_slider("##track", &v, spec.lo, spec.hi, spec.log, spec.neutral))
         {
-            ImGui::SameLine(0.0f, style.ItemSpacing.x * 1.5f);
-            if (button1_on)
+            r.changed = true;
+        }
+        if (wheel_nudge(v, spec.log ? 0.01f : 0.05f, spec.log ? 0.001f : 0.01f, spec.lo, spec.hi))
+        {
+            r.changed = true;
+        }
+        tooltip("Drag to change. Ctrl+wheel nudges (add Shift for finer steps).");
+
+        // Number box: click and type.
+        ImGui::SameLine(0.0f, style.ItemSpacing.x + dpi_px(6.0f));
+        ImGui::SetNextItemWidth(box_w);
+        ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 1.0f);
+        ImGui::PushStyleColor(ImGuiCol_Border, sk.color(Role::Border));
+        if (spec.unset && !ImGui::IsItemActive())
+        {
+            char buf[32] = "";
+            if (ImGui::InputTextWithHint("##box", spec.unset_hint, buf, sizeof(buf), ImGuiInputTextFlags_CharsDecimal | ImGuiInputTextFlags_AutoSelectAll))
+            {
+                char* end = nullptr;
+                const float typed = std::strtof(buf, &end);
+                if (end != buf)
+                {
+                    v = typed;
+                    r.changed = true;
+                }
+            }
+        }
+        else
+        {
+            float typed = v;
+            if (ImGui::InputFloat("##box", &typed, 0.0f, 0.0f, spec.format, ImGuiInputTextFlags_AutoSelectAll) && std::isfinite(typed))
+            {
+                v = spec.log ? std::max(typed, spec.lo * 0.5f) : typed;
+                r.changed = true;
+            }
+        }
+        ImGui::PopStyleColor();
+        ImGui::PopStyleVar();
+        tooltip("Click to type a value.");
+        if (spec.has_axes)
+        {
+            ImGui::SameLine();
+            if (spec.axes_open)
             {
                 ImGui::PushStyleColor(ImGuiCol_Button, accent_dim());
             }
-            if (compact_button(button1, icon1))
-            {
-                pressed = 1;
-            }
-            if (button1_on)
+            r.axes = compact_button("XYZ", "xyz");
+            if (spec.axes_open)
             {
                 ImGui::PopStyleColor();
             }
             tooltip("Edit length / width / depth separately");
         }
         ImGui::SameLine();
-        ImGui::BeginDisabled(!button2_enabled);
-        if (compact_button("Reset", "reset"))
-        {
-            pressed = 2;
-        }
+        ImGui::BeginDisabled(!spec.can_reset);
+        r.reset = compact_button("Reset", "reset");
         ImGui::EndDisabled();
         tooltip("Back to the game's own shape");
-        return pressed;
+        ImGui::PopID();
+        return r;
     }
 
     namespace
     {
-        // Slimmer track for the main sliders; the value is printed above it, so the grab never hides it.
-        struct SlimSlider
+        // Size slider semantics: a uniform part stays uniform, a stretched one keeps its proportions.
+        void set_size(BoneEdit& s, double v)
         {
-            SlimSlider()
+            const double avg = (s.axis[0] + s.axis[1] + s.axis[2]) / 3.0;
+            v = std::clamp(v, 0.01, 100.0);
+            const bool uniform = std::fabs(s.axis[0] - s.axis[1]) < 1e-6 && std::fabs(s.axis[1] - s.axis[2]) < 1e-6;
+            if (uniform || avg <= 1e-6)
             {
-                const ImGuiStyle& s = ImGui::GetStyle();
-                ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(s.FramePadding.x, std::max(1.0f, s.FramePadding.y * 0.45f)));
-                ImGui::PushStyleVar(ImGuiStyleVar_GrabMinSize, std::max(s.GrabMinSize, ImGui::GetFontSize() * 0.9f));
+                s.axis[0] = s.axis[1] = s.axis[2] = v;
             }
-            ~SlimSlider() { ImGui::PopStyleVar(2); }
-        };
-
-        // Tick at the slider's neutral point (1.0x sits in the middle of the log scale).
-        void neutral_tick(float t)
-        {
-            const ImVec2 a = ImGui::GetItemRectMin(), b = ImGui::GetItemRectMax();
-            const float grab = std::max(ImGui::GetStyle().GrabMinSize, ImGui::GetFontSize() * 0.9f);
-            const float x = a.x + 2.0f + grab * 0.5f + (b.x - a.x - 4.0f - grab) * t;
-            ImGui::GetWindowDrawList()->AddLine(ImVec2(x, b.y + 1.0f), ImVec2(x, b.y + 4.0f), ImGui::GetColorU32(muted()), 1.5f);
+            else
+            {
+                for (double& a : s.axis)
+                {
+                    a *= v / avg;
+                }
+            }
         }
     } // namespace
 
@@ -1008,21 +1306,32 @@ namespace uuepbs::ui
     {
         Skin& sk = skin();
         const ImGuiStyle& style = ImGui::GetStyle();
-        // Category title + summary + "Reset category".
-        ImGui::PushFont(nullptr, style.FontSizeBase * 1.3f);
-        ImGui::TextColored(sk.color(Role::Title), "%s", cat.name.c_str());
+        const bool reset_all = section_bar(cat.name.c_str(), "Reset", cat.changed > 0);
+        ImGui::PushFont(nullptr, style.FontSizeBase * 0.86f);
+        ImGui::TextColored(muted(), cat.changed ? "%zu of %zu parts changed. Click a number to type it." : "%zu parts. Click a number to type it.",
+                           cat.changed ? cat.changed : cat.parts, cat.parts);
         ImGui::PopFont();
-        ImGui::SameLine();
-        ImGui::TextColored(muted(), cat.changed ? "%zu of %zu changed" : "%zu parts", cat.changed ? cat.changed : cat.parts, cat.parts);
-        ImGui::SameLine();
-        const float rw = sk.button_width("Reset all", "reset");
-        ImGui::SetCursorPosX(std::max(ImGui::GetCursorPosX(), ImGui::GetWindowContentRegionMax().x - rw));
-        ImGui::BeginDisabled(cat.changed == 0);
-        const bool reset_all = sk.button("Reset all", "reset");
-        ImGui::EndDisabled();
-        tooltip("Reset every part in this category");
-        ImGui::Separator();
-        ImGui::Spacing();
+        ImGui::Dummy(ImVec2(0.0f, dpi_px(4.0f)));
+
+        // Label column: widest part name in this category.
+        float label_w = ImGui::CalcTextSize("Depth").x;
+        for (const GroupBones& gb : m_body.groups)
+        {
+            if (gb.group.section == cat.name)
+            {
+                label_w = std::max(label_w, ImGui::CalcTextSize(gb.group.title.c_str()).x);
+            }
+        }
+        for (const MorphGroupMorphs& mg : m_morph_groups)
+        {
+            label_w = std::max(label_w, ImGui::CalcTextSize(mg.group.title.c_str()).x);
+        }
+        label_w = std::min(label_w + ImGui::GetFontSize() * 1.6f, ImGui::GetContentRegionAvail().x * 0.34f);
+
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(dpi_px(16.0f), dpi_px(14.0f)));
+        ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(style.ItemSpacing.x, dpi_px(12.0f)));
+        sk.begin_child("##group", ImVec2(0, 0), ImGuiChildFlags_Borders | ImGuiChildFlags_AutoResizeY | ImGuiChildFlags_AlwaysUseWindowPadding);
+        ImGui::PopStyleVar();
 
         for (const GroupBones& gb : m_body.groups)
         {
@@ -1033,10 +1342,9 @@ namespace uuepbs::ui
             }
             ImGui::PushID(g.title.c_str());
             BoneEdit s = scale_of(gb.bones.front(), g.spread);
-            const bool edited = s.has_scale();
-            if (reset_all && edited)
+            const double one[3] = {1.0, 1.0, 1.0};
+            if (reset_all && s.has_scale())
             {
-                const double one[3] = {1.0, 1.0, 1.0};
                 write_group(gb, one);
                 s = scale_of(gb.bones.front(), g.spread);
             }
@@ -1045,41 +1353,60 @@ namespace uuepbs::ui
             {
                 tip += " " + b;
             }
-            char value[32];
-            const double avg = (s.axis[0] + s.axis[1] + s.axis[2]) / 3.0;
-            std::snprintf(value, sizeof(value), "%.2f\xC3\x97", avg); // "1.30x" with a real multiplication sign
             bool& open = m_group_open[g.title];
-            switch (part_header(g.title, "group." + g.title, s.has_scale(), value, !s.has_scale(), tip, "XYZ", "xyz", open, s.has_scale()))
+            RowSpec spec;
+            spec.id = "size";
+            spec.title = g.title;
+            spec.tip = tip;
+            spec.edited = s.has_scale();
+            spec.lo = kScaleMin;
+            spec.hi = kScaleMax;
+            spec.log = true;
+            spec.neutral = 1.0f;
+            spec.has_axes = true;
+            spec.axes_open = open;
+            spec.can_reset = s.has_scale();
+            spec.label_w = label_w;
+            float v = static_cast<float>((s.axis[0] + s.axis[1] + s.axis[2]) / 3.0);
+            const RowResult r = part_row(spec, v);
+            if (r.changed)
             {
-            case 1: open = !open; break;
-            case 2:
+                set_size(s, v);
+                write_group(gb, s.axis);
+            }
+            if (r.axes)
             {
-                const double one[3] = {1.0, 1.0, 1.0};
+                open = !open;
+            }
+            if (r.reset)
+            {
                 write_group(gb, one);
                 s = scale_of(gb.bones.front(), g.spread);
-                break;
-            }
-            default: break;
-            }
-            {
-                SlimSlider slim;
-                ImGui::SetNextItemWidth(-FLT_MIN);
-                if (size_slider("##size", s, kScaleMin, kScaleMax, ""))
-                {
-                    write_group(gb, s.axis);
-                }
-                neutral_tick(0.5f);
             }
             if (open)
             {
+                static const char* const names[3] = {"Length", "Width", "Depth"};
                 ImGui::Indent(ImGui::GetFontSize());
-                if (axis_sliders(s))
+                for (int a = 0; a < 3; ++a)
                 {
-                    write_group(gb, s.axis);
+                    RowSpec sub = spec;
+                    sub.id = names[a];
+                    sub.title = names[a];
+                    sub.tip = a == 0 ? "Along the bone (X)" : a == 1 ? "Sideways (Y)" : "Front to back (Z)";
+                    sub.edited = std::fabs(s.axis[a] - 1.0) > 1e-6;
+                    sub.has_axes = false;
+                    sub.can_reset = sub.edited;
+                    sub.label_w = label_w - ImGui::GetFontSize();
+                    float av = static_cast<float>(s.axis[a]);
+                    const RowResult ar = part_row(sub, av);
+                    if (ar.changed || ar.reset)
+                    {
+                        s.axis[a] = ar.reset ? 1.0 : std::clamp(static_cast<double>(av), 0.01, 100.0);
+                        write_group(gb, s.axis);
+                    }
                 }
                 ImGui::Unindent(ImGui::GetFontSize());
             }
-            ImGui::Dummy(ImVec2(0, style.ItemSpacing.y * 0.6f));
             ImGui::PopID();
         }
 
@@ -1099,58 +1426,49 @@ namespace uuepbs::ui
                     break;
                 }
             }
-            if (reset_all && current)
-            {
-                for (const std::string& m : mg.morphs)
-                {
-                    write_morph(m, std::nullopt);
-                }
-                current.reset();
-            }
+            bool reset = reset_all && current.has_value();
             std::string tip = mg.group.hint;
             tip += tip.empty() ? "Morphs:" : "\nMorphs:";
             for (const std::string& m : mg.morphs)
             {
                 tip += " " + m;
             }
-            char value[32];
-            if (current)
+            RowSpec spec;
+            spec.id = "morph";
+            spec.title = mg.group.title;
+            spec.tip = tip + "\nEmpty box = the game's own value.";
+            spec.edited = current.has_value();
+            spec.lo = kMorphSliderMin;
+            spec.hi = kMorphSliderMax;
+            spec.neutral = 0.0f;
+            spec.unset = !current.has_value();
+            spec.can_reset = current.has_value();
+            spec.label_w = label_w;
+            float v = static_cast<float>(current.value_or(0.0));
+            const RowResult r = part_row(spec, v);
+            reset = reset || r.reset;
+            if (r.changed && !reset)
             {
-                std::snprintf(value, sizeof(value), "%.0f%%", *current * 100.0);
+                for (const std::string& m : mg.morphs)
+                {
+                    write_morph(m, v); // clamped to kMorphMin..kMorphMax
+                }
             }
-            else
-            {
-                std::snprintf(value, sizeof(value), "game");
-            }
-            if (part_header(mg.group.title, "group." + mg.group.title, current.has_value(), value, !current, tip, nullptr, nullptr, false,
-                            current.has_value()) == 2)
+            if (reset)
             {
                 for (const std::string& m : mg.morphs)
                 {
                     write_morph(m, std::nullopt);
                 }
-                current.reset();
             }
-            {
-                SlimSlider slim;
-                ImGui::SetNextItemWidth(-FLT_MIN);
-                float v = static_cast<float>(current.value_or(0.0));
-                if (morph_slider("##w", v, ""))
-                {
-                    for (const std::string& m : mg.morphs)
-                    {
-                        write_morph(m, v);
-                    }
-                }
-            }
-            ImGui::Dummy(ImVec2(0, style.ItemSpacing.y * 0.6f));
             ImGui::PopID();
         }
+        sk.end_child();
+        ImGui::PopStyleVar();
     }
 
     void PanelView::draw_simplified()
     {
-        Skin& sk = skin();
         if (m_skeleton.names.empty())
         {
             ImGui::TextWrapped("The sliders appear once a character's skeletal mesh has been found. Load a save or enter a level, or pick a character above.");
@@ -1169,15 +1487,15 @@ namespace uuepbs::ui
         float rail_w = ImGui::CalcTextSize("Hips & Legs").x;
         for (const Category& c : cats)
         {
-            rail_w = std::max(rail_w, ImGui::CalcTextSize(c.name.c_str()).x + (sk.has_icon("section." + c.name) ? ImGui::GetFontSize() * 1.4f : 0.0f));
+            rail_w = std::max(rail_w, ImGui::CalcTextSize(c.name.c_str()).x);
         }
-        rail_w = std::min(rail_w + ImGui::GetFontSize() * 3.2f, ImGui::GetContentRegionAvail().x * 0.36f);
+        rail_w = std::min(rail_w + ImGui::GetFontSize() * 5.0f, ImGui::GetContentRegionAvail().x * 0.29f);
 
-        const float footer = ImGui::GetTextLineHeightWithSpacing() + ImGui::GetStyle().ItemSpacing.y;
-        sk.begin_child("##body", ImVec2(0, -footer), ImGuiChildFlags_None);
         draw_category_rail(cats, rail_w);
-        ImGui::SameLine();
-        sk.begin_child("##parts", ImVec2(0, 0), ImGuiChildFlags_Borders | ImGuiChildFlags_AlwaysUseWindowPadding);
+        ImGui::SameLine(0.0f, ImGui::GetStyle().ItemSpacing.x * 2.0f + 1.0f);
+        ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0, 0, 0, 0));
+        ImGui::BeginChild("##parts", ImVec2(0, 0), ImGuiChildFlags_None);
+        ImGui::PopStyleColor();
         for (const Category& c : cats)
         {
             if (c.name == m_category)
@@ -1193,9 +1511,7 @@ namespace uuepbs::ui
                                m_morph_names.size(), m_morph_names.size() == 1 ? "" : "s");
             ImGui::PopTextWrapPos();
         }
-        sk.end_child();
-        sk.end_child();
-        ImGui::TextColored(muted(), "Ctrl+click a slider to type a value. Ctrl+wheel nudges it (add Shift for finer steps).");
+        ImGui::EndChild();
     }
 
     void PanelView::draw_detailed()
@@ -1322,41 +1638,83 @@ namespace uuepbs::ui
         BoneEdit s = scale_of(m_selected, Spread::Chain);
         bool changed = false;
         sk.begin_child("##editor", ImVec2(0, 0), ImGuiChildFlags_None);
-        if (ImGui::CollapsingHeader(s.has_scale() ? "Scale  *###scale" : "Scale###scale", ImGuiTreeNodeFlags_DefaultOpen))
-        {
-            ImGui::SetNextItemWidth(-ImGui::CalcTextSize("Length (X)").x - ImGui::GetStyle().ItemInnerSpacing.x * 2);
-            changed |= size_slider("Size", s, kScaleMin, kScaleMax);
-            changed |= axis_sliders(s);
-            if (s.has_scale() && sk.small_button("Reset scale"))
+        // Same rows as the Body tab: label | hairline track | number box | Reset.
+        const float label_w = ImGui::CalcTextSize("Length (X)").x + ImGui::GetFontSize() * 1.6f;
+        auto row = [&](const char* label, double& value, float lo, float hi, bool log, float neutral, const char* format, const char* tip) {
+            RowSpec spec;
+            spec.id = label;
+            spec.title = label;
+            spec.tip = tip;
+            spec.edited = std::fabs(value - neutral) > 1e-6;
+            spec.lo = lo;
+            spec.hi = hi;
+            spec.log = log;
+            spec.neutral = neutral;
+            spec.format = format;
+            spec.can_reset = spec.edited;
+            spec.label_w = label_w;
+            float v = static_cast<float>(value);
+            const RowResult r = part_row(spec, v);
+            if (r.reset)
             {
-                s.axis[0] = s.axis[1] = s.axis[2] = 1.0;
+                value = neutral;
+                return true;
+            }
+            if (r.changed)
+            {
+                value = log ? std::clamp(static_cast<double>(v), 0.01, 100.0) : v;
+                return true;
+            }
+            return false;
+        };
+        ImGui::PushStyleColor(ImGuiCol_Header, sk.color(Role::Section));
+        ImGui::PushStyleColor(ImGuiCol_HeaderHovered, ImGui::GetStyleColorVec4(ImGuiCol_FrameBgHovered));
+        ImGui::PushStyleColor(ImGuiCol_HeaderActive, ImGui::GetStyleColorVec4(ImGuiCol_FrameBgActive));
+        const bool scale_open = ImGui::CollapsingHeader(s.has_scale() ? "Scale  *###scale" : "Scale###scale", ImGuiTreeNodeFlags_DefaultOpen);
+        ImGui::PopStyleColor(3);
+        if (scale_open)
+        {
+            double size = (s.axis[0] + s.axis[1] + s.axis[2]) / 3.0;
+            if (row("Size", size, kScaleMin, kScaleMax, true, 1.0f, "%.3f", "All three axes together"))
+            {
+                set_size(s, size);
                 changed = true;
             }
+            changed |= row("Length (X)", s.axis[0], kScaleMin, kScaleMax, true, 1.0f, "%.3f", "Along the bone");
+            changed |= row("Width (Y)", s.axis[1], kScaleMin, kScaleMax, true, 1.0f, "%.3f", "Sideways");
+            changed |= row("Depth (Z)", s.axis[2], kScaleMin, kScaleMax, true, 1.0f, "%.3f", "Front to back");
         }
-        if (ImGui::CollapsingHeader(s.has_turn() ? "Rotate  *###rotate" : "Rotate###rotate", s.has_turn() ? ImGuiTreeNodeFlags_DefaultOpen : 0))
+        ImGui::PushStyleColor(ImGuiCol_Header, sk.color(Role::Section));
+        ImGui::PushStyleColor(ImGuiCol_HeaderHovered, ImGui::GetStyleColorVec4(ImGuiCol_FrameBgHovered));
+        ImGui::PushStyleColor(ImGuiCol_HeaderActive, ImGui::GetStyleColorVec4(ImGuiCol_FrameBgActive));
+        const bool turn_open = ImGui::CollapsingHeader(s.has_turn() ? "Rotate  *###rotate" : "Rotate###rotate", s.has_turn() ? ImGuiTreeNodeFlags_DefaultOpen : 0);
+        ImGui::PopStyleColor(3);
+        if (turn_open)
         {
-            changed |= turn_sliders(s);
-            if (s.has_turn() && sk.small_button("Reset rotation"))
-            {
-                s.turn[0] = s.turn[1] = s.turn[2] = 0.0;
-                changed = true;
-            }
+            changed |= row("Roll (X)", s.turn[0], -180.0f, 180.0f, false, 0.0f, "%.1f", "Degrees");
+            changed |= row("Pitch (Y)", s.turn[1], -180.0f, 180.0f, false, 0.0f, "%.1f", "Degrees");
+            changed |= row("Yaw (Z)", s.turn[2], -180.0f, 180.0f, false, 0.0f, "%.1f", "Degrees");
         }
-        if (ImGui::CollapsingHeader(s.has_shift() ? "Move  *###move" : "Move###move", s.has_shift() ? ImGuiTreeNodeFlags_DefaultOpen : 0))
+        ImGui::PushStyleColor(ImGuiCol_Header, sk.color(Role::Section));
+        ImGui::PushStyleColor(ImGuiCol_HeaderHovered, ImGui::GetStyleColorVec4(ImGuiCol_FrameBgHovered));
+        ImGui::PushStyleColor(ImGuiCol_HeaderActive, ImGui::GetStyleColorVec4(ImGuiCol_FrameBgActive));
+        const bool move_open = ImGui::CollapsingHeader(s.has_shift() ? "Move  *###move" : "Move###move", s.has_shift() ? ImGuiTreeNodeFlags_DefaultOpen : 0);
+        ImGui::PopStyleColor(3);
+        if (move_open)
         {
-            changed |= shift_sliders(s);
-            if (s.has_shift() && sk.small_button("Reset move"))
-            {
-                s.shift[0] = s.shift[1] = s.shift[2] = 0.0;
-                changed = true;
-            }
+            changed |= row("Along (X)", s.shift[0], -20.0f, 20.0f, false, 0.0f, "%.2f", "Centimetres");
+            changed |= row("Side (Y)", s.shift[1], -20.0f, 20.0f, false, 0.0f, "%.2f", "Centimetres");
+            changed |= row("Up (Z)", s.shift[2], -20.0f, 20.0f, false, 0.0f, "%.2f", "Centimetres");
         }
         ImGui::Spacing();
 
         int spread = static_cast<int>(s.spread);
         const char* spreads[3] = {spread_label(Spread::Chain), spread_label(Spread::Keep), spread_label(Spread::Solo)};
-        ImGui::SetNextItemWidth(-ImGui::CalcTextSize("Length (X)").x - ImGui::GetStyle().ItemInnerSpacing.x * 2);
-        if (ImGui::Combo("Children", &spread, spreads, 3))
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextUnformatted("Children");
+        ImGui::SameLine(label_w);
+        ImGui::SetNextItemWidth(std::min(ImGui::GetContentRegionAvail().x, ImGui::GetFontSize() * 14.0f));
+        if (ImGui::Combo("##children", &spread, spreads, 3))
         {
             s.spread = static_cast<Spread>(spread);
             changed = true; // remembered as a hint even while the bone is still at 1.0x
@@ -1378,7 +1736,7 @@ namespace uuepbs::ui
             changed = true;
         }
 
-        ImGui::TextColored(muted(), "Ctrl+click to type a value. Ctrl+wheel nudges (Shift: finer).");
+        ImGui::TextColored(muted(), "Click a number to type a value. Ctrl+wheel over a slider nudges it (Shift: finer).");
         sk.end_child();
 
         if (changed)
@@ -1394,7 +1752,6 @@ namespace uuepbs::ui
     void PanelView::draw_detailed_morphs()
     {
         Skin& sk = skin();
-        const float reset_w = sk.button_width("Reset", "reset");
         ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - ImGui::CalcTextSize("Edited only").x - ImGui::GetFrameHeight() -
                                 ImGui::GetStyle().ItemSpacing.x * 2);
         ImGui::InputTextWithHint("##findmorph", "Search morphs...", m_morph_filter, sizeof(m_morph_filter));
@@ -1425,7 +1782,7 @@ namespace uuepbs::ui
             name_w = std::max(name_w, ImGui::CalcTextSize(m->c_str()).x);
         }
         const float warn_w = ImGui::CalcTextSize(" !").x;
-        name_w = std::min(name_w + warn_w, ImGui::GetContentRegionAvail().x * 0.45f) + ImGui::GetStyle().ItemSpacing.x;
+        name_w = std::min(name_w + warn_w + ImGui::GetFontSize() * 1.2f, ImGui::GetContentRegionAvail().x * 0.40f) + ImGui::GetStyle().ItemSpacing.x;
 
         ImGuiListClipper clipper; // faces can have hundreds of morphs
         clipper.Begin(static_cast<int>(rows.size()), ImGui::GetFrameHeightWithSpacing());
@@ -1437,45 +1794,38 @@ namespace uuepbs::ui
                 ImGui::PushID(name.c_str());
                 const std::optional<double> w = morph_of(name);
                 const bool animated = m_animated.count(fold_case(name)) > 0;
-                ImGui::AlignTextToFramePadding();
-                if (w)
-                {
-                    ImGui::TextColored(accent(), "%s", name.c_str());
-                }
-                else
-                {
-                    ImGui::TextUnformatted(name.c_str());
-                }
-                if (animated)
-                {
-                    ImGui::SameLine(0.0f, 0.0f);
-                    ImGui::TextColored(warn(), " !");
-                    tooltip("The game keeps setting this morph itself (animation or its own code),\nso the slider may not stick. UUEPBS re-applies it each time it notices.");
-                }
-                ImGui::SameLine(name_w);
-                ImGui::SetNextItemWidth(std::max(80.0f, ImGui::GetContentRegionAvail().x - reset_w - ImGui::GetStyle().ItemSpacing.x));
+                RowSpec spec;
+                spec.id = "row";
+                spec.title = animated ? name + " !" : name;
+                spec.tip = animated ? "The game keeps setting this morph itself (animation or its own code),\nso the slider may not stick. "
+                                      "UUEPBS re-applies it each time it notices."
+                                    : "Empty box = the game's own value.";
+                spec.edited = w.has_value();
+                spec.lo = kMorphSliderMin;
+                spec.hi = kMorphSliderMax;
+                spec.unset = !w.has_value();
+                spec.can_reset = w.has_value();
+                spec.label_w = name_w;
                 float v = static_cast<float>(w.value_or(0.0));
-                if (morph_slider("##w", v))
-                {
-                    write_morph(name, v);
-                    const std::string other = mirror_bone_name(name);
-                    if (m_mirror && !other.empty() && has_morph(other))
-                    {
-                        write_morph(other, v);
-                    }
-                }
-                ImGui::SameLine();
-                ImGui::BeginDisabled(!w);
-                if (sk.button("Reset", "reset"))
+                const RowResult res = part_row(spec, v);
+                const std::string other = mirror_bone_name(name);
+                const bool twin = m_mirror && !other.empty() && has_morph(other);
+                if (res.reset)
                 {
                     write_morph(name, std::nullopt);
-                    const std::string other = mirror_bone_name(name);
-                    if (m_mirror && !other.empty() && has_morph(other))
+                    if (twin)
                     {
                         write_morph(other, std::nullopt);
                     }
                 }
-                ImGui::EndDisabled();
+                else if (res.changed)
+                {
+                    write_morph(name, v);
+                    if (twin)
+                    {
+                        write_morph(other, v);
+                    }
+                }
                 ImGui::PopID();
             }
         }
@@ -1498,7 +1848,7 @@ namespace uuepbs::ui
         }
         ImGui::EndDisabled();
         ImGui::PushTextWrapPos(0.0f);
-        ImGui::TextColored(muted(), "A set morph replaces the game's value (even at 0); Reset gives it back. Ctrl+click to type values outside 0..1.");
+        ImGui::TextColored(muted(), "A set morph replaces the game's value (even at 0); Reset gives it back. Type into a box for values outside 0..1.");
         ImGui::PopTextWrapPos();
     }
 
@@ -1550,7 +1900,7 @@ namespace uuepbs::ui
             refresh_presets();
         }
 
-        ImGui::SeparatorText("Save current sliders");
+        section_bar("Save current sliders");
         ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - sk.button_width("Save", "save") - ImGui::GetStyle().ItemSpacing.x);
         const bool enter =
             ImGui::InputTextWithHint("##name", "Preset name", m_preset_name, sizeof(m_preset_name), ImGuiInputTextFlags_EnterReturnsTrue);
@@ -1587,7 +1937,8 @@ namespace uuepbs::ui
             ImGui::EndPopup();
         }
 
-        ImGui::SeparatorText("Saved presets");
+        ImGui::Spacing();
+        section_bar("Saved presets");
         const float list_h = std::max(120.0f, ImGui::GetContentRegionAvail().y - ImGui::GetFrameHeightWithSpacing() * 4.5f);
         sk.begin_child("##presetlist", ImVec2(0, list_h), ImGuiChildFlags_Borders);
         if (m_presets.empty())
@@ -1684,7 +2035,8 @@ namespace uuepbs::ui
     void PanelView::draw_skin_picker()
     {
         Skin& sk = skin();
-        ImGui::SeparatorText("Window skin");
+        ImGui::Spacing();
+        section_bar("Window skin");
         if (Clock::now() - m_skins_time > std::chrono::seconds(3))
         {
             m_skins = sk.available();
@@ -1807,7 +2159,8 @@ namespace uuepbs::ui
         draw_edited_characters();
         draw_skin_picker();
 
-        ImGui::SeparatorText("Tracked meshes");
+        ImGui::Spacing();
+        section_bar("Tracked meshes");
         if (ImGui::BeginTable("##rigs", 3, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_SizingStretchProp))
         {
             ImGui::TableSetupColumn("Component");

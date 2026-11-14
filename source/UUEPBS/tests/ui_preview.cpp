@@ -346,12 +346,14 @@ int main(int argc, char** argv)
         ui::PanelView::Tab tab;
         int detail; // -1, or a PanelView::Detail
         const char* file;
+        bool chooser{false}; // with the "Choose character" grid open
     };
     const Shot shots[] = {{ui::PanelView::Tab::Simplified, -1, "preview_simplified.ppm"},
                           {ui::PanelView::Tab::Detailed, 0, "preview_detailed.ppm"},
                           {ui::PanelView::Tab::Detailed, 1, "preview_morphs.ppm"},
                           {ui::PanelView::Tab::Presets, -1, "preview_presets.ppm"},
-                          {ui::PanelView::Tab::Status, -1, "preview_status.ppm"}};
+                          {ui::PanelView::Tab::Status, -1, "preview_status.ppm"},
+                          {ui::PanelView::Tab::Simplified, -1, "preview_chooser.ppm", true}};
 
     ui::SoftRenderer soft;
     int failures = 0;
@@ -376,6 +378,7 @@ int main(int argc, char** argv)
             if (shot.tab == ui::PanelView::Tab::Detailed)
                 view.select_bone("boob_l");
             view.focus_category("Hips & Legs");
+            view.show_character_chooser(shot.chooser);
             for (int frame = 0; frame < 4; ++frame)
             {
                 if (ui::skin().update())

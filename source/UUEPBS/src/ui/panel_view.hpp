@@ -96,6 +96,8 @@ namespace uuepbs::ui
         void focus_detail(Detail d) { m_focus_detail = static_cast<int>(d); }
         void select_bone(const std::string& bone) { m_selected = bone; }
         void focus_category(const std::string& name) { m_category = name; }
+        // Opens (true) or closes (false) the "Choose character" grid on the next frame.
+        void show_character_chooser(bool show) { (show ? m_choose_open : m_choose_close) = true; }
         void set_message(const std::string& text);
 
       private:
@@ -108,17 +110,12 @@ namespace uuepbs::ui
         void write_group(const GroupBones& group, const double axis[3]);
         std::optional<double> morph_of(const std::string& morph) const;
         void write_morph(const std::string& morph, std::optional<double> weight);
-        static bool size_slider(const char* id, BoneEdit& s, float lo, float hi, const char* format = "%.3fx");
-        static bool axis_sliders(BoneEdit& s);
-        static bool turn_sliders(BoneEdit& s);
-        static bool shift_sliders(BoneEdit& s);
-        static bool morph_slider(const char* id, float& v, const char* format = "%.2f");
         static void tooltip(const char* text);
         void draw_header();
         void draw_target_picker();
         void draw_simplified();
-        // Character-creator layout of the Simplified Panel: body-part categories on the left,
-        // the picked category's sliders on the right.
+        // Character-creator layout of the Body tab (2.7): body-part categories on the left,
+        // the picked category's sliders on the right, in a bordered group under a section bar.
         struct Category
         {
             std::string name;
@@ -128,13 +125,41 @@ namespace uuepbs::ui
         std::vector<Category> categories() const;
         void draw_category_rail(const std::vector<Category>& cats, float width);
         void draw_category(const Category& cat);
-        // Label + readable value (+ buttons) on one line; the caller draws the slider below it.
-        // Returns 1 when the first button was pressed, 2 for the second, else 0.
-        int part_header(const std::string& title, const std::string& icon_key, bool edited, const char* value, bool value_muted,
-                        const std::string& tip, const char* button1, const char* icon1, bool button1_on, bool button2_enabled);
+        // One slider row:  label | hairline track | number box (click to type) | [XYZ] | Reset.
+        struct RowResult
+        {
+            bool changed{false};
+            bool axes{false};  // XYZ pressed
+            bool reset{false}; // Reset pressed
+        };
+        struct RowSpec
+        {
+            const char* id{};
+            std::string title;
+            std::string tip;
+            bool edited{false};
+            float lo{0.0f}, hi{1.0f};
+            bool log{false};
+            float neutral{0.0f};          // where the centre tick goes
+            const char* format{"%.2f"};   // number box
+            bool unset{false};            // number box shows `unset_hint` instead of a value
+            const char* unset_hint{"game"};
+            bool has_axes{false};
+            bool axes_open{false};
+            bool can_reset{false};
+            float label_w{0.0f};
+        };
+        static RowResult part_row(const RowSpec& spec, float& v);
+        // Flat 2px track with a centre tick and a 6x16 thumb; a skin with slider images keeps its own slider.
+        static bool hairline_slider(const char* id, float* v, float lo, float hi, bool log, float neutral);
+        // Lighter full-width bar with a title (and optional right-aligned button). True when the button was pressed.
+        static bool section_bar(const char* title, const char* button = nullptr, bool button_enabled = true, const char* icon_key = "reset");
         static bool compact_button(const char* label, const char* icon_key);
         static float compact_button_width(const char* label, const char* icon_key);
-        void draw_live_badge();
+        // Title row, character banner (portrait/monogram, name, details, Change character / Rename).
+        void draw_character_banner();
+        // "Choose character" modal: a grid of square tiles.
+        void draw_character_chooser();
         void draw_rename_popup();
         std::string identity_of(const std::string& key);
         void draw_detailed();
@@ -158,6 +183,9 @@ namespace uuepbs::ui
         // then stays put, so entries don't move under the mouse.
         bool m_target_combo_open{false};
         char m_rename_buf[96]{};
+        bool m_rename_open{false};
+        bool m_choose_open{false};
+        bool m_choose_close{false};
         std::string m_rename_key{};      // CharacterNames key being renamed
         bool m_rename_stable{false};
         std::string m_rename_label{};    // the game's name, shown in the rename popup

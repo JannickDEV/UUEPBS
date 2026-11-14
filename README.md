@@ -6,6 +6,14 @@ Universal Unreal Engine Player Body Sliders (UUEPBS) is a near universal player 
 
 
 https://github.com/user-attachments/assets/4e4372bc-8a64-4255-b8ae-a33645ce187e
+### V2.7.0 - Changelogs
+* New window look: flat slate-navy theme with sharp corners, flush text tabs (**Body**, **Presets**, **Advanced**, **Status**) and 1px bordered groups
+* Body tab (was the Simplified Panel): body-part categories on the left, the picked category's sliders on the right under a section bar with **Reset**
+* Thin sliders whose value sits in a box next to them (click it to type), so the grab never covers the number
+* Character banner at the top (monogram, name, engine name, live state) with **Change character**, which opens a grid of every loaded character
+* **Rename** a character: your name for it is shown everywhere in the window and saved in `UUEPBS Presets\_characters\_names.txt`; the game and engine names stay in tooltips and on the Status tab
+* Bone tree and morph list moved to the **Advanced** tab (was the Detailed Panel). Skins keep working; tabs no longer show icons
+
 ### V2.6.1 - Changelogs
 * Added full support for player and NPC that works simultaneously
 * Improved performance
@@ -38,15 +46,17 @@ https://github.com/user-attachments/assets/4e4372bc-8a64-4255-b8ae-a33645ce187e
   The window is a separate top-level window, so it works with borderless or windowed fullscreen. With *exclusive* fullscreen, switch the game to borderless.
 * **F7** (`RefreshKey` in `config.lua`, `""` turns it off) does the same as the **Refresh** button, in game or in the window.
   It rescans the character and its meshes, relists the characters, and immediately retries a pose hook that was refused, instead of waiting out the retry delay.
-* **Character** picker at the top: *Automatic* picks the game profile's character, or otherwise the pawn you control. The list also shows every `Character` loaded in the level.
-  The list is only built while the window is open (and every few seconds while it stays open). **Refresh** rescans all actors within the current level.
-* **Simplified Panel** (called the Body tab before 2.2): curated sliders for the head, neck, rib cage, waist, hips, shoulders, breasts, butt, thighs, calves, arms and so on.
+* **Character banner** at the top: who the sliders edit, with the engine name and whether the pose hook is live.
+  **Change character** opens a grid of every `Character` loaded in the level (nearest first). *Automatic* picks the game profile's character, or otherwise the pawn you control.
+  A small square marks characters with edited sliders. The list is only built while the window is open. **Refresh** (in the grid) rescans all actors within the current level.
+  **Rename** gives the character a name of your own. It is saved in `UUEPBS Presets\_characters\_names.txt` (for the player and for NPCs the mod recognises after a reload; other characters keep it for the visit).
+* **Body** tab (called the Simplified Panel in 2.2–2.6): pick a category on the left (Head & Neck, Torso, Chest, Hips & Legs, Arms...), then use its curated sliders for the head, neck, rib cage, waist, hips, shoulders, breasts, butt, thighs, calves, arms and so on.
   A slider only appears when the skeleton has matching bones. Hover a slider's name to see which bones it drives.
   Left/right pairs and twist/roll/jiggle helper bones move together. **XYZ** splits the size into Length (X, along the bone), Width (Y) and Depth (Z).
-  Scale sliders run from 0.1× to 10× on a log scale. **Ctrl + mouse wheel** nudges a slider by 0.01, and **Ctrl + Shift + wheel** by 0.001.
-  Ctrl+click any slider to type a value.
+  Scale sliders run from 0.1× to 10× on a log scale; the tick marks 1.0×. **Ctrl + mouse wheel** nudges a slider by 0.01, and **Ctrl + Shift + wheel** by 0.001.
+  Click the number box next to a slider to type a value. **Reset** on the section bar resets the whole category.
   Morph groups from the game profile (`MorphGroups`, see below) appear here as extra sliders.
-* **Detailed Panel** (called the Bones tab before 2.2). When the meshes have morph targets it has two sub-tabs, **Bones** and **Morphs**.
+* **Advanced** tab (called the Detailed Panel in 2.2–2.6, the Bones tab before). When the meshes have morph targets it has two sub-tabs, **Bones** and **Morphs**.
   * **Bones:** every bone of the primary mesh, with search, "edited only" and mirror left/right.
     * **Scale**, **Rotate** (roll/pitch/yaw in degrees, pivoting on the joint) and **Move** (cm), all in the bone's own axes (X runs along the bone).
     * **Children** mode:
@@ -55,7 +65,7 @@ https://github.com/user-attachments/assets/4e4372bc-8a64-4255-b8ae-a33645ce187e
       * *This bone only* changes nothing below the bone.
     * **Mirror to other side** gives the opposite bone the true mirror image. The per-bone axis conversion is measured from the skeleton's reference pose, or from the first animated frame if the game doesn't expose the reference pose.
       The Status tab shows which one was used.
-  * **Morphs:** every morph target on the tracked meshes, with search and "edited only". Sliders run 0–1; Ctrl+click types any value from −2 to 2.
+  * **Morphs:** every morph target on the tracked meshes, with search and "edited only". Sliders run 0–1; the box takes any value from −2 to 2 (empty = the game's value).
     * A morph you move **replaces** the game's own value, even at 0. **Reset** gives it back, and the value the game had before comes back.
     * *Mirror left/right morphs* moves `…_L`/`…_R` twins together.
     * A **!** next to a name means the game keeps setting that morph itself (an animation or its own code). UUEPBS puts your value back each time it notices, but it may flicker or not stick.
@@ -74,7 +84,8 @@ Skins live in **`<Win64>\UUEPBS Skins\<name>\`**: a `skin.json` plus PNG or JPG 
 Pick a skin in **Status > Window skin** or with `ubs skin <name>`; the choice is remembered. `Skin` in `config.lua` sets the one used until you pick another.
 
 * **What a skin can change:** every colour (accent, text, window, panels, frames, buttons, tabs, headers, scrollbars; any Dear ImGui colour by name), sizes (rounding, padding, spacing, borders, font scale), a TTF/OTF font, and images for the
-  window background, the title strip, a logo in place of the title, panels, buttons (normal/hover/pressed), slider track/fill/grab, checkboxes and tabs, plus icons for the tabs, buttons and each Simplified Panel slider (`"group.Thighs"`).
+  window background, the title strip, a logo in place of the title, panels, buttons (normal/hover/pressed), slider track/fill/grab, checkboxes and tabs, plus icons for buttons and each Body tab category (`"section.Hips & Legs"`).
+  A skin with slider images keeps its own sliders instead of the thin built-in ones.
 * **What it can't change:** the layout. Skins are looks only.
 * **Images** can stretch, cover, contain, centre, tile, or nine-slice (corners keep their size, so one small frame image fits any button). Anything a skin leaves out keeps the built-in look, and an image that can't be loaded falls back to the normal widget; the Status tab lists the problem.
 * **Editing:** the window reloads the active skin as soon as you save `skin.json` or one of its images, so you can tweak it with the game running. Start by copying the example folder.
