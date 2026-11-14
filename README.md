@@ -16,6 +16,7 @@ https://github.com/user-attachments/assets/4e4372bc-8a64-4255-b8ae-a33645ce187e
 * Added Undo / Redo for slider edits (buttons in the character banner, **Ctrl+Z** / **Ctrl+Y** or **Ctrl+Shift+Z**), kept per character
 * Added a "Changed only" filter to the Body tab
 * Added preset details: the Presets tab shows which body parts, bones and morphs a preset changes before you load it
+* Added symmetry tools above the sliders: **Symmetry lock** (replaces the per-bone and per-morph mirror checkboxes), **Mirror L to R** / **Mirror R to L** for the whole character, and **Randomize** with adjustable **Limits**. Each action is one undo step
 
 ### V2.6.1 - Changelogs
 * Added full support for player and NPC that works simultaneously
@@ -62,18 +63,23 @@ https://github.com/user-attachments/assets/4e4372bc-8a64-4255-b8ae-a33645ce187e
   **Changed only** hides every body part and morph group that is still at the game's own shape.
 * **Undo / Redo** (buttons in the character banner, **Ctrl+Z** and **Ctrl+Y** / **Ctrl+Shift+Z** while the window has focus) step back and forth through slider changes.
   A whole drag, a burst of Ctrl+wheel nudges, a preset load or a reset counts as one step. Each character has its own history (up to 100 steps), so undoing never touches another character's sliders.
+* **Symmetry tools** (row above the sliders on the Body and Advanced tabs):
+  * **Symmetry lock** (on by default): editing a left or right bone, or a `…_L`/`…_R` morph, under Advanced also gives its partner the mirror image. Body tab parts always move both sides together.
+  * **Mirror L to R** / **Mirror R to L** copy every edit on one side of the character onto the other side as a mirror image (bones and morphs). Edits on the receiving side are replaced, and a bone there whose partner is unedited goes back to the game's shape. Bones in the middle (spine, head) are not touched.
+  * **Randomize** (Body tab) gives every body part a random size, and morph groups a random weight, inside the **Limits**: *Size ±* (default 15 %), *Shape ±* (extra per-axis variation, default 5 %), the morph weight range (default 0–0.6), which of the two to touch, and *Only <category>* to leave the other categories alone. Both sides of a part always get the same values; rotations, moves and Children settings are kept.
+  * Each Mirror or Randomize click is exactly one undo step, so **Ctrl+Z** takes it back.
 * **Advanced** tab (called the Detailed Panel in 2.2–2.6, the Bones tab before). When the meshes have morph targets it has two sub-tabs, **Bones** and **Morphs**.
-  * **Bones:** every bone of the primary mesh, with search, "edited only" and mirror left/right.
+  * **Bones:** every bone of the primary mesh, with search and "edited only".
     * **Scale**, **Rotate** (roll/pitch/yaw in degrees, pivoting on the joint) and **Move** (cm), all in the bone's own axes (X runs along the bone).
     * **Children** mode:
       * *Scale children too* is the engine's behaviour.
       * *Keep children size* makes children follow the new shape without growing.
       * *This bone only* changes nothing below the bone.
-    * **Mirror to other side** gives the opposite bone the true mirror image. The per-bone axis conversion is measured from the skeleton's reference pose, or from the first animated frame if the game doesn't expose the reference pose.
+    * With **Symmetry lock** on, the opposite bone gets the true mirror image. The per-bone axis conversion is measured from the skeleton's reference pose, or from the first animated frame if the game doesn't expose the reference pose.
       The Status tab shows which one was used.
   * **Morphs:** every morph target on the tracked meshes, with search and "edited only". Sliders run 0–1; the box takes any value from −2 to 2 (empty = the game's value).
     * A morph you move **replaces** the game's own value, even at 0. **Reset** gives it back, and the value the game had before comes back.
-    * *Mirror left/right morphs* moves `…_L`/`…_R` twins together.
+    * With **Symmetry lock** on, `…_L`/`…_R` twins move together.
     * A **!** next to a name means the game keeps setting that morph itself (an animation or its own code). UUEPBS puts your value back each time it notices, but it may flicker or not stick.
 * **Presets** tab: save, load (or double-click), delete and open the folder. Clicking a preset once shows what it changes next to the list:
   body parts with their size (and whether they are rotated or moved), other bones, morphs with their weights, and anything the current character doesn't have. Presets are JSON files in **`<Win64>\UUEPBS Presets`** and hold bones and morphs.

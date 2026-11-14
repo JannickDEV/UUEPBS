@@ -14,6 +14,7 @@
 #include "../core/morphs.hpp"
 #include "../core/presets.hpp"
 #include "../core/registry.hpp"
+#include "../core/symmetry.hpp"
 
 #include <imgui.h>
 
@@ -188,6 +189,13 @@ namespace uuepbs::ui
         void refresh_preset_details();
         void draw_preset_details();    // what the picked preset changes, before loading it
 
+        // Symmetry tools (Body and Advanced tabs): Symmetry lock, Mirror L to R / R to L, Randomize.
+        void draw_symmetry_tools(bool randomize);
+        void apply_action(const EditSnapshot& next, const char* what); // one undo step
+        void mirror_all(Side from);
+        void randomize_body();
+        void draw_random_limits(); // "Limits" popup
+
         const PresetShelf* m_shelf{};
         PanelHost* m_host{};
         TargetSource* m_targets{};
@@ -246,7 +254,7 @@ namespace uuepbs::ui
         std::map<std::string, Spread> m_spread_hint{};
         char m_filter[64]{};
         bool m_only_edited{false};
-        bool m_mirror{true};
+        bool m_mirror{true}; // Symmetry lock: an Advanced bone/morph edit also writes its mirror image
         std::string m_selected{};
 
         std::vector<std::string> m_presets{};
@@ -268,6 +276,11 @@ namespace uuepbs::ui
         std::string m_details_error{};
         EditSummary m_details{};
         Clock::time_point m_details_time{};
+
+        // Randomize
+        RandomLimits m_random{};
+        bool m_random_category_only{false};
+        uint64_t m_random_count{0};
 
         std::vector<std::string> m_skins{};
         Clock::time_point m_skins_time{};
