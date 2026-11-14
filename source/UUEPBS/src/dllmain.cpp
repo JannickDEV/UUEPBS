@@ -287,6 +287,12 @@ namespace
 
         std::string hotkey_text() override { return key_label(m_hotkey.load()); }
 
+        std::string compare_hotkey_text() override
+        {
+            const int vk = m_compare_key.load();
+            return vk ? key_label(vk) : std::string();
+        }
+
         std::string write_diagnostics() override
         {
             const uintptr_t comp = uuepbs::Registry::instance().primary_component();
@@ -347,6 +353,22 @@ namespace
             if (pressed(m_refresh_key.load(), m_refresh_down))
             {
                 refresh_now();
+            }
+            poll_compare_key();
+        }
+
+        // Hold-to-compare: the original body shows while CompareKey is down (and the game or the
+        // window has focus). The window's Before / After switch ends when the window closes, so
+        // the game is never left showing the original by accident.
+        void poll_compare_key()
+        {
+            uuepbs::Registry& reg = uuepbs::Registry::instance();
+            const int vk = m_compare_key.load();
+            const bool down = vk && (GetAsyncKeyState(vk) & 0x8000) != 0 && game_has_focus();
+            reg.set_compare_held(down);
+            if (reg.compare().latched() && !uuepbs::ui::visible())
+            {
+                reg.set_compare(false);
             }
         }
 
@@ -768,6 +790,7 @@ namespace
             m_hotkey.store(vk ? vk : VK_F6);
             const std::string refresh_name = state.setting("refresh_key", "F7");
             m_refresh_key.store(uuepbs::bridge::virtual_key_from_name(refresh_name)); // "" or unknown = off
+            m_compare_key.store(uuepbs::bridge::virtual_key_from_name(state.setting("compare_key"))); // hold to see the original; "" = off
 
             const std::string folder = state.setting("presets");
             if (!m_shelf_ready || folder != m_shelf_source)
@@ -1139,7 +1162,7 @@ namespace
             uuepbs::Registry& reg = uuepbs::Registry::instance();
             uint64_t morph_rev = 0;
             const auto morphs = reg.all_morphs(&morph_rev);
-            const bool send_morphs = reg.enabled();
+            const bool send_morphs = reg.applying(); // not while off or showing the original (Lua puts the game's values back)
             std::vector<std::pair<std::string, std::string>> keeps;
             for (const auto& a : reg.edited_actors())
             {
@@ -1270,6 +1293,15 @@ namespace
                 reg.set_enabled(v == "on");
                 return "sliders " + v;
             }
+            if (v == "compare")
+            {
+                // ubs compare [on|off]: on = show the original body, off = back to the edits, nothing = switch.
+                const std::string a = fold_arg(c.argument);
+                reg.set_compare(a == "on" ? true : a == "off" ? false : !reg.compare().latched());
+                const std::string text = reg.comparing() ? "Showing the original body (before) - edits kept" : "Showing your edits (after)";
+                uuepbs::ui::post_message(text);
+                return text;
+            }
             if (v == "reset")
             {
                 if (fold_arg(c.argument) == "all")
@@ -1362,6 +1394,7 @@ namespace
         std::atomic<bool> m_quit{false};
         std::atomic<int> m_hotkey{VK_F6};
         std::atomic<int> m_refresh_key{VK_F7};
+        std::atomic<int> m_compare_key{0}; // CompareKey: hold to show the original body (0 = off)
         bool m_key_down{};
         bool m_refresh_down{};
         bool m_retry_hook{};

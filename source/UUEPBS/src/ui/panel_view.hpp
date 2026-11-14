@@ -62,6 +62,7 @@ namespace uuepbs::ui
         virtual std::string hotkey_text() = 0; // e.g. "F6"
         virtual std::string write_diagnostics() { return {}; } // returns where it was written
         virtual std::string refresh_hotkey_text() { return {}; } // e.g. "F7", empty = no hotkey
+        virtual std::string compare_hotkey_text() { return {}; } // CompareKey, e.g. "F8", empty = no hotkey
         // Who an actor key is across reloads (character_memory.hpp), "" when unknown. Renames are
         // stored under it, so they survive reloads.
         virtual std::string identity_of(const std::string& key) { (void)key; return {}; }
@@ -166,6 +167,8 @@ namespace uuepbs::ui
         static float compact_button_width(const char* label, const char* icon_key);
         // Title row, character banner (portrait/monogram, name, details, Change character / Rename).
         void draw_character_banner();
+        void draw_compare_switch(); // Before | After (core/compare.hpp)
+        static float compare_switch_width();
         // "Choose character" modal: a grid of square tiles.
         void draw_character_chooser();
         void draw_rename_popup();

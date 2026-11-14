@@ -627,7 +627,8 @@ namespace uuepbs::ui
         const std::string shown_note = fit_text(note, std::max(dpi_px(60.0f), ImGui::GetContentRegionAvail().x * 0.30f - rename_w));
         const float note_w = ImGui::CalcTextSize(shown_note.c_str()).x;
         ImGui::PopFont();
-        const float right_w = std::max(change_w, note_w + rename_w + style.ItemSpacing.x);
+        const float compare_w = compare_switch_width();
+        const float right_w = std::max(change_w + style.ItemSpacing.x + compare_w, note_w + rename_w + style.ItemSpacing.x);
 
         ImGui::BeginGroup();
         const float text_w = std::max(dpi_px(80.0f), right_x - ImGui::GetCursorPosX() - right_w - style.ItemSpacing.x * 2.0f);
@@ -673,6 +674,11 @@ namespace uuepbs::ui
                 std::snprintf(buf, sizeof(buf), "Tracking %zu mesh%s - waiting for an animated frame", m_rigs.size(), m_rigs.size() == 1 ? "" : "es");
                 line = buf;
             }
+            else if (Registry::instance().comparing())
+            {
+                col = accent();
+                line = "Before: the game's own body   \xC2\xB7   your edits are kept";
+            }
             else
             {
                 std::snprintf(buf, sizeof(buf), "%s   \xC2\xB7   live on %zu mesh%s   \xC2\xB7   %zu bones%s", Registry::instance().enabled() ? "Edits on" : "Edits off",
@@ -689,7 +695,9 @@ namespace uuepbs::ui
         ImGui::PopFont();
         ImGui::EndGroup();
 
-        // Right: Change character (opens the grid), then Rename and a short note.
+        // Right: Before / After and Change character (opens the grid), then Rename and a short note.
+        ImGui::SetCursorPos(ImVec2(right_x - change_w - style.ItemSpacing.x - compare_w, pad));
+        draw_compare_switch();
         ImGui::SetCursorPos(ImVec2(right_x - change_w, pad));
         ImGui::BeginDisabled(!m_targets);
         if (sk.button("Change character    ", {}, ImVec2(change_w, 0.0f)))
@@ -746,6 +754,60 @@ namespace uuepbs::ui
             m_choose_open = false;
         }
         ImGui::Dummy(ImVec2(0.0f, dpi_px(4.0f)));
+    }
+
+    float PanelView::compare_switch_width()
+    {
+        const ImGuiStyle& style = ImGui::GetStyle();
+        return std::ceil(std::max(ImGui::CalcTextSize("Before").x, ImGui::CalcTextSize("After").x) + style.FramePadding.x * 2.0f) * 2.0f;
+    }
+
+    // Before | After: two flush cells; the one showing is filled with the accent and gets an accent top
+    // line (the line also shows on skins that draw buttons with images). "Before" shows the game's own
+    // body for every character, "After" the sliders. Moving a slider or closing the window goes back to After.
+    void PanelView::draw_compare_switch()
+    {
+        Skin& sk = skin();
+        Registry& reg = Registry::instance();
+        const ImGuiStyle& style = ImGui::GetStyle();
+        const float cell = compare_switch_width() * 0.5f;
+        const bool before = reg.comparing();
+        const bool held = reg.compare().held();
+        std::string tip = "Before shows the game's own body, After shows your sliders. Nothing is lost.\n"
+                          "Moving a slider or closing the window goes back to After.";
+        const std::string key = m_targets ? m_targets->compare_hotkey_text() : std::string();
+        tip += key.empty() ? std::string("\nSet CompareKey in config.lua to compare by holding a key in game.")
+                           : "\nOr hold " + key + " in game to see the original while the key is down.";
+        ImDrawList* dl = ImGui::GetWindowDrawList();
+        ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0.0f, style.ItemSpacing.y));
+        for (int i = 0; i < 2; ++i)
+        {
+            const bool is_before = i == 0;
+            const bool on = is_before == before;
+            if (!is_before)
+            {
+                ImGui::SameLine();
+            }
+            if (on)
+            {
+                ImGui::PushStyleColor(ImGuiCol_Button, accent_dim());
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered, accent_dim());
+                ImGui::PushStyleColor(ImGuiCol_ButtonActive, accent_dim());
+            }
+            if (sk.button(is_before ? "Before##compare" : "After##compare", {}, ImVec2(cell, 0.0f)))
+            {
+                reg.set_compare(is_before);
+            }
+            if (on)
+            {
+                ImGui::PopStyleColor(3);
+                const ImVec2 a = ImGui::GetItemRectMin();
+                const ImVec2 b = ImGui::GetItemRectMax();
+                dl->AddRectFilled(a, ImVec2(b.x, a.y + std::max(1.0f, std::floor(dpi_px(2.0f)))), u32(accent()));
+            }
+            tooltip(held && !is_before ? (tip + "\n(" + key + " is held down right now.)").c_str() : tip.c_str());
+        }
+        ImGui::PopStyleVar();
     }
 
     void PanelView::draw_character_chooser()

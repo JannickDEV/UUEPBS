@@ -6,6 +6,10 @@ Universal Unreal Engine Player Body Sliders (UUEPBS) is a near universal player 
 
 
 https://github.com/user-attachments/assets/4e4372bc-8a64-4255-b8ae-a33645ce187e
+### V2.8.0 - Changelogs
+* **Before / After** switch in the character banner: **Before** shows every character's original body, **After** your sliders. Nothing is lost, and moving a slider or closing the window goes back to After
+* Hold-to-compare hotkey: hold **F8** (`CompareKey` in `config.lua`, `""` turns it off) in game to see the original body, let go to get your sliders back. Console: `ubs compare [on|off]`
+
 ### V2.7.0 - Changelogs
 * New window look: flat slate-navy theme with sharp corners, flush text tabs (**Body**, **Presets**, **Advanced**, **Status**) and 1px bordered groups
 * Body tab (was the Simplified Panel): body-part categories on the left, the picked category's sliders on the right under a section bar with **Reset**
@@ -47,6 +51,8 @@ https://github.com/user-attachments/assets/4e4372bc-8a64-4255-b8ae-a33645ce187e
   The window is a separate top-level window, so it works with borderless or windowed fullscreen. With *exclusive* fullscreen, switch the game to borderless.
 * **F7** (`RefreshKey` in `config.lua`, `""` turns it off) does the same as the **Refresh** button, in game or in the window.
   It rescans the character and its meshes, relists the characters, and immediately retries a pose hook that was refused, instead of waiting out the retry delay.
+* **Before / After** (in the character banner) flips between the game's own body and your edits on every character, without changing any slider.
+  Moving a slider or closing the window switches back to After. **F8** (`CompareKey` in `config.lua`, `""` turns it off) shows the original only while you hold it, in game or in the window.
 * **Character banner** at the top: who the sliders edit, with the engine name and whether the pose hook is live.
   **Change character** opens a grid of every `Character` loaded in the level (nearest first). *Automatic* picks the game profile's character, or otherwise the pawn you control.
   A small square marks characters with edited sliders. The list is only built while the window is open. **Refresh** (in the grid) rescans all actors within the current level.
@@ -79,7 +85,7 @@ https://github.com/user-attachments/assets/4e4372bc-8a64-4255-b8ae-a33645ce187e
   Bone and morph names aren't case-sensitive, and names a character doesn't have are skipped, so one preset can be shared between characters on the same rig.
 * **Status** tab: hook details, the Lua link, mirroring, morph counts, the **window skin** picker, tracked meshes, **Rescan**, and **Write diagnostics**, which dumps what the hook finder sees into the log for bug reports.
 
-UE4SS console: `uuepbs` (toggle window), `uuepbs status`, `uuepbs rescan`, `uuepbs list`, `uuepbs load <name>`, `uuepbs save <name>`, `uuepbs on|off`, `uuepbs reset`, `uuepbs diag`,
+UE4SS console: `uuepbs` (toggle window), `uuepbs status`, `uuepbs rescan`, `uuepbs list`, `uuepbs load <name>`, `uuepbs save <name>`, `uuepbs on|off`, `uuepbs compare [on|off]` (before/after; without on/off it switches), `uuepbs reset`, `uuepbs diag`,
 `uuepbs skin` (list skins), `uuepbs skin <name>` (switch; `Default` = built-in look), `uuepbs morph <name> <weight>` (set a morph; without a weight it goes back to the game).
 `ubs …` is the short form.
 
