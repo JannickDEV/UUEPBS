@@ -12,6 +12,7 @@
 #include "../core/changes.hpp"
 #include "../core/history.hpp"
 #include "../core/morphs.hpp"
+#include "../core/preset_library.hpp"
 #include "../core/presets.hpp"
 #include "../core/registry.hpp"
 
@@ -75,6 +76,13 @@ namespace uuepbs::ui
             (void)stem;
             (void)retake;
         }
+        // Ask the script for a whole-body picture of character `id` for preset `preset`, saved as
+        // "<presets>\_library\<preset>.auto.png" (preset thumbnails).
+        virtual void request_thumbnail(const std::string& id, const std::string& preset)
+        {
+            (void)id;
+            (void)preset;
+        }
     };
 
 
@@ -109,6 +117,10 @@ namespace uuepbs::ui
         // Opens (true) or closes (false) the "Choose character" grid on the next frame.
         void show_character_chooser(bool show) { (show ? m_choose_open : m_choose_close) = true; }
         void pick_preset(const std::string& name) { m_picked = name; } // shows its details in the Presets tab
+        // Presets tab browser: search text and tag filter (headless previews / tests).
+        void search_presets(const std::string& query, std::set<std::string> tags = {});
+        void show_preset_list(bool list) { m_preset_list_view = list; }
+        const PresetLibrary& preset_library() const { return m_library; }
         void set_message(const std::string& text);
 
       private:
@@ -201,6 +213,13 @@ namespace uuepbs::ui
         void refresh_preset_details();
         void draw_preset_details();    // what the picked preset changes, before loading it
 
+        // Preset browser (Presets tab): thumbnails, search, tag filter, tags of the picked preset.
+        void sync_library();
+        void draw_preset_browser(float height);
+        void draw_preset_tags(); // chips of the picked preset + "Add tag"
+        bool tag_chip(const char* label, bool active, bool removable = false); // true when clicked
+        void request_preset_thumbnail(const std::string& preset);
+
         const PresetShelf* m_shelf{};
         PanelHost* m_host{};
         TargetSource* m_targets{};
@@ -281,6 +300,17 @@ namespace uuepbs::ui
         std::string m_details_error{};
         EditSummary m_details{};
         Clock::time_point m_details_time{};
+
+        // Presets tab: browser
+        PresetLibrary m_library{};
+        std::filesystem::path m_library_for{};
+        Clock::time_point m_library_time{};
+        char m_preset_search[64]{};
+        char m_new_tag[32]{};
+        std::set<std::string> m_tag_filter{}; // folded tags that must all be on a preset
+        bool m_preset_list_view{false};       // false = thumbnail grid
+        bool m_scroll_to_picked{false};
+        std::map<std::string, Clock::time_point> m_thumb_wait{}; // preset -> when its picture was asked for
 
         std::vector<std::string> m_skins{};
         Clock::time_point m_skins_time{};

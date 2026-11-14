@@ -17,6 +17,8 @@ https://github.com/user-attachments/assets/4e4372bc-8a64-4255-b8ae-a33645ce187e
 * Added Undo / Redo for slider edits (buttons in the character banner, **Ctrl+Z** / **Ctrl+Y** or **Ctrl+Shift+Z**), kept per character
 * Added a "Changed only" filter to the Body tab
 * Added preset details: the Presets tab shows which body parts, bones and morphs a preset changes before you load it
+* Added a preset browser: thumbnails in a grid (or a compact list), search by name or `#tag`, and tag chips to filter by. Tags are added and removed next to the preset details
+* Saving a preset takes a whole-body thumbnail of the character in the game (**Retake picture** takes a new one). Thumbnails and tags live in `UUEPBS Presets\_library`, so preset files stay exactly as before and share as before. `PresetThumbnails = false` in `config.lua` turns the pictures off
 
 ### V2.6.1 - Changelogs
 * Added full support for player and NPC that works simultaneously
@@ -58,6 +60,10 @@ https://github.com/user-attachments/assets/4e4372bc-8a64-4255-b8ae-a33645ce187e
   * Your own: put a PNG or JPG in **`UUEPBS Presets\_portraits\`** named after the character: its remembered name (identity), the name you gave it, its game name or its engine name, e.g. `Anca.png` or `BP_Rokuv3_C_0.jpg`. Case does not matter. Your images always win.
   * Automatic (while the window is open, one every 1.5 s at most): the script saves `<name>.auto.png` in the same folder. If the game profile names the character's own portrait texture, that one is used, e.g. `"PortraitTexture": ["CharacterData.FaceIcon"]` (property path from the character actor; a list tries each). Otherwise a small camera takes a head shot of only that character, tuned with `"PortraitBone"` (default: `head` and common variants), `"PortraitDistance"` (cm, default 60) and `"PortraitFov"` (degrees, default 30).
   * **Retake portrait** (in the Rename window) takes a new one. Delete a `.auto.png` to have it taken again next time. `AutoPortraits = false` in `config.lua` keeps only your own images.
+* **Preset browser** (Presets tab): every saved preset as a tile with its thumbnail, name and tags. Click to see what it changes, double-click (or **Load**) to load it. **Grid** / **List** switches the view.
+  * **Search** matches every word against the name and the tags (`hips roku`); `#word` only matches tags starting with it. The tag chips under the search box filter too (click again, or **Clear**, to drop them).
+  * **Tags**: type into **Add tag...** next to the preset details and press Enter (commas add several); click a tag's **x** to remove it. Saved in `UUEPBS Presets\_library\presets.json`, which you can also edit by hand.
+  * **Thumbnails**: saving a preset takes a whole-body picture of the current character (one every 1.5 s at most, while the window is open), saved as `_library\<preset>.auto.png`. Your own PNG/JPG named after the preset (`_library\Curvy.png`) always wins. **Retake picture** takes a new one of the character as it looks right now. The framing comes from the character's bounds; `"ThumbnailDistance"` (cm) and `"ThumbnailFov"` (degrees, default 40) in the game profile override it. Deleting a preset deletes its thumbnail and tags.
 * **Body** tab (called the Simplified Panel in 2.2–2.6): pick a category on the left (Head & Neck, Torso, Chest, Hips & Legs, Arms...), then use its curated sliders for the head, neck, rib cage, waist, hips, shoulders, breasts, butt, thighs, calves, arms and so on.
   A slider only appears when the skeleton has matching bones. Hover a slider's name to see which bones it drives.
   Left/right pairs and twist/roll/jiggle helper bones move together. **XYZ** splits the size into Length (X, along the bone), Width (Y) and Depth (Z).
@@ -204,6 +210,7 @@ If a game update moves things, the check fails, the log says so, and you delete 
 * `morphs` (optional) holds morph weights. A listed morph replaces the game's value, even at 0. Loading a preset without `morphs` gives every morph back to the game. Presets without morphs are still written as version 2, so older builds read them unchanged.
 * `children` is `scale_too`, `keep_size` or `this_bone_only`.
 * `"scale": 1.2` and `"scale": [1, 1.2, 1.2]` shortcuts work. Older `.rbs` files still load.
+* Thumbnails and tags are not part of the preset file; they live in `UUEPBS Presets\_library\` (see the preset browser above).
 ### Limits
 * The change is visual only. Collision capsules, physics bodies and hit boxes keep their original size.
 * <b>UUEPBS presets are generally not interchangeable between games, that is to say a preset made for Stellar Blade will not work with a preset made for Wuchang, and that won't work with a preset made for Expedition 33. This is simply because every UE game developer uses different practices and character rigs for the player. And thus there is no possibility to generalise the naming scheme of body models.</b>

@@ -1981,13 +1981,21 @@ namespace uuepbs::ui
     void PanelView::save_preset(const std::string& name)
     {
         std::string message;
+        bool saved = false;
         if (m_shelf)
         {
             const MorphBook morphs = Registry::instance().morphs();
-            m_shelf->save(name, Registry::instance().edits(), message, &morphs);
+            saved = m_shelf->save(name, Registry::instance().edits(), message, &morphs);
         }
         set_message(message);
         refresh_presets();
+        if (saved)
+        {
+            const std::string clean = PresetShelf::clean_name(name);
+            m_picked = clean;
+            m_scroll_to_picked = true;
+            request_preset_thumbnail(clean); // a picture of the character as it looks now
+        }
     }
 
     void PanelView::draw_presets()
@@ -2042,29 +2050,8 @@ namespace uuepbs::ui
 
         ImGui::Spacing();
         section_bar("Saved presets");
-        const float list_h = std::max(120.0f, ImGui::GetContentRegionAvail().y - ImGui::GetFrameHeightWithSpacing() * 4.5f);
-        const float list_w = std::floor(ImGui::GetContentRegionAvail().x * 0.42f);
-        sk.begin_child("##presetlist", ImVec2(list_w, list_h), ImGuiChildFlags_Borders);
-        if (m_presets.empty())
-        {
-            ImGui::TextColored(muted(), "No presets yet.");
-        }
-        for (const std::string& name : m_presets)
-        {
-            if (ImGui::Selectable(name.c_str(), m_picked == name, ImGuiSelectableFlags_AllowDoubleClick))
-            {
-                m_picked = name;
-                if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
-                {
-                    load_preset(name);
-                }
-            }
-        }
-        sk.end_child();
-        ImGui::SameLine();
-        sk.begin_child("##presetdetails", ImVec2(0, list_h), ImGuiChildFlags_Borders);
-        draw_preset_details();
-        sk.end_child();
+        const float list_h = std::max(160.0f, ImGui::GetContentRegionAvail().y - ImGui::GetFrameHeightWithSpacing() * 4.5f);
+        draw_preset_browser(list_h);
 
         const bool picked = !m_picked.empty() && std::find(m_presets.begin(), m_presets.end(), m_picked) != m_presets.end();
         ImGui::BeginDisabled(!picked);
@@ -2078,6 +2065,13 @@ namespace uuepbs::ui
             m_pending = m_picked;
             ImGui::OpenPopup("Delete preset?");
         }
+        ImGui::SameLine();
+        if (sk.button("Retake picture"))
+        {
+            request_preset_thumbnail(m_picked);
+        }
+        tooltip("Takes a new thumbnail of the selected character as it looks right now (load the preset first).\n"
+                "Your own PNG/JPG named after the preset in the presets folder's _library folder always wins.");
         ImGui::EndDisabled();
         ImGui::SameLine();
         if (sk.button("Open folder", "folder"))
@@ -2092,11 +2086,14 @@ namespace uuepbs::ui
 
         if (ImGui::BeginPopupModal("Delete preset?", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
         {
-            ImGui::Text("Delete '%s' from disk?", m_pending.c_str());
+            ImGui::Text("Delete '%s' (and its thumbnail and tags) from disk?", m_pending.c_str());
             if (sk.button("Delete"))
             {
                 std::string message;
-                m_shelf->remove(m_pending, message);
+                if (m_shelf->remove(m_pending, message))
+                {
+                    m_library.forget(m_pending); // its tags and thumbnail
+                }
                 set_message(message);
                 m_picked.clear();
                 refresh_presets();
@@ -2445,6 +2442,7 @@ namespace uuepbs::ui
         const EditSummary& d = m_details;
         ImGui::TextColored(accent(), "%s", m_picked.c_str());
         ImGui::TextColored(muted(), "%zu bone%s, %zu morph%s", d.bones, d.bones == 1 ? "" : "s", d.morphs.size(), d.morphs.size() == 1 ? "" : "s");
+        draw_preset_tags();
 
         auto part_row = [](const PartChange& p) {
             std::string extra;
@@ -2517,6 +2515,381 @@ namespace uuepbs::ui
             ImGui::PushTextWrapPos(0.0f);
             ImGui::TextColored(muted(), "No morphs: loading it gives every morph back to the game.");
             ImGui::PopTextWrapPos();
+        }
+    }
+    // ---- preset browser ----------------------------------------------------------
+
+    void PanelView::search_presets(const std::string& query, std::set<std::string> tags)
+    {
+        std::snprintf(m_preset_search, sizeof(m_preset_search), "%s", query.c_str());
+        m_tag_filter.clear();
+        for (const std::string& t : tags)
+        {
+            m_tag_filter.insert(fold_case(t));
+        }
+    }
+
+    void PanelView::sync_library()
+    {
+        const std::filesystem::path folder = m_shelf ? m_shelf->folder() : std::filesystem::path();
+        if (folder != m_library_for)
+        {
+            m_library_for = folder;
+            m_library.set_presets_folder(folder);
+            preset_thumbnails().set_folder(m_library.folder());
+            m_library_time = Clock::now();
+        }
+        else if (Clock::now() - m_library_time > std::chrono::seconds(2))
+        {
+            m_library.reload_if_changed(); // tags edited by hand
+            m_library_time = Clock::now();
+        }
+    }
+
+    void PanelView::request_preset_thumbnail(const std::string& preset)
+    {
+        if (preset.empty() || !m_targets || m_target.id.empty())
+        {
+            return;
+        }
+        m_targets->request_thumbnail(m_target.id, preset);
+        m_thumb_wait[fold_case(preset)] = Clock::now();
+    }
+
+    bool PanelView::tag_chip(const char* label, bool active, bool removable)
+    {
+        Skin& sk = skin();
+        const float pad_x = dpi_px(7.0f);
+        const float h = std::floor(ImGui::GetFontSize() * 0.86f + dpi_px(8.0f));
+        const float small = ImGui::GetFontSize() * 0.86f;
+        ImFont* font = ImGui::GetFont();
+        const ImVec2 ts = font->CalcTextSizeA(small, FLT_MAX, 0.0f, label);
+        const float x_w = removable ? font->CalcTextSizeA(small, FLT_MAX, 0.0f, "x").x + pad_x : 0.0f;
+        const float w = std::floor(ts.x + pad_x * 2.0f + x_w);
+        // Wrap onto the next line when the chip does not fit.
+        const float right = ImGui::GetWindowPos().x + ImGui::GetContentRegionMax().x;
+        if (ImGui::GetCursorScreenPos().x + w > right && ImGui::GetCursorScreenPos().x > ImGui::GetWindowPos().x + ImGui::GetStyle().WindowPadding.x + 1.0f)
+        {
+            ImGui::NewLine();
+        }
+        ImGui::PushID(label);
+        const ImVec2 a = ImGui::GetCursorScreenPos();
+        const bool pressed = ImGui::InvisibleButton("##chip", ImVec2(w, h));
+        const bool hovered = ImGui::IsItemHovered();
+        ImGui::PopID();
+        ImDrawList* dl = ImGui::GetWindowDrawList();
+        const ImVec2 b(a.x + w, a.y + h);
+        dl->AddRectFilled(a, b, u32(active ? sk.color(Role::AccentDim) : hovered ? ImGui::GetStyleColorVec4(ImGuiCol_FrameBgHovered) : ImGui::GetStyleColorVec4(ImGuiCol_FrameBg)));
+        dl->AddRect(a, b, u32(active ? accent() : hovered ? accent_dim() : sk.color(Role::Border)), 0.0f, 0, 1.0f);
+        const float ty = std::floor(a.y + (h - ts.y) * 0.5f);
+        dl->AddText(font, small, ImVec2(a.x + pad_x, ty), u32(active ? sk.color(Role::Title) : ImGui::GetStyleColorVec4(ImGuiCol_Text)), label);
+        if (removable)
+        {
+            dl->AddText(font, small, ImVec2(b.x - pad_x - x_w + pad_x * 0.5f, ty), u32(hovered ? warn() : muted()), "x");
+        }
+        ImGui::SameLine(0.0f, dpi_px(4.0f));
+        return pressed;
+    }
+
+    void PanelView::draw_preset_tags()
+    {
+        if (m_picked.empty() || !m_library.ready())
+        {
+            return;
+        }
+        ImGui::Dummy(ImVec2(0.0f, dpi_px(2.0f)));
+        const std::vector<std::string> tags = m_library.tags(m_picked);
+        std::string remove;
+        for (const std::string& t : tags)
+        {
+            if (tag_chip(t.c_str(), false, true))
+            {
+                remove = t;
+            }
+            if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
+            {
+                ImGui::SetTooltip("Remove the tag '%s'", t.c_str());
+            }
+        }
+        if (tags.size() < PresetLibrary::kMaxTags)
+        {
+            const float w = std::max(dpi_px(90.0f), ImGui::CalcTextSize("Add tag...").x + dpi_px(16.0f));
+            const float right = ImGui::GetWindowPos().x + ImGui::GetContentRegionMax().x;
+            if (!tags.empty() && ImGui::GetCursorScreenPos().x + w > right)
+            {
+                ImGui::NewLine();
+            }
+            ImGui::SetNextItemWidth(w);
+            ImGui::PushFont(nullptr, ImGui::GetStyle().FontSizeBase * 0.86f);
+            if (ImGui::InputTextWithHint("##newtag", "Add tag...", m_new_tag, sizeof(m_new_tag), ImGuiInputTextFlags_EnterReturnsTrue))
+            {
+                if (!PresetLibrary::split_tags(m_new_tag).empty() && !m_library.add_tag(m_picked, m_new_tag))
+                {
+                    set_message("Could not save the tags (presets folder read-only?)");
+                }
+                m_new_tag[0] = '\0';
+                ImGui::SetKeyboardFocusHere(-1); // keep typing the next one
+            }
+            ImGui::PopFont();
+            tooltip("Type a tag and press Enter (commas add several). Tags are saved in the presets folder's _library\\presets.json.");
+        }
+        else
+        {
+            ImGui::NewLine();
+        }
+        if (!remove.empty())
+        {
+            m_library.remove_tag(m_picked, remove);
+        }
+    }
+
+    void PanelView::draw_preset_browser(float height)
+    {
+        Skin& sk = skin();
+        const ImGuiStyle& style = ImGui::GetStyle();
+        sync_library();
+
+        const float left_w = std::floor(ImGui::GetContentRegionAvail().x * 0.5f);
+        ImGui::BeginGroup();
+
+        // Search + Grid/List toggle
+        const float grid_w = sk.button_width("Grid");
+        const float list_w = sk.button_width("List");
+        ImGui::SetNextItemWidth(left_w - grid_w - list_w - style.ItemSpacing.x);
+        ImGui::InputTextWithHint("##presetsearch", "Search name or #tag", m_preset_search, sizeof(m_preset_search));
+        tooltip("Every word must match the name or a tag. #word matches tags only.");
+        ImGui::SameLine();
+        auto toggle = [&](const char* label, bool on) {
+            ImGui::PushStyleColor(ImGuiCol_Button, on ? sk.color(Role::AccentDim) : ImGui::GetStyleColorVec4(ImGuiCol_FrameBg));
+            ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0.0f, style.ItemSpacing.y));
+            const bool hit = sk.button(label);
+            ImGui::PopStyleVar();
+            ImGui::PopStyleColor();
+            return hit;
+        };
+        if (toggle("Grid", !m_preset_list_view))
+        {
+            m_preset_list_view = false;
+        }
+        ImGui::SameLine(0.0f, 0.0f);
+        if (toggle("List", m_preset_list_view))
+        {
+            m_preset_list_view = true;
+        }
+
+        // Tag filter chips (every tag in use; the active ones first)
+        const auto counts = m_library.tag_counts(m_presets);
+        std::erase_if(m_tag_filter, [&](const std::string& t) {
+            return std::none_of(counts.begin(), counts.end(), [&](const auto& c) { return fold_case(c.first) == t; });
+        });
+        const float chips_top = ImGui::GetCursorPosY();
+        if (!counts.empty())
+        {
+            ImGui::BeginChild("##tagchips", ImVec2(left_w, 0.0f), ImGuiChildFlags_AutoResizeY, ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoScrollbar);
+            constexpr size_t kShownChips = 14;
+            size_t shown = 0;
+            std::string toggled;
+            for (int pass = 0; pass < 2; ++pass)
+            {
+                for (const auto& [tag, n] : counts)
+                {
+                    const bool on = m_tag_filter.count(fold_case(tag)) > 0;
+                    if ((pass == 0) != on || (!on && shown >= kShownChips))
+                    {
+                        continue;
+                    }
+                    ++shown;
+                    const std::string label = tag + "  " + std::to_string(n);
+                    if (tag_chip(label.c_str(), on))
+                    {
+                        toggled = fold_case(tag);
+                    }
+                }
+            }
+            if (!m_tag_filter.empty() || m_preset_search[0])
+            {
+                if (tag_chip("Clear", false))
+                {
+                    m_tag_filter.clear();
+                    m_preset_search[0] = '\0';
+                }
+            }
+            ImGui::NewLine();
+            if (!toggled.empty() && !m_tag_filter.erase(toggled))
+            {
+                m_tag_filter.insert(toggled);
+            }
+            ImGui::EndChild();
+        }
+        const float used = ImGui::GetCursorPosY() - chips_top;
+
+        // Grid / list
+        const std::vector<std::string> shown = m_library.filter(m_presets, m_preset_search, m_tag_filter);
+        const float grid_h = std::max(ImGui::GetFrameHeight() * 3.0f, height - used - ImGui::GetFrameHeightWithSpacing());
+        sk.begin_child("##presetgrid", ImVec2(left_w, grid_h), ImGuiChildFlags_Borders);
+        if (m_presets.empty())
+        {
+            ImGui::PushTextWrapPos(0.0f);
+            ImGui::TextColored(muted(), "No presets yet. Save one above: a picture of the character is taken for it.");
+            ImGui::PopTextWrapPos();
+        }
+        else if (shown.empty())
+        {
+            ImGui::TextColored(muted(), "No preset matches.");
+        }
+
+        ImDrawList* dl = ImGui::GetWindowDrawList();
+        const float base = style.FontSizeBase;
+        const float small = base * style.FontScaleDpi * 0.8f;
+        const auto now = Clock::now();
+        std::string load;
+        auto picture = [&](const std::string& name, ImVec2 a, ImVec2 b, bool selected, bool hovered) {
+            const ImU32 border = u32(selected ? accent() : hovered ? accent_dim() : sk.color(Role::Border));
+            ImTextureData* thumb = preset_thumbnails().find({name});
+            const auto wait = m_thumb_wait.find(fold_case(name));
+            const bool waiting = !thumb && wait != m_thumb_wait.end() && now - wait->second < std::chrono::seconds(20);
+            monogram_frame(dl, a, b, thumb ? std::string() : monogram(name), (b.y - a.y) > dpi_px(60.0f) ? base * style.FontScaleDpi * 1.4f : small,
+                           u32(hovered ? ImGui::GetStyleColorVec4(ImGuiCol_FrameBgHovered) : sk.color(Role::Section)), border,
+                           u32(ImVec4(sk.color(Role::Title).x, sk.color(Role::Title).y, sk.color(Role::Title).z, 0.85f)));
+            if (thumb)
+            {
+                Portraits::draw(dl, thumb, ImVec2(a.x + 1.0f, a.y + 1.0f), ImVec2(b.x - 1.0f, b.y - 1.0f));
+                dl->AddRect(a, b, border, 0.0f, 0, 1.0f);
+            }
+            else if (waiting && (b.y - a.y) > dpi_px(60.0f))
+            {
+                const char* t = "taking picture";
+                const ImVec2 ts = ImGui::GetFont()->CalcTextSizeA(small, FLT_MAX, 0.0f, t);
+                dl->AddText(ImGui::GetFont(), small, ImVec2(std::floor((a.x + b.x - ts.x) * 0.5f), b.y - ts.y - dpi_px(6.0f)), u32(muted()), t);
+            }
+        };
+        auto tags_line = [&](const std::string& name) {
+            std::string line;
+            for (const std::string& t : m_library.tags(name))
+            {
+                line += (line.empty() ? "" : ", ") + t;
+            }
+            return line;
+        };
+        auto hover_tip = [&](const std::string& name, const std::string& tags) {
+            if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
+            {
+                ImGui::SetTooltip("%s%s%s\nDouble-click to load.", name.c_str(), tags.empty() ? "" : "\nTags: ", tags.c_str());
+            }
+        };
+
+        if (!m_preset_list_view)
+        {
+            const float gap = dpi_px(8.0f);
+            const float avail = ImGui::GetContentRegionAvail().x;
+            const int cols = std::max(2, static_cast<int>((avail + gap) / (dpi_px(76.0f) + gap)));
+            const float tile_w = std::floor((avail - gap * static_cast<float>(cols - 1)) / static_cast<float>(cols));
+            const float img_h = std::floor(tile_w * 1.25f);
+            const float foot_h = std::floor(ImGui::GetFontSize() + small + dpi_px(12.0f));
+            int index = 0;
+            for (const std::string& name : shown)
+            {
+                ImGui::PushID(name.c_str());
+                if (index % cols != 0)
+                {
+                    ImGui::SameLine(0.0f, gap);
+                }
+                const ImVec2 a = ImGui::GetCursorScreenPos();
+                const bool selected = m_picked == name;
+                if (ImGui::InvisibleButton("##tile", ImVec2(tile_w, img_h + foot_h)))
+                {
+                    m_picked = name;
+                }
+                if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
+                {
+                    load = name;
+                }
+                const bool hovered = ImGui::IsItemHovered();
+                const std::string tags = tags_line(name);
+                hover_tip(name, tags);
+                if (selected && m_scroll_to_picked)
+                {
+                    ImGui::SetScrollHereY(0.5f);
+                    m_scroll_to_picked = false;
+                }
+                const ImVec2 img_b(a.x + tile_w, a.y + img_h);
+                const ImVec2 b(a.x + tile_w, a.y + img_h + foot_h);
+                picture(name, a, img_b, selected, hovered);
+                dl->AddRectFilled(ImVec2(a.x, img_b.y), b, u32(selected ? accent_dim() : ImGui::GetStyleColorVec4(ImGuiCol_FrameBg)));
+                dl->AddRect(a, b, u32(selected ? accent() : hovered ? accent_dim() : sk.color(Role::Border)), 0.0f, 0, 1.0f);
+                if (selected)
+                {
+                    dl->AddRectFilled(a, ImVec2(b.x, a.y + dpi_px(2.0f)), u32(accent())); // accent top line, like the active tab
+                }
+                const float tx = a.x + dpi_px(6.0f);
+                const float ny = img_b.y + dpi_px(5.0f);
+                dl->PushClipRect(ImVec2(a.x, img_b.y), ImVec2(b.x - dpi_px(3.0f), b.y), true);
+                dl->AddText(ImVec2(tx, ny), u32(ImGui::GetStyleColorVec4(ImGuiCol_Text)), fit_text(name, tile_w - dpi_px(10.0f)).c_str());
+                dl->AddText(ImGui::GetFont(), small, ImVec2(tx, ny + ImGui::GetFontSize() + dpi_px(1.0f)), u32(muted()), tags.empty() ? "no tags" : tags.c_str());
+                dl->PopClipRect();
+                ImGui::PopID();
+                ++index;
+            }
+        }
+        else
+        {
+            const float row_h = std::floor(ImGui::GetFontSize() * 2.0f + dpi_px(8.0f));
+            const float avail = ImGui::GetContentRegionAvail().x;
+            for (const std::string& name : shown)
+            {
+                ImGui::PushID(name.c_str());
+                const ImVec2 a = ImGui::GetCursorScreenPos();
+                const bool selected = m_picked == name;
+                if (ImGui::InvisibleButton("##row", ImVec2(avail, row_h)))
+                {
+                    m_picked = name;
+                }
+                if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
+                {
+                    load = name;
+                }
+                const bool hovered = ImGui::IsItemHovered();
+                const std::string tags = tags_line(name);
+                hover_tip(name, tags);
+                if (selected && m_scroll_to_picked)
+                {
+                    ImGui::SetScrollHereY(0.5f);
+                    m_scroll_to_picked = false;
+                }
+                const ImVec2 b(a.x + avail, a.y + row_h);
+                if (selected || hovered)
+                {
+                    dl->AddRectFilled(a, b, u32(selected ? accent_dim() : ImGui::GetStyleColorVec4(ImGuiCol_FrameBgHovered)));
+                }
+                const float pic = row_h - dpi_px(4.0f);
+                const ImVec2 pa(a.x + dpi_px(2.0f), a.y + dpi_px(2.0f));
+                picture(name, pa, ImVec2(pa.x + std::floor(pic * 0.75f), pa.y + pic), selected, hovered);
+                const float tx = pa.x + std::floor(pic * 0.75f) + dpi_px(8.0f);
+                dl->PushClipRect(a, ImVec2(b.x - dpi_px(3.0f), b.y), true);
+                dl->AddText(ImVec2(tx, a.y + dpi_px(3.0f)), u32(ImGui::GetStyleColorVec4(ImGuiCol_Text)), name.c_str());
+                dl->AddText(ImGui::GetFont(), small, ImVec2(tx, a.y + dpi_px(4.0f) + ImGui::GetFontSize()), u32(muted()), tags.empty() ? "no tags" : tags.c_str());
+                dl->PopClipRect();
+                ImGui::PopID();
+            }
+        }
+        sk.end_child();
+        ImGui::TextColored(muted(), "%zu of %zu preset%s", shown.size(), m_presets.size(), m_presets.size() == 1 ? "" : "s");
+        ImGui::EndGroup();
+
+        ImGui::SameLine();
+        sk.begin_child("##presetdetails", ImVec2(0, height), ImGuiChildFlags_Borders);
+        draw_preset_details();
+        sk.end_child();
+
+        if (!load.empty())
+        {
+            m_picked = load;
+            load_preset(load);
+        }
+        // Forget waits that are over (picture arrived or gave up).
+        for (auto it = m_thumb_wait.begin(); it != m_thumb_wait.end();)
+        {
+            it = now - it->second > std::chrono::seconds(30) ? m_thumb_wait.erase(it) : std::next(it);
         }
     }
 } // namespace uuepbs::ui
