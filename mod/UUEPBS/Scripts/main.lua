@@ -125,7 +125,7 @@ local profileFileName = profileKey:gsub('[<>:"/\\|?*]', "_") .. ".json"
 local profileFile = profileDir .. "\\" .. profileFileName
 local legacyProfileFile = modsDir .. "\\" .. LEGACY_MOD_FOLDER .. "\\Scripts\\GameProfiles\\" .. profileFileName
 local PROFILE_ORDER = { "Project", "Game", "Target", "TargetClassPath", "TargetPrefer", "PrimaryComponent", "IncludeComponents", "ExcludeComponents",
-    "SameSkeletonOnly", "WorldMeshSearch", "BodyGroups", "MorphGroups", "ExcludeMorphs", "Hook", "_help" }
+    "SameSkeletonOnly", "WorldMeshSearch", "BodyGroups", "MorphGroups", "ExcludeMorphs", "Names", "Hook", "_help" }
 local PROFILE_HELP = "Target: actor class to edit (empty = the pawn you control). TargetClassPath: optional full path of that class. "
     .. "TargetPrefer: when several actors of the Target class exist, the default is the one with the lowest value of this "
     .. "number property (e.g. a fighting game's PlayerNumber, 0 = player 1). "
@@ -135,6 +135,8 @@ local PROFILE_HELP = "Target: actor class to edit (empty = the pawn you control)
     .. "(real bone names from the Detailed Panel, * wildcards allowed; [] hides a slider; new names add sliders). "
     .. "MorphGroups: Simplified Panel sliders for morph targets, e.g. {\"Breasts\": [\"BreastSize*\"]} (names from Detailed Panel > Morphs). "
     .. "ExcludeMorphs: morph names to hide, e.g. [\"*_corrective*\"]. "
+    .. "Names: names shown in the window's character list, by engine name, e.g. {\"BP_Rokuv3_C\": \"Roku\", \"00_EVE_*\": \"Eve\"} "
+    .. "(actor, class or mesh asset names; * wildcards allowed, a plain name also matches names that start with it). "
     .. "WorldMeshSearch: true = find meshes by searching every skeletal mesh in the world (slower; only for games where "
     .. "the log says the direct mesh lookup misses meshes)."
 
@@ -811,8 +813,14 @@ function Prefer.value(actor)
     return ok and type(v) == "number" and v or nil
 end
 
+-- Filled in further down (they need helpers defined later).
+local late = {}
+
+-- The name shown in the window, plus the engine's object name (sent separately, for tooltips and the
+-- Status tab). Actor keys and identities never use the shown name.
 local function actor_label(actor, pawn)
-    local label = name_of(actor)
+    local engine = name_of(actor)
+    local label = late.display_name and late.display_name(actor) or engine
     if pawn and same_object(actor, pawn) then
         label = label .. " (player)"
     end
@@ -820,7 +828,7 @@ local function actor_label(actor, pawn)
     if v then
         label = string.format("%s [%s %d]", label, Profile.TargetPrefer, v)
     end
-    return label
+    return label, engine
 end
 
 local function full_name(obj)
@@ -882,8 +890,6 @@ local function key_of(actor, default)
     return address_of(actor)
 end
 
--- Filled in further down (they need helpers defined later).
-local late = {}
 -- Characters seen through the new-object notification: the picker lists these while the window
 -- stays open instead of walking the whole object array every few seconds (that walk takes long
 -- enough in big games to be felt). The full search runs when the window opens and on Refresh.
@@ -999,9 +1005,10 @@ local function refresh_candidates(full)
             plain = plain + 1
         end
         if edited or plain <= cap then
-            local label = actor_label(e.actor, pawn)
-        -- show who a character is recognised as when that differs from its object name
-            if late.identity and not (default and same_object(e.actor, default)) then
+            local label, engine = actor_label(e.actor, pawn)
+            -- show who a character is recognised as when that differs from its object name
+            -- (engine names only: with readable names the window has the engine name in a tooltip)
+            if not late.friendly() and late.identity and not (default and same_object(e.actor, default)) then
                 local ok, ident = pcall(late.identity, e.actor)
                 if ok and ident and ident ~= name_of(e.actor) and not ident:find("@", 1, true) then
                     label = label .. "  = " .. ident
@@ -1009,7 +1016,7 @@ local function refresh_candidates(full)
             end
             -- distance from the player, whole metres (only in the list; the label stays a name)
             local dist = (e.d >= 0 and e.d < math.huge) and string.format("   %d m", math.floor(math.sqrt(e.d) / 100 + 0.5)) or ""
-            list[#list + 1] = { id = address_of(e.actor), label = label, actor = e.actor, key = key, dist = dist }
+            list[#list + 1] = { id = address_of(e.actor), label = label, actor = e.actor, key = key, dist = dist, engine = engine }
         end
     end
     candidates = list
@@ -1328,6 +1335,116 @@ end
 
 late.identity, late.location = identity_of, location_of
 
+---------------------------------------------------------------------------
+-- Readable names (labels only; see uuepbs_names.lua)
+---------------------------------------------------------------------------
+-- (a block of its own: the main chunk is near Lua's 200-local limit)
+do
+    local Names = require("uuepbs_names")
+
+    -- FriendlyNames = false in config.lua shows the engine's object names as before.
+    local function friendly()
+        return Config.FriendlyNames ~= false
+    end
+
+    local profileNames = Names.compile(Profile.Names)
+    local displayCache = {} -- actor full name -> { name, how, tries, at }
+    local DISPLAY_RETRY_S, DISPLAY_TRIES = 2, 3 -- a cleaned-up name is looked for again: the game may name it after spawning
+
+    -- Mesh asset names of a character: face / head meshes first (they tell people apart), then the main mesh.
+    local function character_mesh_names(actor)
+        local faces, others = {}, {}
+        local skel = engine_class("/Script/Engine.SkeletalMeshComponent")
+        pcall(function()
+            each_of(skel and actor:K2_GetComponentsByClass(skel) or {}, function(c)
+                local m = alive(c) and mesh_asset(c)
+                local an = m and name_of(m)
+                if an and an ~= "?" then
+                    local n = name_of(c):lower() .. " " .. an:lower()
+                    local list = (n:find("face", 1, true) or n:find("head", 1, true)) and faces or others
+                    list[#list + 1] = an
+                end
+            end)
+        end)
+        pcall(function()
+            local m = alive(actor.Mesh) and mesh_asset(actor.Mesh)
+            if m then
+                table.insert(others, 1, name_of(m))
+            end
+        end)
+        for _, n in ipairs(others) do
+            faces[#faces + 1] = n
+        end
+        return faces
+    end
+
+    local function resolve_display_name(actor)
+        local name, how = Names.from_object(actor, read_prop, alive)
+        if name then
+            return name, "game property " .. how
+        end
+        local raw, cls = name_of(actor), class_name(actor)
+        -- Character Switch Watcher: the player pawn's meshes change with the party member played (the
+        -- window adds " - Lune" for that), so they must not name the pawn itself
+        local swapping = Config.CharacterSwitchWatcher == true and same_object(actor, player_pawn())
+        local meshes = swapping and {} or character_mesh_names(actor)
+        local engineNames = { raw, stem(raw), cls }
+        for _, m in ipairs(meshes) do
+            engineNames[#engineNames + 1] = m
+        end
+        name = Names.lookup(profileNames, engineNames)
+        if name then
+            return name, "profile Names"
+        end
+        -- "BP_NonPlayerCharacter_C_12" says nothing about who it is: the mesh does ("00_EVE_01_Body" -> "Eve")
+        local generic = raw == cls or (raw:sub(1, #cls + 1) == cls .. "_" and raw:sub(#cls + 2):match("^%d+$") ~= nil)
+        if generic then
+            for _, m in ipairs(meshes) do
+                name = Names.clean(m, true)
+                if name then
+                    return name, "clean"
+                end
+            end
+        end
+        return Names.clean(raw) or Names.clean(cls) or raw, "clean"
+    end
+
+    local function display_name(actor)
+        if not friendly() then
+            return name_of(actor)
+        end
+        local full = full_name(actor)
+        local c = full and displayCache[full]
+        local now = os.clock()
+        if c and (c.how ~= "clean" or c.tries >= DISPLAY_TRIES or now - c.at < DISPLAY_RETRY_S) then
+            return c.name
+        end
+        local ok, name, how = pcall(resolve_display_name, actor)
+        if not ok or type(name) ~= "string" or name == "" then
+            name, how = name_of(actor), "clean"
+        end
+        if how ~= "clean" and (not c or c.name ~= name) then
+            chatter("%s is shown as \"%s\" (%s)", name_of(actor), name, how)
+        end
+        if full then
+            displayCache[full] = { name = name, how = how == "clean" and "clean" or "found", tries = c and c.tries + 1 or 1, at = now }
+        end
+        return name
+    end
+
+    -- A mesh's label: its asset cleaned up ("SK_Shirt" -> "Shirt"), else its component name cleaned up
+    -- ("SkeletalMeshComponent_2147482611" says nothing, the asset does).
+    local function mesh_label(comp, compName)
+        if not friendly() then
+            return compName
+        end
+        local m = mesh_asset(comp)
+        return (m and Names.clean(name_of(m))) or Names.clean(compName) or compName
+    end
+
+    late.friendly, late.display_name, late.mesh_label = friendly, display_name, mesh_label
+end
+
 -- NPCs are only sculpted while they are this close to the player (CharacterRange in config.lua).
 -- An NPC already in range only counts as out of it 10% further away, so one standing right at the
 -- edge (or walking around on it) doesn't flip in and out, causing a rescan each time.
@@ -1386,8 +1503,8 @@ local function check_character(actor)
         end
         return
     end
-    local label = actor_label(actor, nil)
-    sighted[key] = { actor = actor, full = full_name(actor), identity = id, label = label }
+    local label, engine = actor_label(actor, nil)
+    sighted[key] = { actor = actor, full = full_name(actor), identity = id, label = label, engine = engine }
     knownActors[key] = knownActors[key] or { actor = actor, full = sighted[key].full, label = label }
     stateDirty = true
     chatter("remembered character %s found (%s)", label, id)
@@ -1507,8 +1624,8 @@ function Switch.check(actor)
     if same >= Switch.MAX_LINKS then
         return
     end
-    local label = actor_label(actor, nil)
-    Switch.links[key] = { actor = actor, full = full, who = who, label = label }
+    local label, engine = actor_label(actor, nil)
+    Switch.links[key] = { actor = actor, full = full, who = who, label = label, engine = engine }
     sighted[key] = nil -- not a remembered NPC of its own: it shares the party member's sliders
     knownActors[key] = knownActors[key] or { actor = actor, full = full, label = label }
     stateDirty = true
@@ -1623,6 +1740,7 @@ do
         local lines = {}
         for _, r in ipairs(rigs) do
             lines[#lines + 1] = "rig\t" .. r.address .. "\t" .. clean(r.label) .. "\t" .. (r.primary and "1" or "0") .. "\t" .. clean(r.ownerLabel) .. "\t" .. r.actorKey
+                .. "\t" .. clean(r.engine or "") .. "\t" .. clean(r.ownerEngine or "")
             lines[#lines + 1] = "bones\t" .. r.hierarchy.names
             lines[#lines + 1] = "parents\t" .. r.hierarchy.parents
             if r.primary and r.hierarchy.reference then
@@ -1847,6 +1965,7 @@ do
         end
         local primarySkeleton = skeleton_path(primary)
         local driven = 0
+        local shownCount = {} -- mesh label shown in the window -> meshes with it
         for _, comp in ipairs(comps) do
             local label = name_of(comp)
             local key = label:lower()
@@ -1866,8 +1985,14 @@ do
                 if ok and h then
                     local okm, morphs = pcall(read_morph_names, comp)
                     morphs = okm and morphs or nil
-                    out[#out + 1] = { comp = comp, address = address_of(comp), label = label, primary = isPrimary, hierarchy = h,
+                    local shown = late.mesh_label(comp, label)
+                    shownCount[shown] = (shownCount[shown] or 0) + 1
+                    if shownCount[shown] > 1 then
+                        shown = shown .. " " .. shownCount[shown] -- two meshes made from the same asset
+                    end
+                    out[#out + 1] = { comp = comp, address = address_of(comp), label = shown, primary = isPrimary, hierarchy = h,
                         morphs = morphs, morphSet = morph_set(morphs), actorKey = e.key, ownerLabel = e.label,
+                        engine = label, ownerEngine = name_of(actor),
                         full = full_name(comp), meshAddr = mesh_prop(comp) }
                     driven = driven + 1
                     if morphs then
@@ -2121,11 +2246,11 @@ do
         local entries = {}
         if actor then
             local key = (pickedId == nil or (default and same_object(actor, default))) and PLAYER_KEY or address_of(actor)
-            local label = actor_label(actor, pawn)
+            local label, engine = actor_label(actor, pawn)
             if key == PLAYER_KEY and switch_on() and Switch.who then
                 label = label .. " - " .. switch_display(Switch.who)
             end
-            targetInfo = { id = pickedId or "auto", label = label, key = key,
+            targetInfo = { id = pickedId or "auto", label = label, key = key, engine = engine,
                 identity = (key ~= PLAYER_KEY and REMEMBER) and (identity_of(actor) or "") or "" }
             if key ~= PLAYER_KEY then
                 knownActors[key] = { actor = actor, full = full_name(actor), label = targetInfo.label }
@@ -2521,6 +2646,7 @@ local function build_state()
         "refresh_key=" .. clean(Config.RefreshKey == nil and "F7" or Config.RefreshKey),
         "next_preset_key=" .. clean(Config.NextPresetKey or ""),
         "prev_preset_key=" .. clean(Config.PrevPresetKey or ""),
+        "compare_key=" .. clean(Config.CompareKey == nil and "F8" or Config.CompareKey),
         "game=" .. clean(projectName),
         "profile=" .. clean(Profile.name),
         "mkdir=" .. (needProfileFolder and clean(profileDir) or ""),
@@ -2528,20 +2654,22 @@ local function build_state()
         "engine=" .. clean(engineVersion),
     }, "\t"))
     add("scan\t" .. scanCount)
-    add("target\t" .. clean(targetInfo.id) .. "\t" .. clean(targetInfo.label) .. "\t" .. clean(targetInfo.key) .. "\t" .. clean(targetInfo.identity or ""))
+    -- engine names go last on each line (older DLLs ignore the extra field)
+    add("target\t" .. clean(targetInfo.id) .. "\t" .. clean(targetInfo.label) .. "\t" .. clean(targetInfo.key) .. "\t" .. clean(targetInfo.identity or "")
+        .. "\t" .. clean(targetInfo.engine or ""))
     for key, e in pairs(sighted) do
-        add("npc\t" .. clean(key) .. "\t" .. clean(e.identity) .. "\t" .. clean(e.label))
+        add("npc\t" .. clean(key) .. "\t" .. clean(e.identity) .. "\t" .. clean(e.label) .. "\t" .. clean(e.engine or ""))
     end
     if switch_on() and Switch.who then
         add("switch\t" .. clean(Switch.who))
     end
     if switch_on() then
         for key, l in pairs(Switch.links) do
-            add("party\t" .. clean(key) .. "\t" .. clean(l.who) .. "\t" .. clean(l.label))
+            add("party\t" .. clean(key) .. "\t" .. clean(l.who) .. "\t" .. clean(l.label) .. "\t" .. clean(l.engine or ""))
         end
     end
     for _, c in ipairs(candidates) do
-        add("cand\t" .. c.id .. "\t" .. clean(c.label .. (c.dist or "")) .. "\t" .. clean(c.key or c.id))
+        add("cand\t" .. c.id .. "\t" .. clean(c.label .. (c.dist or "")) .. "\t" .. clean(c.key or c.id) .. "\t" .. clean(c.engine or ""))
     end
     for key in pairs(goneKeys) do
         add("gone\t" .. clean(key))
@@ -2778,15 +2906,19 @@ end
 
 -- Portraits for the window (uuepbs_portraits.lua): taken on request, one at a time.
 -- Kept in `late` (main.lua is at Lua's limit of 200 locals).
-if Config.AutoPortraits ~= false then
+-- The same module takes preset thumbnails (PresetThumbnails in config.lua).
+if Config.AutoPortraits ~= false or Config.PresetThumbnails ~= false then
     local okP, mod = pcall(require, "uuepbs_portraits")
     if okP and type(mod) == "table" then
         late.portraits = mod
         mod.setup({
             say = say,
             chatter = chatter,
+            portraits = Config.AutoPortraits ~= false,
             folder = presetFolder .. "\\_portraits",
             request_file = nativeDir .. "\\portrait_requests.txt",
+            thumb_folder = Config.PresetThumbnails ~= false and (presetFolder .. "\\_library") or nil,
+            thumb_request_file = nativeDir .. "\\thumbnail_requests.txt",
             profile = function()
                 return Profile
             end,
@@ -2970,7 +3102,7 @@ local function rest_of(params, first)
     return table.concat(parts, " ")
 end
 
-local usage = "uuepbs (or ubs) ui | status | rescan | list | load <name> | next | prev | save <name> | on | off | reset [all] | diag | skin [name] | morph <name> [weight]"
+local usage = "uuepbs (or ubs) ui | status | rescan | list | load <name> | next | prev | save <name> | on | off | compare [on|off] | reset [all] | diag | skin [name] | morph <name> [weight]"
 
 local function console(_, params, out)
     local verb = string.lower(params[1] or "")
@@ -2992,7 +3124,7 @@ local function console(_, params, out)
             projectName, Profile.name, targetInfo.label, math.max(0, #keptOrder - (keptSet[targetInfo.key] and 1 or 0)), #rigs, hookState))
         reply(scan_status())
         send_command("status", "", true)
-    elseif verb == "load" or verb == "save" or verb == "skin" or verb == "morph" or verb == "reset" then
+    elseif verb == "load" or verb == "save" or verb == "skin" or verb == "morph" or verb == "reset" or verb == "compare" then
         send_command(verb, rest_of(params, 2), true)
     elseif verb == "list" or verb == "on" or verb == "off" or verb == "diag" or verb == "next" or verb == "prev" then
         send_command(verb, "", true)

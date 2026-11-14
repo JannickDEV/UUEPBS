@@ -137,6 +137,22 @@ M = [
      "    if builtIn and not upgrade then", "    if false then"),
     ("2.7.3: no player number in the labels",
      "    local v = Prefer.value(actor)\n    if v then", "    local v = Prefer.value(actor)\n    if false then"),
+    ("2.8: game's own names ignored",
+     "    local name, how = Names.from_object(actor, read_prop, alive)", "    local name, how = nil, nil"),
+    ("2.8: profile Names table ignored",
+     "    name = Names.lookup(profileNames, engineNames)", "    name = nil"),
+    ("2.8: engine-made actor names not replaced by the mesh name",
+     "        if generic then\n            for _, m in ipairs(meshes) do", "        if false then\n            for _, m in ipairs(meshes) do"),
+    ("2.8: cleaned-up names never looked at again",
+     "if c and (c.how ~= \"clean\" or c.tries >= DISPLAY_TRIES or now - c.at < DISPLAY_RETRY_S) then", "if c then"),
+    ("2.8: FriendlyNames = false ignored",
+     "    return Config.FriendlyNames ~= false", "    return true"),
+    ("2.8: no engine name on the target line",
+     "        .. \"\\t\" .. clean(targetInfo.engine or \"\"))", "        .. \"\\t\")"),
+    ("2.8: no engine name on candidates",
+     "clean(c.key or c.id) .. \"\\t\" .. clean(c.engine or \"\"))", "clean(c.key or c.id))"),
+    ("2.8: mesh labels not readable",
+     "                    local shown = late.mesh_label(comp, label)", "                    local shown = label"),
     ("2.7.3: the choice not logged",
      "            say(\"%s (pick another in the window's Character list)\", text)", "            local _ = text"),
 ]
@@ -155,7 +171,7 @@ try:
         with open(os.path.join(target, "main.lua"), "w", encoding="utf-8") as f:
             f.write(base.replace(old, new))
         caught = None
-        for mode in ["gon", "generic", "nodir", "broken", "legacy", "polaris", "tekkenjson", "tekkenedit", "nobody"]:
+        for mode in ["gon", "generic", "nodir", "broken", "legacy", "polaris", "tekkenjson", "tekkenedit", "nobody", "names"]:
             r = subprocess.run([lua, "lua_harness.lua", target, peer, work, mode], capture_output=True, text=True)
             if r.returncode != 0:
                 caught = mode + ": " + ((r.stderr.strip().splitlines() or ["?"])[0])[:110]

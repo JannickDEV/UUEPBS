@@ -18,6 +18,12 @@ namespace uuepbs::ui
         return p;
     }
 
+    Portraits& preset_thumbnails()
+    {
+        static Portraits p;
+        return p;
+    }
+
     namespace
     {
         std::string lower(std::string s)

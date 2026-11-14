@@ -8,11 +8,14 @@
 //   bridge_in.txt   written by Lua, read by the DLL
 //     UBS1 <session> <seq>
 //     setup <tab> key=value <tab> key=value ...
-//     target <tab> <id> <tab> <label> <tab> <actor key> <tab> <identity>
-//     cand <tab> <id> <tab> <label> <tab> <actor key>  (one per pickable character)
-//     rig <tab> <address hex> <tab> <label> <tab> <primary 0/1> <tab> <owner> <tab> <actor key>
+//     target <tab> <id> <tab> <label> <tab> <actor key> <tab> <identity> <tab> <engine name>
+//     cand <tab> <id> <tab> <label> <tab> <actor key> <tab> <engine name>  (one per pickable character)
+//     rig <tab> <address hex> <tab> <label> <tab> <primary 0/1> <tab> <owner> <tab> <actor key> <tab> <engine name> <tab> <owner engine name>
 //     gone <tab> <actor key>                            (a kept character no longer exists)
-//     npc <tab> <actor key> <tab> <identity> <tab> <label>  (a remembered character is loaded)
+//     npc <tab> <actor key> <tab> <identity> <tab> <label> <tab> <engine name>  (a remembered character is loaded)
+//     party <tab> <actor key> <tab> <face mesh> <tab> <label> <tab> <engine name>
+//   Labels are what the window shows (readable names since 2.8: "Eve (player)"); engine names are the
+//   object names (BP_Eve_C_0, SkeletalMeshComponent_2147482611). Scripts before 2.8 send no engine name.
 //     bones <tab> <name> <tab> <name> ...
 //     parents <tab> <index> <tab> <index> ...
 //     ref <tab> <10 numbers per bone, space separated>   (optional: qx qy qz qw tx ty tz sx sy sz)
@@ -58,9 +61,11 @@ namespace uuepbs::bridge
     struct RigInfo
     {
         uintptr_t address{};
-        std::string label;
-        std::string owner;
+        std::string label;           // shown in the window (readable name)
+        std::string owner;           // the character's label
         std::string actor{"player"}; // key of the character this mesh belongs to
+        std::string engine;          // the component's engine name (empty from older scripts)
+        std::string owner_engine;    // the character's engine name (empty from older scripts)
         bool primary{};
         std::vector<std::string> names;
         std::vector<int32_t> parents;
@@ -74,6 +79,7 @@ namespace uuepbs::bridge
         std::string label;
         std::string key{"player"}; // actor key
         std::string identity;      // NPC identity across reloads (target line only)
+        std::string engine;        // engine object name (empty from older scripts)
     };
 
     struct NpcSighting
@@ -81,6 +87,7 @@ namespace uuepbs::bridge
         std::string key;
         std::string identity;
         std::string label;
+        std::string engine; // engine object name (empty from older scripts)
     };
 
     struct Command

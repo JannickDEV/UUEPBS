@@ -57,6 +57,17 @@ int main(int argc, char** argv)
     CHECK(format_dll_state(dr).find("remember\tAnca\nremember\tBP_NPC_C@SK_Head_B\nmorph\t") != std::string::npos);
     auto old = parse_lua_state("UBS1 s 6\ntarget\tauto\tRoku\n#end 6\n");
     CHECK(old && old->target.key == "player");
+    CHECK(old && old->target.engine.empty() && mc && mc->candidates[0].engine.empty() && mc->rigs[0].engine.empty() && mc->rigs[0].owner_engine.empty());
+    // 2.8: readable labels, with the engine names as an extra last field on each line
+    auto en = parse_lua_state("UBS1 s 8\ntarget\tauto\tEve (player)\tplayer\t\tBP_Eve_C_0\ncand\t1A2B\tEve (player)\tplayer\tBP_Eve_C_0\n"
+                              "cand\t4D5E\tGuard   12 m\t4D5E\tBP_Guard_C_3\nnpc\t77AA\tLacra_9\tLacra\tLacra_9\nparty\t88BB\tSciel_FaceMesh\tSciel\tBP_Pawn_AICompanion_Sciel_C_2\n"
+                              "rig\t1000\tEve Body\t1\tEve (player)\tplayer\tSkeletalMeshComponent_2147482611\tBP_Eve_C_0\nbones\troot\nparents\t-1\n#end 8\n");
+    CHECK(en && en->target.label == "Eve (player)" && en->target.engine == "BP_Eve_C_0" && en->target.identity.empty() && en->target.key == "player");
+    CHECK(en && en->candidates.size() == 2 && en->candidates[1].label == "Guard   12 m" && en->candidates[1].key == "4D5E" && en->candidates[1].engine == "BP_Guard_C_3");
+    CHECK(en && en->npcs.size() == 1 && en->npcs[0].label == "Lacra" && en->npcs[0].engine == "Lacra_9");
+    CHECK(en && en->party.size() == 1 && en->party[0].label == "Sciel" && en->party[0].engine == "BP_Pawn_AICompanion_Sciel_C_2");
+    CHECK(en && en->rigs.size() == 1 && en->rigs[0].label == "Eve Body" && en->rigs[0].owner == "Eve (player)" && en->rigs[0].actor == "player"
+          && en->rigs[0].engine == "SkeletalMeshComponent_2147482611" && en->rigs[0].owner_engine == "BP_Eve_C_0");
     std::printf(fails ? "BRIDGE TESTS FAILED\n" : "bridge tests passed\n");
     return fails;
 }

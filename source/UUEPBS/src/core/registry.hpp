@@ -9,6 +9,7 @@
 // while they have some (Lua is told which through edited_actors()).
 #pragma once
 
+#include "compare.hpp"
 #include "mirror.hpp"
 #include "morphs.hpp"
 #include "sculpt.hpp"
@@ -88,6 +89,7 @@ namespace uuepbs
         size_t morphs{};
         bool active{};
         std::string identity; // who the NPC is across reloads ("Anca"); empty = not remembered
+        std::string engine;   // engine object name of the character (BP_Guard_C_3); empty when not known
     };
 
     // An NPC's sliders as they should be remembered (one file per identity).
@@ -130,7 +132,8 @@ namespace uuepbs
 
         // ---- characters --------------------------------------------------------
         // The character the window edits. Rebuilds the skeleton view when it changes.
-        void set_active_actor(const std::string& key, const std::string& label, const std::string& pick_id);
+        // engine: the character's engine object name, kept next to the (readable) label when not empty.
+        void set_active_actor(const std::string& key, const std::string& label, const std::string& pick_id, const std::string& engine = {});
         std::string active_actor() const;
         // Characters with any bone or morph edits (the active one included), active first.
         std::vector<ActorSummary> edited_actors() const;
@@ -166,6 +169,15 @@ namespace uuepbs
         bool enabled() const { return m_enabled.load(std::memory_order_relaxed); }
         void set_enabled(bool on); // also bumps the morph revision (morphs are sent to Lua only while enabled)
 
+        // ---- before/after compare (core/compare.hpp) ------------------------------
+        // While it shows the original, every mesh gets the game's own pose and morphs; no edit is lost.
+        bool comparing() const { return m_compare.showing_original(); }
+        const CompareSwitch& compare() const { return m_compare; }
+        void set_compare(bool show_original); // the window's Before / After switch (latched)
+        void set_compare_held(bool down);     // the hold-to-compare hotkey
+        // Sliders reach the game: switched on and not comparing. The pose hook and the morphs sent to Lua use this.
+        bool applying() const { return enabled() && !comparing(); }
+
         // ---- morph targets (weights applied by the Lua script) ------------------
         MorphBook morphs(uint64_t* revision = nullptr) const;
         uint64_t morph_revision() const { return m_morph_revision.load(std::memory_order_acquire); }
@@ -198,6 +210,7 @@ namespace uuepbs
             std::string label;
             std::string pick_id;
             std::string identity;
+            std::string engine; // engine object name (empty when not known)
             EditBook book;
             uint64_t revision{}; // value of m_edit_revision at its last change (unique across actors)
         };
@@ -232,6 +245,7 @@ namespace uuepbs
         Actor& actor_locked(const std::string& key);
         Actor& active_locked() { return actor_locked(m_active); }
         void prune_actors_locked();
+        void end_compare_for_edit(); // a slider moved from the window: switch back to "After"
 
         mutable std::mutex m_lock;
         std::vector<std::unique_ptr<Rig>> m_rigs;
@@ -245,6 +259,7 @@ namespace uuepbs
         EditBook m_empty_book;
         std::atomic<uint64_t> m_edit_revision{1};
         std::atomic<bool> m_enabled{true};
+        CompareSwitch m_compare;
 
         SkeletonView m_view;
         std::atomic<uint64_t> m_skeleton_revision{0};

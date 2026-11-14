@@ -15,6 +15,11 @@
 -- The render target is written with KismetRenderingLibrary::ExportRenderTarget (PNG), or, if that
 -- is not available, read back pixel by pixel and encoded here.
 --
+-- Preset thumbnails (native\thumbnail_requests.txt, written when a preset is saved) use the same
+-- machinery with a whole-body shot, saved as "<presets>\_library\<preset>.auto.png". "ThumbnailDistance"
+-- (cm) and "ThumbnailFov" (degrees) in the game profile tune the framing; without a distance it is worked
+-- out from the character's bounds.
+--
 -- Everything is guarded: a game where neither works just keeps the monogram tiles. config.lua
 -- AutoPortraits = false turns this off. One picture at most every PORTRAIT_GAP_MS, so a crowd does not
 -- turn into a stutter.
@@ -318,25 +323,20 @@ local function draw_texture(world, rt, tex)
     return drawn
 end
 
-local function head_shot(actor, rt)
+-- Renders only `actor` into `rt` from a camera `dist` cm in front of `centre`, looking back at it.
+local function scene_shot(actor, rt, centre, dist, fov, lift, pitch)
     local gs, cls = statics(), find("/Script/Engine.SceneCapture2D")
     if not gs or not cls then
         return false, "no SceneCapture2D / GameplayStatics"
-    end
-    local profile = ctx.profile()
-    local head, bone = head_of(actor)
-    if not head then
-        return false, "no head position"
     end
     local fwd = nil
     pcall(function()
         fwd = vec(actor:GetActorForwardVector())
     end)
     fwd = fwd or { X = 1, Y = 0, Z = 0 }
-    local dist = tonumber(profile.PortraitDistance) or 60
-    local cam = { X = head.X + fwd.X * dist, Y = head.Y + fwd.Y * dist, Z = head.Z + 2 }
+    local cam = { X = centre.X + fwd.X * dist, Y = centre.Y + fwd.Y * dist, Z = centre.Z + lift }
     local yaw = math.deg(math.atan(fwd.Y, fwd.X)) + 180
-    local xf = { Rotation = quat(-2, yaw, 0), Translation = cam, Scale3D = { X = 1, Y = 1, Z = 1 } }
+    local xf = { Rotation = quat(pitch, yaw, 0), Translation = cam, Scale3D = { X = 1, Y = 1, Z = 1 } }
 
     local cap = nil
     local ok, err = pcall(function()
@@ -354,7 +354,7 @@ local function head_shot(actor, rt)
         comp.CaptureSource = 2 -- final colour, LDR
         comp.bCaptureEveryFrame = false
         comp.bCaptureOnMovement = false
-        comp.FOVAngle = tonumber(profile.PortraitFov) or 30
+        comp.FOVAngle = fov
         comp.PrimitiveRenderMode = 2 -- only what is in the show-only list
         comp:ShowOnlyActorComponents(actor, true)
         comp:CaptureScene()
@@ -365,13 +365,67 @@ local function head_shot(actor, rt)
     if not shot then
         return false, "capture failed: " .. tostring(why)
     end
+    return true
+end
+
+local function head_shot(actor, rt)
+    local profile = ctx.profile()
+    local head, bone = head_of(actor)
+    if not head then
+        return false, "no head position"
+    end
+    local ok, why = scene_shot(actor, rt, head, tonumber(profile.PortraitDistance) or 60, tonumber(profile.PortraitFov) or 30, 2, -2)
+    if not ok then
+        return false, why
+    end
     return true, "head shot at " .. tostring(bone)
+end
+
+-- The whole character, for preset thumbnails: framed from the actor's bounds when the engine gives
+-- them, else from its capsule centre at "ThumbnailDistance" cm (game profile, default 260).
+local function body_shot(actor, rt)
+    local profile = ctx.profile()
+    local fov = tonumber(profile.ThumbnailFov) or 40
+    local centre, dist, how = nil, tonumber(profile.ThumbnailDistance), nil
+    if not dist then
+        local originOut, extentOut = {}, {}
+        local ok, a, b = pcall(function()
+            return actor:GetActorBounds(true, originOut, extentOut, false)
+        end)
+        if ok then
+            local origin = vec(type(a) == "userdata" and a or nil) or vec(originOut.Origin) or vec(originOut)
+            local extent = vec(type(b) == "userdata" and b or nil) or vec(extentOut.BoxExtent) or vec(extentOut)
+            local h = extent and tonumber(extent.Z)
+            if origin and tonumber(origin.Z) and h and h > 20 and h < 400 then
+                centre = origin
+                dist = h * 1.12 / math.tan(math.rad(fov) / 2)
+                how = string.format("bounds %.0f cm tall", h * 2)
+            end
+        end
+    end
+    if not centre then
+        local ok, loc = pcall(function()
+            return vec(actor:K2_GetActorLocation())
+        end)
+        if not ok or not loc then
+            return false, "no position"
+        end
+        centre = loc
+        centre.Z = centre.Z - 5 -- a capsule's centre sits around the hips; a little lower frames the feet
+        dist = dist or 260
+        how = string.format("%.0f cm away", dist)
+    end
+    local ok, why = scene_shot(actor, rt, centre, dist, fov, 10, -3)
+    if not ok then
+        return false, why
+    end
+    return true, "body shot, " .. how
 end
 
 -- ---------------------------------------------------------------- requests
 
-local function read_requests()
-    local f = io.open(ctx.request_file, "rb")
+local function read_requests(file, header)
+    local f = file and io.open(file, "rb")
     if not f then
         return nil
     end
@@ -382,7 +436,7 @@ local function read_requests()
     for line in text:gmatch("[^\r\n]+") do
         if first then
             first = false
-            if line ~= "UUEPBS portraits 1" then
+            if line ~= (header or "UUEPBS portraits 1") then
                 return nil
             end
         else
@@ -422,17 +476,70 @@ local function take(actor, stem)
     return true, string.format("%s: %s, %s", file, how, saved)
 end
 
--- ctx: { say, chatter, folder, request_file, profile = function, find_actor = function(id), primary_mesh = function(actor) }
+-- Preset thumbnail: always the whole character (the game's portrait shows a face, not a shape).
+local function take_thumbnail(actor, name)
+    local file = name .. ".auto.png"
+    local rt = make_target(actor)
+    if not rt then
+        return false, "could not create a render target"
+    end
+    local ok, how = body_shot(actor, rt)
+    if not ok then
+        release_target(actor, rt)
+        return false, how
+    end
+    local saved = save_target(actor, rt, ctx.thumb_folder, file)
+    release_target(actor, rt)
+    if not saved then
+        return false, "could not save the picture (" .. how .. ")"
+    end
+    return true, string.format("thumbnail %s: %s, %s", file, how, saved)
+end
+
+local THUMB_HEADER = "UUEPBS thumbnails 1"
+
+-- ctx: { say, chatter, folder, request_file, profile = function, find_actor = function(id), primary_mesh = function(actor),
+--        portraits = bool (default true), thumb_folder, thumb_request_file (preset thumbnails; optional) }
 function P.setup(c)
     ctx = c
+    -- Requests left over from an earlier run are not taken again: they would picture today's shape
+    -- under yesterday's preset.
+    for _, r in ipairs(read_requests(ctx.thumb_request_file, THUMB_HEADER) or {}) do
+        done["thumb\t" .. r.line] = true
+    end
 end
 
 -- Game thread. Takes at most one picture per call, and not more often than PORTRAIT_GAP_MS.
+-- Preset thumbnails go first: someone just pressed Save and is waiting for it.
 function P.tick(now)
     if not ctx or now < nextAt then
         return
     end
-    local list = read_requests()
+    if ctx.thumb_folder and ctx.thumb_request_file then
+        for _, r in ipairs(read_requests(ctx.thumb_request_file, THUMB_HEADER) or {}) do
+            local key = "thumb\t" .. r.line
+            if not done[key] then
+                local actor = ctx.find_actor(r.id)
+                if actor then
+                    nextAt = now + PORTRAIT_GAP_MS
+                    local ok, info = take_thumbnail(actor, r.stem)
+                    tries[key] = (tries[key] or 0) + 1
+                    if ok then
+                        done[key] = true
+                        log("%s", info)
+                    elseif tries[key] >= 2 then
+                        done[key] = true
+                        say("no thumbnail for preset %s: %s", r.stem, tostring(info))
+                    end
+                    return
+                end
+            end
+        end
+    end
+    if ctx.portraits == false then
+        return
+    end
+    local list = read_requests(ctx.request_file)
     if not list then
         return
     end

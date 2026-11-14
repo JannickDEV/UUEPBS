@@ -15,6 +15,11 @@ return {
     NextPresetKey = "",
     PrevPresetKey = "",
 
+    -- Hold to compare: while this key is down the game shows the character's original body,
+    -- and your sliders come back when you let go (nothing is changed or saved). The window's
+    -- Before / After switch does the same with a click. "" turns the key off.
+    CompareKey = "F8",
+
     -- Presets go to <Win64>\<PresetFolderName> (the folder that holds the game exe).
     -- Set PresetFolder to an absolute path to use somewhere else instead.
     -- Presets from an older "RBS Presets" folder next to it are copied over the first time.
@@ -52,6 +57,11 @@ return {
     -- window opens and on Refresh; while it stays open, newly spawned characters are added as they appear.
     CandidateClasses = { "Character" },
     MaxCandidates = 40,
+    -- Readable names in the Character list and mesh labels ("Eve" instead of BP_Eve_C_2147482611 or
+    -- 00_EVE_01_Body): the game's own name for the character when it has one, else the game profile's
+    -- "Names" table, else the engine name cleaned up. Saved sliders and presets don't depend on it.
+    -- false = show the engine's object names.
+    FriendlyNames = true,
     -- Characters you picked and edited keep their sliders while you edit someone else
     -- (characters you never edited are left alone). This caps how many are kept at once.
     MaxEditedCharacters = 16,
@@ -97,6 +107,11 @@ return {
     -- profile names it in "PortraitTexture", else a head shot), saved in "UUEPBS Presets\_portraits".
     -- Your own PNG/JPG there, named after the character, always wins. false = only your own images.
     AutoPortraits = true,
+
+    -- Saving a preset takes a whole-body picture of the character for the preset browser, saved in
+    -- "UUEPBS Presets\_library\<preset>.auto.png". Your own PNG/JPG there named after the preset wins.
+    -- The game profile's "ThumbnailDistance" (cm) / "ThumbnailFov" tune the framing. false = no pictures.
+    PresetThumbnails = true,
 
     Verbose = false,
 
