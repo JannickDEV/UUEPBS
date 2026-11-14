@@ -1571,12 +1571,17 @@ Start from the example skin next to this file and change what you like.
             // An image grab can be bigger and brighter than Dear ImGui's thin bar, and the value is
             // printed in the middle of the slider: where they overlap, the text gets a dark outline
             // (drawn here, above the grab and below the widget's own text).
+            // No outline when the caller prints the value elsewhere (empty format: nothing in the slider).
             char text[64];
-            std::snprintf(text, sizeof(text), format && *format ? format : "%.3f", static_cast<double>(*v));
+            std::snprintf(text, sizeof(text), "%s", "");
+            if (format && *format)
+            {
+                std::snprintf(text, sizeof(text), format, static_cast<double>(*v));
+            }
             const ImVec2 ts = ImGui::CalcTextSize(text);
             const float cx = (a.x + b.x) * 0.5f, cy = (a.y + b.y) * 0.5f;
             const ImVec2 tp(std::floor(cx - ts.x * 0.5f), std::floor(cy - ts.y * 0.5f)); // same spot as RenderTextClipped centres it
-            if (gx0 < tp.x + ts.x && gx0 + gw > tp.x)
+            if (text[0] && gx0 < tp.x + ts.x && gx0 + gw > tp.x)
             {
                 const ImU32 dark = IM_COL32(0, 0, 0, static_cast<int>(200 * style.Alpha));
                 const float o = std::max(1.0f, std::floor(m_dpi + 0.25f));

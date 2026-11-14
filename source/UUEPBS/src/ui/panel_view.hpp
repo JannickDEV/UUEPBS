@@ -90,6 +90,7 @@ namespace uuepbs::ui
         void focus_tab(Tab tab) { m_focus_tab = static_cast<int>(tab); }
         void focus_detail(Detail d) { m_focus_detail = static_cast<int>(d); }
         void select_bone(const std::string& bone) { m_selected = bone; }
+        void focus_category(const std::string& name) { m_category = name; }
         void set_message(const std::string& text);
 
       private:
@@ -102,16 +103,33 @@ namespace uuepbs::ui
         void write_group(const GroupBones& group, const double axis[3]);
         std::optional<double> morph_of(const std::string& morph) const;
         void write_morph(const std::string& morph, std::optional<double> weight);
-        static bool size_slider(const char* id, BoneEdit& s, float lo, float hi);
+        static bool size_slider(const char* id, BoneEdit& s, float lo, float hi, const char* format = "%.3fx");
         static bool axis_sliders(BoneEdit& s);
         static bool turn_sliders(BoneEdit& s);
         static bool shift_sliders(BoneEdit& s);
-        static bool morph_slider(const char* id, float& v);
+        static bool morph_slider(const char* id, float& v, const char* format = "%.2f");
         static void tooltip(const char* text);
         void draw_header();
         void draw_target_picker();
         void draw_simplified();
-        void draw_simplified_morphs(float label_w);
+        // Character-creator layout of the Simplified Panel: body-part categories on the left,
+        // the picked category's sliders on the right.
+        struct Category
+        {
+            std::string name;
+            size_t parts{0};
+            size_t changed{0};
+        };
+        std::vector<Category> categories() const;
+        void draw_category_rail(const std::vector<Category>& cats, float width);
+        void draw_category(const Category& cat);
+        // Label + readable value (+ buttons) on one line; the caller draws the slider below it.
+        // Returns 1 when the first button was pressed, 2 for the second, else 0.
+        int part_header(const std::string& title, const std::string& icon_key, bool edited, const char* value, bool value_muted,
+                        const std::string& tip, const char* button1, const char* icon1, bool button1_on, bool button2_enabled);
+        static bool compact_button(const char* label, const char* icon_key);
+        static float compact_button_width(const char* label, const char* icon_key);
+        void draw_live_badge();
         void draw_detailed();
         void draw_detailed_bones();
         void draw_detailed_morphs();
@@ -169,6 +187,7 @@ namespace uuepbs::ui
         bool m_morph_only_edited{false};
 
         std::map<std::string, bool> m_group_open{};
+        std::string m_category{}; // Simplified Panel category shown on the right
         std::map<std::string, Spread> m_spread_hint{};
         char m_filter[64]{};
         bool m_only_edited{false};

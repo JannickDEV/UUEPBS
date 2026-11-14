@@ -33,9 +33,9 @@ struct FakeTargets : ui::TargetSource
 {
     std::vector<ui::TargetChoice> targets() override
     {
-        return {{"1A2B3C", "BP_Rokuv3_C_0 (player)", "player"}, {"4D5E6F", "BP_NPC_Guard_C_2", "4D5E6F"}, {"778899", "BP_NPC_Vendor_C_1", "778899"}};
+        return {{"1A2B3C", "Roku (player)", "player"}, {"4D5E6F", "Anca", "4D5E6F"}, {"778899", "Vendor", "778899"}};
     }
-    ui::TargetChoice current_target() override { return {"auto", "BP_Rokuv3_C_0 (player)", "player"}; }
+    ui::TargetChoice current_target() override { return {"auto", "Roku (player)", "player"}; }
     void pick_target(const std::string&) override {}
     void refresh_targets() override {}
     void request_rescan() override {}
@@ -369,6 +369,7 @@ int main(int argc, char** argv)
                 view.focus_detail(static_cast<ui::PanelView::Detail>(shot.detail));
             if (shot.tab == ui::PanelView::Tab::Detailed)
                 view.select_bone("boob_l");
+            view.focus_category("Hips & Legs");
             for (int frame = 0; frame < 4; ++frame)
             {
                 if (ui::skin().update())

@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cfloat>
 #include <cstring>
 
 namespace uuepbs::ui
@@ -253,11 +254,11 @@ namespace uuepbs::ui
         m_morph_revision = reg.morph_revision();
     }
 
-    bool PanelView::size_slider(const char* id, BoneEdit& s, float lo, float hi)
+    bool PanelView::size_slider(const char* id, BoneEdit& s, float lo, float hi, const char* format)
     {
         const double avg = (s.axis[0] + s.axis[1] + s.axis[2]) / 3.0;
         float v = static_cast<float>(avg);
-        const bool dragged = skin().slider_float(id, &v, lo, hi, "%.3fx", ImGuiSliderFlags_Logarithmic);
+        const bool dragged = skin().slider_float(id, &v, lo, hi, format, ImGuiSliderFlags_Logarithmic);
         const bool nudged = wheel_nudge(v, 0.01f, 0.001f, lo, hi);
         if (!dragged && !nudged)
         {
@@ -335,9 +336,9 @@ namespace uuepbs::ui
         return triple_sliders(labels, s.shift, -20.0f, 20.0f, "%.2f cm", 0.1f, 0.01f);
     }
 
-    bool PanelView::morph_slider(const char* id, float& v)
+    bool PanelView::morph_slider(const char* id, float& v, const char* format)
     {
-        const bool dragged = skin().slider_float(id, &v, kMorphSliderMin, kMorphSliderMax, "%.2f");
+        const bool dragged = skin().slider_float(id, &v, kMorphSliderMin, kMorphSliderMax, format);
         const bool nudged = wheel_nudge(v, 0.05f, 0.01f, static_cast<float>(kMorphMin), static_cast<float>(kMorphMax));
         v = static_cast<float>(clamp_morph(v)); // typed values (Ctrl+click) may leave 0..1
         return dragged || nudged;
@@ -373,19 +374,20 @@ namespace uuepbs::ui
             auto tab_flags = [this](Tab tab) {
                 return m_focus_tab == static_cast<int>(tab) ? ImGuiTabItemFlags_SetSelected : ImGuiTabItemFlags_None;
             };
-            if (sk.begin_tab_item("Simplified Panel###simplified", "simplified", tab_flags(Tab::Simplified)))
+            // The ### ids (and icon keys) stay the same as before 2.5 so skins and saved focus keep working.
+            if (sk.begin_tab_item("Body###simplified", "simplified", tab_flags(Tab::Simplified)))
             {
                 draw_simplified();
-                ImGui::EndTabItem();
-            }
-            if (sk.begin_tab_item("Detailed Panel###detailed", "detailed", tab_flags(Tab::Detailed)))
-            {
-                draw_detailed();
                 ImGui::EndTabItem();
             }
             if (sk.begin_tab_item("Presets###presets", "presets", tab_flags(Tab::Presets)))
             {
                 draw_presets();
+                ImGui::EndTabItem();
+            }
+            if (sk.begin_tab_item("Advanced###detailed", "detailed", tab_flags(Tab::Detailed)))
+            {
+                draw_detailed();
                 ImGui::EndTabItem();
             }
             if (sk.begin_tab_item("Status###status", "status", tab_flags(Tab::Status)))
@@ -403,6 +405,58 @@ namespace uuepbs::ui
         }
     }
 
+    // Small coloured dot + one or two words; the full sentence is in the tooltip.
+    void PanelView::draw_live_badge()
+    {
+        size_t live = 0;
+        for (const auto& r : m_rigs)
+        {
+            live += (!r.stale && r.frames > 0) ? 1 : 0;
+        }
+        const char* word = "Live";
+        ImVec4 col = good();
+        std::string tip;
+        char buf[256];
+        if (m_skeleton.names.empty())
+        {
+            word = "No character";
+            col = warn();
+            tip = "No character found yet. Pick one in the list or press Refresh.";
+        }
+        else if (!m_host->hook_active())
+        {
+            word = "Waiting";
+            col = warn();
+            std::snprintf(buf, sizeof(buf), "Found %s - waiting for the pose hook (see Status)",
+                          m_skeleton.owner.empty() ? m_skeleton.label.c_str() : m_skeleton.owner.c_str());
+            tip = buf;
+        }
+        else if (live == 0)
+        {
+            word = "Waiting";
+            col = warn();
+            std::snprintf(buf, sizeof(buf), "Tracking %zu mesh%s - waiting for an animated frame", m_rigs.size(), m_rigs.size() == 1 ? "" : "es");
+            tip = buf;
+        }
+        else
+        {
+            std::snprintf(buf, sizeof(buf), "Live on %zu mesh%s - %s, %zu bones, %zu morphs", live, live == 1 ? "" : "es", m_skeleton.label.c_str(),
+                          m_skeleton.names.size(), m_morph_names.size());
+            tip = buf;
+        }
+        const float r = ImGui::GetFontSize() * 0.22f;
+        ImGui::AlignTextToFramePadding();
+        const ImVec2 p = ImGui::GetCursorScreenPos();
+        const float cy = p.y + ImGui::GetFrameHeight() * 0.5f;
+        ImGui::GetWindowDrawList()->AddCircleFilled(ImVec2(p.x + r, cy), r, ImGui::GetColorU32(col));
+        ImGui::Dummy(ImVec2(r * 2.0f, ImGui::GetFrameHeight()));
+        ImGui::SameLine(0.0f, ImGui::GetStyle().ItemInnerSpacing.x);
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextColored(col, "%s", word);
+        tooltip(tip.c_str());
+    }
+
+    // Compact header: title row (logo, version, live badge, Enabled), then the character row.
     void PanelView::draw_header()
     {
         Skin& sk = skin();
@@ -419,53 +473,6 @@ namespace uuepbs::ui
         ImGui::SameLine();
         ImGui::AlignTextToFramePadding();
         ImGui::TextColored(muted(), "%s", m_version.c_str());
-        ImGui::SameLine();
-        ImGui::PushFont(nullptr, base * 0.85f);
-        ImGui::AlignTextToFramePadding();
-        ImGui::TextColored(ImVec4(muted().x, muted().y, muted().z, 0.70f), "by XTGMods");
-        ImGui::PopFont();
-
-        bool on = Registry::instance().enabled();
-        const float box = ImGui::GetFrameHeight() + ImGui::CalcTextSize("Enabled").x + ImGui::GetStyle().ItemInnerSpacing.x;
-        ImGui::SameLine();
-        ImGui::SetCursorPosX(ImGui::GetCursorPosX() + std::max(0.0f, ImGui::GetContentRegionAvail().x - box)); // right-align
-        if (sk.checkbox("Enabled", &on))
-        {
-            Registry::instance().set_enabled(on);
-        }
-
-        draw_target_picker();
-
-        size_t live = 0;
-        for (const auto& r : m_rigs)
-        {
-            live += (!r.stale && r.frames > 0) ? 1 : 0;
-        }
-        if (m_skeleton.names.empty())
-        {
-            ImGui::TextColored(warn(), "No character found yet. Pick one above or use Status > Rescan.");
-        }
-        else if (!m_host->hook_active())
-        {
-            ImGui::TextColored(warn(), "Found %s - waiting for the pose hook (see Status)", m_skeleton.owner.empty() ? m_skeleton.label.c_str() : m_skeleton.owner.c_str());
-        }
-        else if (live == 0)
-        {
-            ImGui::TextColored(warn(), "Tracking %zu mesh%s - waiting for an animated frame", m_rigs.size(), m_rigs.size() == 1 ? "" : "es");
-        }
-        else
-        {
-            ImGui::TextColored(good(), "Live on %zu mesh%s", live, live == 1 ? "" : "es");
-            ImGui::SameLine();
-            if (m_morph_names.empty())
-            {
-                ImGui::TextColored(muted(), "- %s, %zu bones", m_skeleton.label.c_str(), m_skeleton.names.size());
-            }
-            else
-            {
-                ImGui::TextColored(muted(), "- %s, %zu bones, %zu morphs", m_skeleton.label.c_str(), m_skeleton.names.size(), m_morph_names.size());
-            }
-        }
 
         std::string message;
         {
@@ -475,11 +482,58 @@ namespace uuepbs::ui
                 message = m_message;
             }
         }
-        if (!message.empty())
+
+        const ImGuiStyle& style = ImGui::GetStyle();
+        const float box = ImGui::GetFrameHeight() + ImGui::CalcTextSize("Enabled").x + style.ItemInnerSpacing.x;
+        const float badge = ImGui::GetFontSize() * 0.44f + style.ItemInnerSpacing.x + ImGui::CalcTextSize("No character").x;
+        const float right = box + badge + style.ItemSpacing.x * 2.0f;
+        ImGui::SameLine();
+        const float msg_room = ImGui::GetContentRegionAvail().x - right;
+        if (!message.empty() && msg_room > ImGui::GetFontSize() * 3.0f)
         {
+            // Latest action ("Loaded 'Curvy'...") between the title and the badge, cut to fit.
+            ImGui::AlignTextToFramePadding();
+            const ImVec2 p = ImGui::GetCursorScreenPos();
+            ImGui::PushClipRect(p, ImVec2(p.x + msg_room, p.y + ImGui::GetFrameHeight()), true);
             ImGui::TextColored(accent(), "%s", message.c_str());
+            ImGui::PopClipRect();
+            tooltip(message.c_str());
+            ImGui::SameLine();
         }
+        ImGui::SetCursorPosX(ImGui::GetWindowContentRegionMax().x - right + style.ItemSpacing.x);
+        draw_live_badge();
+        ImGui::SameLine();
+        ImGui::SetCursorPosX(ImGui::GetWindowContentRegionMax().x - box);
+        bool on = Registry::instance().enabled();
+        if (sk.checkbox("Enabled", &on))
+        {
+            Registry::instance().set_enabled(on);
+        }
+        tooltip("Turn every slider on or off at once (nothing is lost).");
+
+        draw_target_picker();
         ImGui::Spacing();
+    }
+
+    bool PanelView::compact_button(const char* label, const char* icon_key)
+    {
+        Skin& sk = skin();
+        if (sk.has_icon(icon_key))
+        {
+            const std::string id = std::string("##") + label;
+            return sk.button(id.c_str(), icon_key);
+        }
+        return sk.button(label, icon_key);
+    }
+
+    float PanelView::compact_button_width(const char* label, const char* icon_key)
+    {
+        Skin& sk = skin();
+        if (sk.has_icon(icon_key))
+        {
+            return sk.button_width("##", icon_key);
+        }
+        return sk.button_width(label, icon_key);
     }
 
     void PanelView::draw_target_picker()
@@ -489,11 +543,10 @@ namespace uuepbs::ui
             return;
         }
         Skin& sk = skin();
-        ImGui::AlignTextToFramePadding();
-        ImGui::TextUnformatted("Character");
-        ImGui::SameLine();
-        const float refresh_w = sk.button_width("Refresh", "refresh");
-        ImGui::SetNextItemWidth(std::max(120.0f, ImGui::GetContentRegionAvail().x - refresh_w - ImGui::GetStyle().ItemSpacing.x));
+        const ImGuiStyle& style = ImGui::GetStyle();
+        const float refresh_w = compact_button_width("Refresh", "refresh");
+        const float rename_w = compact_button_width("Rename", "rename");
+        ImGui::SetNextItemWidth(std::max(120.0f, ImGui::GetContentRegionAvail().x - refresh_w - rename_w - style.ItemSpacing.x * 2));
         const std::string shown = m_target.label.empty() ? std::string("(searching...)") : m_target.label;
         const bool was_open = m_target_combo_open;
         m_target_combo_open = ImGui::BeginCombo("##target", shown.c_str(), ImGuiComboFlags_HeightLarge);
@@ -537,12 +590,28 @@ namespace uuepbs::ui
             }
             ImGui::EndCombo();
         }
-        tooltip("Whose body the sliders edit. The list shows characters currently loaded in the level, nearest first,\n"
-                "with their distance from the player. Characters you have edited are always listed.\n"
-                "Characters you have edited keep their sliders while you edit someone else (marked \"edited\").\n"
-                "Characters you never edited are left alone.");
+        {
+            std::string tip = "Whose body the sliders edit. The list shows characters currently loaded in the level, nearest first.\n"
+                              "Characters you have edited are always listed and keep their sliders while you edit someone else.";
+            std::string others;
+            for (const ActorSummary& a : m_edited)
+            {
+                if (!a.active)
+                {
+                    others += (others.empty() ? "" : ", ") + a.label;
+                }
+            }
+            if (!others.empty())
+            {
+                tip += "\n\nAlso keeping sliders on: " + others;
+            }
+            tooltip(tip.c_str());
+        }
         ImGui::SameLine();
-        if (sk.button("Refresh", "refresh"))
+        compact_button("Rename", "rename");
+        tooltip("Give this character your own name (only shown here; saved with your presets).");
+        ImGui::SameLine();
+        if (compact_button("Refresh", "refresh"))
         {
             m_targets->refresh_targets();
             m_targets->request_rescan();
@@ -553,26 +622,6 @@ namespace uuepbs::ui
             const std::string tip = "Rescan the character and its meshes, relist the characters and retry the pose hook." +
                                     (key.empty() ? std::string() : "\nHotkey: " + key + " (works in game too).");
             tooltip(tip.c_str());
-        }
-
-        // Other characters that keep their sliders while this one is edited.
-        std::string others;
-        size_t n_others = 0;
-        for (const ActorSummary& a : m_edited)
-        {
-            if (!a.active)
-            {
-                others += (others.empty() ? "" : ", ") + a.label;
-                ++n_others;
-            }
-        }
-        if (n_others > 0)
-        {
-            ImGui::PushTextWrapPos(0.0f);
-            ImGui::TextColored(muted(), "Also keeping sliders on: %s", others.c_str());
-            ImGui::PopTextWrapPos();
-            tooltip("These characters keep their own sliders while you edit this one.\n"
-                    "Pick one above to change it, or release it in the Status tab (Edited characters).");
         }
     }
 
@@ -683,153 +732,249 @@ namespace uuepbs::ui
         ImGui::PopTextWrapPos();
     }
 
-    void PanelView::draw_simplified()
+    std::vector<PanelView::Category> PanelView::categories() const
     {
-        Skin& sk = skin();
-        sk.begin_child("##simplified", ImVec2(0, 0), ImGuiChildFlags_None);
-        if (m_skeleton.names.empty())
-        {
-            ImGui::TextWrapped("The sliders appear once a character's skeletal mesh has been found. Load a save or enter a level, or pick a character above.");
-            sk.end_child();
-            return;
-        }
-
-        if (m_body.groups.empty())
-        {
-            ImGui::TextWrapped("This skeleton uses bone names the Simplified Panel does not recognise. Every bone can still be edited in the Detailed Panel.");
-        }
-        const float icon_w = ImGui::GetFontSize();
-        const float icon_room = icon_w + ImGui::GetStyle().ItemSpacing.x;
-        float label_w = ImGui::CalcTextSize("Upper arms").x;
+        std::vector<Category> out;
+        auto slot = [&out](const std::string& name) -> Category& {
+            for (Category& c : out)
+            {
+                if (c.name == name)
+                {
+                    return c;
+                }
+            }
+            out.push_back(Category{name});
+            return out.back();
+        };
         for (const GroupBones& gb : m_body.groups)
         {
-            label_w = std::max(label_w, ImGui::CalcTextSize(gb.group.title.c_str()).x + (sk.has_icon("group." + gb.group.title) ? icon_room : 0.0f));
+            Category& c = slot(gb.group.section);
+            c.parts++;
+            c.changed += scale_of(gb.bones.front(), gb.group.spread).has_scale() ? 1 : 0;
         }
         for (const MorphGroupMorphs& mg : m_morph_groups)
         {
-            label_w = std::max(label_w, ImGui::CalcTextSize(mg.group.title.c_str()).x + (sk.has_icon("group." + mg.group.title) ? icon_room : 0.0f));
+            Category& c = slot(mg.group.section.empty() ? std::string("Morphs") : mg.group.section);
+            c.parts++;
+            const bool set = std::any_of(mg.morphs.begin(), mg.morphs.end(), [this](const std::string& m) { return morph_of(m).has_value(); });
+            c.changed += set ? 1 : 0;
         }
-        label_w = std::min(label_w, ImGui::GetContentRegionAvail().x * 0.35f) + ImGui::GetStyle().ItemSpacing.x * 2;
-        const float buttons = sk.button_width("XYZ", "xyz") + sk.button_width("Reset", "reset") + ImGui::GetStyle().ItemSpacing.x * 2;
-        std::string section;
-        bool first_section = true;
-        for (const GroupBones& gb : m_body.groups)
+        return out;
+    }
+
+    void PanelView::draw_category_rail(const std::vector<Category>& cats, float width)
+    {
+        Skin& sk = skin();
+        sk.begin_child("##categories", ImVec2(width, 0), ImGuiChildFlags_Borders | ImGuiChildFlags_AlwaysUseWindowPadding);
+        const float row_h = ImGui::GetFrameHeight() * 1.45f;
+        const float icon_w = ImGui::GetFontSize();
+        for (const Category& c : cats)
         {
-            const BodyGroup& g = gb.group;
-            const std::string& first = gb.bones.front();
-            if (first_section || section != g.section)
+            ImGui::PushID(c.name.c_str());
+            const bool picked = c.name == m_category;
+            const ImVec2 p = ImGui::GetCursorScreenPos();
+            if (ImGui::Selectable("##cat", picked, ImGuiSelectableFlags_None, ImVec2(0, row_h)))
             {
-                first_section = false;
-                section = g.section;
-                ImGui::Spacing();
-                ImGui::PushStyleColor(ImGuiCol_Text, muted());
-                ImGui::SeparatorText(section.c_str());
-                ImGui::PopStyleColor();
+                m_category = c.name;
             }
+            const ImVec2 q = ImGui::GetItemRectMax();
+            ImDrawList* dl = ImGui::GetWindowDrawList();
+            float x = p.x + ImGui::GetStyle().FramePadding.x * 0.5f;
+            const float text_y = p.y + (row_h - ImGui::GetFontSize()) * 0.5f;
+            if (picked)
+            {
+                dl->AddRectFilled(ImVec2(p.x, p.y + row_h * 0.18f), ImVec2(p.x + 3.0f, q.y - row_h * 0.18f), ImGui::GetColorU32(accent()), 2.0f);
+            }
+            if (sk.has_icon("section." + c.name))
+            {
+                sk.draw_image(dl, "icon." + fold_case("section." + c.name), ImVec2(x + 4.0f, text_y), ImVec2(x + 4.0f + icon_w, text_y + icon_w));
+                x += icon_w + ImGui::GetStyle().ItemInnerSpacing.x;
+            }
+            const ImVec4& tc = picked ? sk.color(Role::Title) : ImGui::GetStyleColorVec4(ImGuiCol_Text);
+            dl->AddText(ImVec2(x + 6.0f, text_y), ImGui::GetColorU32(tc), c.name.c_str());
+            if (c.changed > 0)
+            {
+                // Pill with the number of changed parts, right-aligned.
+                char n[16];
+                std::snprintf(n, sizeof(n), "%zu", c.changed);
+                const ImVec2 ts = ImGui::CalcTextSize(n);
+                const float ph = ImGui::GetFontSize() * 1.05f;
+                const float pw = std::max(ph, ts.x + ph * 0.6f);
+                const ImVec2 a(q.x - pw - 4.0f, p.y + (row_h - ph) * 0.5f);
+                dl->AddRectFilled(a, ImVec2(a.x + pw, a.y + ph), ImGui::GetColorU32(accent_dim()), ph * 0.5f);
+                dl->AddText(ImVec2(a.x + (pw - ts.x) * 0.5f, a.y + (ph - ts.y) * 0.5f), ImGui::GetColorU32(sk.color(Role::Text)), n);
+            }
+            std::string tip = std::to_string(c.parts) + (c.parts == 1 ? " part" : " parts");
+            if (c.changed)
+            {
+                tip += ", " + std::to_string(c.changed) + " changed";
+            }
+            tooltip(tip.c_str());
+            ImGui::PopID();
+        }
+        sk.end_child();
+    }
 
-            ImGui::PushID(g.title.c_str());
-            BoneEdit s = scale_of(first, g.spread);
-            const bool edited = s.has_scale();
+    int PanelView::part_header(const std::string& title, const std::string& icon_key, bool edited, const char* value, bool value_muted,
+                               const std::string& tip, const char* button1, const char* icon1, bool button1_on, bool button2_enabled)
+    {
+        Skin& sk = skin();
+        const ImGuiStyle& style = ImGui::GetStyle();
+        int pressed = 0;
+        sk.icon(icon_key, ImGui::GetFontSize());
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextColored(edited ? accent() : ImGui::GetStyleColorVec4(ImGuiCol_Text), "%s", title.c_str());
+        tooltip(tip.c_str());
 
-            sk.icon("group." + g.title, icon_w);
-            ImGui::AlignTextToFramePadding();
-            if (edited)
-            {
-                ImGui::TextColored(accent(), "%s", g.title.c_str());
-            }
-            else
-            {
-                ImGui::TextUnformatted(g.title.c_str());
-            }
-            {
-                std::string tip = g.hint;
-                tip += "\nBones:";
-                for (const std::string& b : gb.bones)
-                {
-                    tip += " " + b;
-                }
-                tooltip(tip.c_str());
-            }
-
-            bool& open = m_group_open[g.title];
-            ImGui::SameLine(label_w);
-            ImGui::SetNextItemWidth(std::max(80.0f, ImGui::GetContentRegionAvail().x - buttons));
-            if (size_slider("##size", s, kScaleMin, kScaleMax))
-            {
-                write_group(gb, s.axis);
-            }
-            ImGui::SameLine();
-            const bool was_open = open;
-            if (was_open)
+        const float b1 = button1 ? compact_button_width(button1, icon1) + style.ItemSpacing.x : 0.0f;
+        const float b2 = compact_button_width("Reset", "reset");
+        ImGui::PushFont(nullptr, style.FontSizeBase * 1.08f);
+        const float vw = ImGui::CalcTextSize(value).x;
+        ImGui::PopFont();
+        ImGui::SameLine();
+        const float end = ImGui::GetWindowContentRegionMax().x;
+        ImGui::SetCursorPosX(std::max(ImGui::GetCursorPosX(), end - b2 - b1 - vw - style.ItemSpacing.x * 1.5f));
+        ImGui::AlignTextToFramePadding();
+        ImGui::PushFont(nullptr, ImGui::GetStyle().FontSizeBase * 1.08f);
+        ImGui::TextColored(value_muted ? muted() : edited ? sk.color(Role::Title) : ImGui::GetStyleColorVec4(ImGuiCol_Text), "%s", value);
+        ImGui::PopFont();
+        tooltip("Ctrl+click the slider to type a value. Ctrl+wheel nudges it (add Shift for finer steps).");
+        if (button1)
+        {
+            ImGui::SameLine(0.0f, style.ItemSpacing.x * 1.5f);
+            if (button1_on)
             {
                 ImGui::PushStyleColor(ImGuiCol_Button, accent_dim());
             }
-            if (sk.button("XYZ", "xyz"))
+            if (compact_button(button1, icon1))
             {
-                open = !open;
+                pressed = 1;
             }
-            if (was_open)
+            if (button1_on)
             {
                 ImGui::PopStyleColor();
             }
             tooltip("Edit length / width / depth separately");
-            ImGui::SameLine();
-            ImGui::BeginDisabled(!edited);
-            if (sk.button("Reset", "reset"))
+        }
+        ImGui::SameLine();
+        ImGui::BeginDisabled(!button2_enabled);
+        if (compact_button("Reset", "reset"))
+        {
+            pressed = 2;
+        }
+        ImGui::EndDisabled();
+        tooltip("Back to the game's own shape");
+        return pressed;
+    }
+
+    namespace
+    {
+        // Slimmer track for the main sliders; the value is printed above it, so the grab never hides it.
+        struct SlimSlider
+        {
+            SlimSlider()
+            {
+                const ImGuiStyle& s = ImGui::GetStyle();
+                ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(s.FramePadding.x, std::max(1.0f, s.FramePadding.y * 0.45f)));
+                ImGui::PushStyleVar(ImGuiStyleVar_GrabMinSize, std::max(s.GrabMinSize, ImGui::GetFontSize() * 0.9f));
+            }
+            ~SlimSlider() { ImGui::PopStyleVar(2); }
+        };
+
+        // Tick at the slider's neutral point (1.0x sits in the middle of the log scale).
+        void neutral_tick(float t)
+        {
+            const ImVec2 a = ImGui::GetItemRectMin(), b = ImGui::GetItemRectMax();
+            const float grab = std::max(ImGui::GetStyle().GrabMinSize, ImGui::GetFontSize() * 0.9f);
+            const float x = a.x + 2.0f + grab * 0.5f + (b.x - a.x - 4.0f - grab) * t;
+            ImGui::GetWindowDrawList()->AddLine(ImVec2(x, b.y + 1.0f), ImVec2(x, b.y + 4.0f), ImGui::GetColorU32(muted()), 1.5f);
+        }
+    } // namespace
+
+    void PanelView::draw_category(const Category& cat)
+    {
+        Skin& sk = skin();
+        const ImGuiStyle& style = ImGui::GetStyle();
+        // Category title + summary + "Reset category".
+        ImGui::PushFont(nullptr, style.FontSizeBase * 1.3f);
+        ImGui::TextColored(sk.color(Role::Title), "%s", cat.name.c_str());
+        ImGui::PopFont();
+        ImGui::SameLine();
+        ImGui::TextColored(muted(), cat.changed ? "%zu of %zu changed" : "%zu parts", cat.changed ? cat.changed : cat.parts, cat.parts);
+        ImGui::SameLine();
+        const float rw = sk.button_width("Reset all", "reset");
+        ImGui::SetCursorPosX(std::max(ImGui::GetCursorPosX(), ImGui::GetWindowContentRegionMax().x - rw));
+        ImGui::BeginDisabled(cat.changed == 0);
+        const bool reset_all = sk.button("Reset all", "reset");
+        ImGui::EndDisabled();
+        tooltip("Reset every part in this category");
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        for (const GroupBones& gb : m_body.groups)
+        {
+            const BodyGroup& g = gb.group;
+            if (g.section != cat.name)
+            {
+                continue;
+            }
+            ImGui::PushID(g.title.c_str());
+            BoneEdit s = scale_of(gb.bones.front(), g.spread);
+            const bool edited = s.has_scale();
+            if (reset_all && edited)
             {
                 const double one[3] = {1.0, 1.0, 1.0};
                 write_group(gb, one);
+                s = scale_of(gb.bones.front(), g.spread);
             }
-            ImGui::EndDisabled();
-
+            std::string tip = g.hint + "\nBones:";
+            for (const std::string& b : gb.bones)
+            {
+                tip += " " + b;
+            }
+            char value[32];
+            const double avg = (s.axis[0] + s.axis[1] + s.axis[2]) / 3.0;
+            std::snprintf(value, sizeof(value), "%.2f\xC3\x97", avg); // "1.30x" with a real multiplication sign
+            bool& open = m_group_open[g.title];
+            switch (part_header(g.title, "group." + g.title, s.has_scale(), value, !s.has_scale(), tip, "XYZ", "xyz", open, s.has_scale()))
+            {
+            case 1: open = !open; break;
+            case 2:
+            {
+                const double one[3] = {1.0, 1.0, 1.0};
+                write_group(gb, one);
+                s = scale_of(gb.bones.front(), g.spread);
+                break;
+            }
+            default: break;
+            }
+            {
+                SlimSlider slim;
+                ImGui::SetNextItemWidth(-FLT_MIN);
+                if (size_slider("##size", s, kScaleMin, kScaleMax, ""))
+                {
+                    write_group(gb, s.axis);
+                }
+                neutral_tick(0.5f);
+            }
             if (open)
             {
-                ImGui::Indent(label_w);
+                ImGui::Indent(ImGui::GetFontSize());
                 if (axis_sliders(s))
                 {
                     write_group(gb, s.axis);
                 }
-                ImGui::Unindent(label_w);
+                ImGui::Unindent(ImGui::GetFontSize());
             }
+            ImGui::Dummy(ImVec2(0, style.ItemSpacing.y * 0.6f));
             ImGui::PopID();
         }
-        draw_simplified_morphs(label_w);
-        ImGui::Spacing();
-        ImGui::TextColored(muted(), "Ctrl+click a slider to type a value. Ctrl+wheel nudges it (add Shift for finer steps).");
-        sk.end_child();
-    }
 
-    // "MorphGroups" from the game profile: one slider per group, driving every morph in it.
-    void PanelView::draw_simplified_morphs(float label_w)
-    {
-        Skin& sk = skin();
-        if (m_morph_groups.empty())
-        {
-            if (!m_morph_names.empty())
-            {
-                ImGui::Spacing();
-                ImGui::PushTextWrapPos(0.0f);
-                ImGui::TextColored(muted(), "%zu morph target%s: see Detailed Panel > Morphs. Add \"MorphGroups\" to the game profile to put sliders here.",
-                                   m_morph_names.size(), m_morph_names.size() == 1 ? "" : "s");
-                ImGui::PopTextWrapPos();
-            }
-            return;
-        }
-        const float icon_w = ImGui::GetFontSize();
-        const float reset_w = sk.button_width("Reset", "reset") + ImGui::GetStyle().ItemSpacing.x;
-        std::string section;
-        bool first = true;
         for (const MorphGroupMorphs& mg : m_morph_groups)
         {
-            const std::string sec = mg.group.section.empty() ? std::string("Morphs") : mg.group.section;
-            if (first || sec != section)
+            if ((mg.group.section.empty() ? std::string("Morphs") : mg.group.section) != cat.name)
             {
-                first = false;
-                section = sec;
-                ImGui::Spacing();
-                ImGui::PushStyleColor(ImGuiCol_Text, muted());
-                ImGui::SeparatorText(section.c_str());
-                ImGui::PopStyleColor();
+                continue;
             }
             ImGui::PushID(("morphgroup:" + mg.group.title).c_str());
             std::optional<double> current;
@@ -841,49 +986,103 @@ namespace uuepbs::ui
                     break;
                 }
             }
-            const bool edited = current.has_value();
-            sk.icon("group." + mg.group.title, icon_w);
-            ImGui::AlignTextToFramePadding();
-            if (edited)
-            {
-                ImGui::TextColored(accent(), "%s", mg.group.title.c_str());
-            }
-            else
-            {
-                ImGui::TextUnformatted(mg.group.title.c_str());
-            }
-            {
-                std::string tip = mg.group.hint;
-                tip += tip.empty() ? "Morphs:" : "\nMorphs:";
-                for (const std::string& m : mg.morphs)
-                {
-                    tip += " " + m;
-                }
-                tooltip(tip.c_str());
-            }
-            ImGui::SameLine(label_w);
-            ImGui::SetNextItemWidth(std::max(80.0f, ImGui::GetContentRegionAvail().x - reset_w));
-            float v = static_cast<float>(current.value_or(0.0));
-            if (morph_slider("##w", v))
-            {
-                for (const std::string& m : mg.morphs)
-                {
-                    write_morph(m, v);
-                }
-            }
-            ImGui::SameLine();
-            ImGui::BeginDisabled(!edited);
-            if (sk.button("Reset", "reset"))
+            if (reset_all && current)
             {
                 for (const std::string& m : mg.morphs)
                 {
                     write_morph(m, std::nullopt);
                 }
+                current.reset();
             }
-            ImGui::EndDisabled();
-            tooltip("Give these morphs back to the game (its own value comes back).");
+            std::string tip = mg.group.hint;
+            tip += tip.empty() ? "Morphs:" : "\nMorphs:";
+            for (const std::string& m : mg.morphs)
+            {
+                tip += " " + m;
+            }
+            char value[32];
+            if (current)
+            {
+                std::snprintf(value, sizeof(value), "%.0f%%", *current * 100.0);
+            }
+            else
+            {
+                std::snprintf(value, sizeof(value), "game");
+            }
+            if (part_header(mg.group.title, "group." + mg.group.title, current.has_value(), value, !current, tip, nullptr, nullptr, false,
+                            current.has_value()) == 2)
+            {
+                for (const std::string& m : mg.morphs)
+                {
+                    write_morph(m, std::nullopt);
+                }
+                current.reset();
+            }
+            {
+                SlimSlider slim;
+                ImGui::SetNextItemWidth(-FLT_MIN);
+                float v = static_cast<float>(current.value_or(0.0));
+                if (morph_slider("##w", v, ""))
+                {
+                    for (const std::string& m : mg.morphs)
+                    {
+                        write_morph(m, v);
+                    }
+                }
+            }
+            ImGui::Dummy(ImVec2(0, style.ItemSpacing.y * 0.6f));
             ImGui::PopID();
         }
+    }
+
+    void PanelView::draw_simplified()
+    {
+        Skin& sk = skin();
+        if (m_skeleton.names.empty())
+        {
+            ImGui::TextWrapped("The sliders appear once a character's skeletal mesh has been found. Load a save or enter a level, or pick a character above.");
+            return;
+        }
+        const std::vector<Category> cats = categories();
+        if (cats.empty())
+        {
+            ImGui::TextWrapped("This skeleton uses bone names the Body tab does not recognise. Every bone can still be edited under Advanced.");
+            return;
+        }
+        if (std::none_of(cats.begin(), cats.end(), [this](const Category& c) { return c.name == m_category; }))
+        {
+            m_category = cats.front().name;
+        }
+        float rail_w = ImGui::CalcTextSize("Hips & Legs").x;
+        for (const Category& c : cats)
+        {
+            rail_w = std::max(rail_w, ImGui::CalcTextSize(c.name.c_str()).x + (sk.has_icon("section." + c.name) ? ImGui::GetFontSize() * 1.4f : 0.0f));
+        }
+        rail_w = std::min(rail_w + ImGui::GetFontSize() * 3.2f, ImGui::GetContentRegionAvail().x * 0.36f);
+
+        const float footer = ImGui::GetTextLineHeightWithSpacing() + ImGui::GetStyle().ItemSpacing.y;
+        sk.begin_child("##body", ImVec2(0, -footer), ImGuiChildFlags_None);
+        draw_category_rail(cats, rail_w);
+        ImGui::SameLine();
+        sk.begin_child("##parts", ImVec2(0, 0), ImGuiChildFlags_Borders | ImGuiChildFlags_AlwaysUseWindowPadding);
+        for (const Category& c : cats)
+        {
+            if (c.name == m_category)
+            {
+                draw_category(c);
+            }
+        }
+        if (m_morph_groups.empty() && !m_morph_names.empty())
+        {
+            ImGui::Spacing();
+            ImGui::PushTextWrapPos(0.0f);
+            ImGui::TextColored(muted(), "%zu morph target%s: see Advanced > Morphs. Add \"MorphGroups\" to the game profile to put sliders here.",
+                               m_morph_names.size(), m_morph_names.size() == 1 ? "" : "s");
+            ImGui::PopTextWrapPos();
+        }
+        sk.end_child();
+        sk.end_child();
+        ImGui::TextColored(muted(), "Ctrl+click a slider to type a value. Ctrl+wheel nudges it (add Shift for finer steps).");
     }
 
     void PanelView::draw_detailed()
