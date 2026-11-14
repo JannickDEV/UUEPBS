@@ -44,6 +44,7 @@ namespace uuepbs::ui
         std::string id;
         std::string label;
         std::string key{"player"}; // actor key: "player" for the default character, else its address
+        std::string engine; // engine object name, e.g. BP_Rokuv3_C_0 (empty from older scripts)
     };
 
     // Characters the user can switch the sliders to (fed by the Lua script).
@@ -61,7 +62,19 @@ namespace uuepbs::ui
         virtual std::string hotkey_text() = 0; // e.g. "F6"
         virtual std::string write_diagnostics() { return {}; } // returns where it was written
         virtual std::string refresh_hotkey_text() { return {}; } // e.g. "F7", empty = no hotkey
+        // Who an actor key is across reloads (character_memory.hpp), "" when unknown. Renames are
+        // stored under it, so they survive reloads.
+        virtual std::string identity_of(const std::string& key) { (void)key; return {}; }
+        // Ask the script for a portrait of character `id` ("auto" or an address), saved as
+        // "<presets>\_portraits\<stem>.auto.png". `retake` takes a new one even if it has one.
+        virtual void request_portrait(const std::string& id, const std::string& stem, bool retake)
+        {
+            (void)id;
+            (void)stem;
+            (void)retake;
+        }
     };
+
 
     class PanelView
     {
@@ -90,6 +103,9 @@ namespace uuepbs::ui
         void focus_tab(Tab tab) { m_focus_tab = static_cast<int>(tab); }
         void focus_detail(Detail d) { m_focus_detail = static_cast<int>(d); }
         void select_bone(const std::string& bone) { m_selected = bone; }
+        void focus_category(const std::string& name) { m_category = name; }
+        // Opens (true) or closes (false) the "Choose character" grid on the next frame.
+        void show_character_chooser(bool show) { (show ? m_choose_open : m_choose_close) = true; }
         void set_message(const std::string& text);
 
       private:
@@ -102,16 +118,63 @@ namespace uuepbs::ui
         void write_group(const GroupBones& group, const double axis[3]);
         std::optional<double> morph_of(const std::string& morph) const;
         void write_morph(const std::string& morph, std::optional<double> weight);
-        static bool size_slider(const char* id, BoneEdit& s, float lo, float hi);
-        static bool axis_sliders(BoneEdit& s);
-        static bool turn_sliders(BoneEdit& s);
-        static bool shift_sliders(BoneEdit& s);
-        static bool morph_slider(const char* id, float& v);
         static void tooltip(const char* text);
         void draw_header();
         void draw_target_picker();
         void draw_simplified();
-        void draw_simplified_morphs(float label_w);
+        // Character-creator layout of the Body tab (2.7): body-part categories on the left,
+        // the picked category's sliders on the right, in a bordered group under a section bar.
+        struct Category
+        {
+            std::string name;
+            size_t parts{0};
+            size_t changed{0};
+        };
+        std::vector<Category> categories() const;
+        void draw_category_rail(const std::vector<Category>& cats, float width);
+        void draw_category(const Category& cat);
+        // One slider row:  label | hairline track | number box (click to type) | [XYZ] | Reset.
+        struct RowResult
+        {
+            bool changed{false};
+            bool axes{false};  // XYZ pressed
+            bool reset{false}; // Reset pressed
+        };
+        struct RowSpec
+        {
+            const char* id{};
+            std::string title;
+            std::string tip;
+            bool edited{false};
+            float lo{0.0f}, hi{1.0f};
+            bool log{false};
+            float neutral{0.0f};          // where the centre tick goes
+            const char* format{"%.2f"};   // number box
+            bool unset{false};            // number box shows `unset_hint` instead of a value
+            const char* unset_hint{"game"};
+            bool has_axes{false};
+            bool axes_open{false};
+            bool can_reset{false};
+            float label_w{0.0f};
+        };
+        static RowResult part_row(const RowSpec& spec, float& v);
+        // Flat 2px track with a centre tick and a 6x16 thumb; a skin with slider images keeps its own slider.
+        static bool hairline_slider(const char* id, float* v, float lo, float hi, bool log, float neutral);
+        // Lighter full-width bar with a title (and optional right-aligned button). True when the button was pressed.
+        static bool section_bar(const char* title, const char* button = nullptr, bool button_enabled = true, const char* icon_key = "reset");
+        static bool compact_button(const char* label, const char* icon_key);
+        static float compact_button_width(const char* label, const char* icon_key);
+        // Title row, character banner (portrait/monogram, name, details, Change character / Rename).
+        void draw_character_banner();
+        // "Choose character" modal: a grid of square tiles.
+        void draw_character_chooser();
+        void draw_rename_popup();
+        std::string identity_of(const std::string& key);
+        ImTextureData* portrait_for(const std::string& key, const std::string& identity, const std::string& label, const std::string& engine);
+        // Same lookup; when there is no image, asks the script to take one (once per character).
+        ImTextureData* portrait_or_request(const std::string& id, const std::string& key, const std::string& identity, const std::string& label,
+                                           const std::string& engine);
+        static std::string portrait_stem(const std::string& key, const std::string& identity, const std::string& label, const std::string& engine);
         void draw_detailed();
         void draw_detailed_bones();
         void draw_detailed_morphs();
@@ -132,6 +195,14 @@ namespace uuepbs::ui
         // While the character list is open it takes the fresh nearest-first order that opening it asked for,
         // then stays put, so entries don't move under the mouse.
         bool m_target_combo_open{false};
+        char m_rename_buf[96]{};
+        bool m_rename_open{false};
+        bool m_choose_open{false};
+        bool m_choose_close{false};
+        std::string m_rename_key{};      // CharacterNames key being renamed
+        bool m_rename_stable{false};
+        std::string m_rename_label{};    // the game's name, shown in the rename popup
+        std::map<std::string, std::string> m_identity_cache{}; // actor key -> identity (refreshed with the list)
         Clock::time_point m_target_combo_since{};
         BodyMap m_body{};
         uint64_t m_body_revision{0};
@@ -169,6 +240,7 @@ namespace uuepbs::ui
         bool m_morph_only_edited{false};
 
         std::map<std::string, bool> m_group_open{};
+        std::string m_category{}; // Simplified Panel category shown on the right
         std::map<std::string, Spread> m_spread_hint{};
         char m_filter[64]{};
         bool m_only_edited{false};

@@ -85,6 +85,12 @@ return {
     -- feels live. 0 = only every PollIntervalMs. Nothing runs at this rate while it is closed.
     MorphPollMs = 100,
 
+    -- Character portraits for the window's banner and "Change character" grid. While the window is open,
+    -- characters without a picture get one taken in the game (the game's own portrait when the game
+    -- profile names it in "PortraitTexture", else a head shot), saved in "UUEPBS Presets\_portraits".
+    -- Your own PNG/JPG there, named after the character, always wins. false = only your own images.
+    AutoPortraits = true,
+
     Verbose = false,
 
     -- Starting values for a new game profile. The first time the mod runs in a game it writes

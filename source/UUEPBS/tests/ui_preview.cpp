@@ -1,10 +1,12 @@
 // Headless run of the slider window contents with a tiny software rasterizer,
 // so the layout can be checked (and asserts caught) without Windows.
 #include "core/body_groups.hpp"
+#include "core/character_names.hpp"
 #include "core/mirror.hpp"
 #include "core/presets.hpp"
 #include "core/registry.hpp"
 #include "ui/panel_view.hpp"
+#include "ui/portraits.hpp"
 #include "ui/skin.hpp"
 #include "ui/soft_raster.hpp"
 
@@ -16,6 +18,7 @@
 #include <cstdio>
 #include <cstring>
 #include <fstream>
+#include <map>
 #include <sstream>
 #include <vector>
 
@@ -33,9 +36,12 @@ struct FakeTargets : ui::TargetSource
 {
     std::vector<ui::TargetChoice> targets() override
     {
-        return {{"1A2B3C", "BP_Rokuv3_C_0 (player)", "player"}, {"4D5E6F", "BP_NPC_Guard_C_2", "4D5E6F"}, {"778899", "BP_NPC_Vendor_C_1", "778899"}};
+        return {{"1A2B3C", "Roku (player)", "player", "BP_Rokuv3_C_0"}, {"4D5E6F", "Anca", "4D5E6F", "BP_NPC_Guard_C_2"}, {"778899", "Vendor", "778899", "BP_NPC_Vendor_C_1"}};
     }
-    ui::TargetChoice current_target() override { return {"auto", "BP_Rokuv3_C_0 (player)", "player"}; }
+    ui::TargetChoice current_target() override { return {"auto", "Roku (player)", "player", "BP_Rokuv3_C_0"}; }
+    std::string identity_of(const std::string& key) override { return key == "4D5E6F" ? "Anca" : ""; }
+    std::map<std::string, std::string> asked; // portrait requests: id -> file stem
+    void request_portrait(const std::string& id, const std::string& stem, bool) override { asked[id] = stem; }
     void pick_target(const std::string&) override {}
     void refresh_targets() override {}
     void request_rescan() override {}
@@ -303,6 +309,10 @@ int main(int argc, char** argv)
     reg.set_morph("Face_Smile", 1.0);
     reg.set_animated_morphs({"face_smile"});
 
+    // A name the user gave a remembered NPC (shown in the picker and Status > Edited characters).
+    CharacterNames::instance().set_file("/tmp/claude-uuepbs-preview/UUEPBS Presets/_characters/_names.txt");
+    CharacterNames::instance().set("Anca", "Anca the Guard", true);
+
     PresetShelf shelf;
     shelf.set_folder("/tmp/claude-uuepbs-preview/UUEPBS Presets");
     {
@@ -328,6 +338,25 @@ int main(int argc, char** argv)
     ui::skin().update();
     ui::PanelView::apply_theme(dpi);
 
+    // Portraits: a hand-made one for Anca (by identity), an automatic one for the vendor (by game name).
+    const std::filesystem::path portrait_dir = "/tmp/claude-uuepbs-preview/UUEPBS Presets/_portraits";
+    std::filesystem::remove_all(portrait_dir);
+    std::filesystem::create_directories(portrait_dir);
+    {
+        const auto example = ui::Skin::list(skins);
+        const std::filesystem::path bg = skins / (example.empty() ? std::string() : example.front()) / "background.jpg";
+        std::error_code ec;
+        std::filesystem::copy_file(bg, portrait_dir / "Anca.jpg", ec);
+        std::filesystem::copy_file(bg, portrait_dir / "vendor.auto.jpg", ec);
+        if (ec)
+            std::printf("  note: no example image to use as a portrait (%s)\n", ec.message().c_str());
+    }
+    ui::portraits().set_folder(portrait_dir);
+    if (ui::Portraits::file_key("Anca: the Guard?") != "anca the guard")
+    {
+        std::printf("  FAIL: portrait file key\n");
+    }
+
     FakeHost host;
     FakeTargets targets;
     ui::PanelView view;
@@ -340,12 +369,14 @@ int main(int argc, char** argv)
         ui::PanelView::Tab tab;
         int detail; // -1, or a PanelView::Detail
         const char* file;
+        bool chooser{false}; // with the "Choose character" grid open
     };
     const Shot shots[] = {{ui::PanelView::Tab::Simplified, -1, "preview_simplified.ppm"},
                           {ui::PanelView::Tab::Detailed, 0, "preview_detailed.ppm"},
                           {ui::PanelView::Tab::Detailed, 1, "preview_morphs.ppm"},
                           {ui::PanelView::Tab::Presets, -1, "preview_presets.ppm"},
-                          {ui::PanelView::Tab::Status, -1, "preview_status.ppm"}};
+                          {ui::PanelView::Tab::Status, -1, "preview_status.ppm"},
+                          {ui::PanelView::Tab::Simplified, -1, "preview_chooser.ppm", true}};
 
     ui::SoftRenderer soft;
     int failures = 0;
@@ -369,14 +400,27 @@ int main(int argc, char** argv)
                 view.focus_detail(static_cast<ui::PanelView::Detail>(shot.detail));
             if (shot.tab == ui::PanelView::Tab::Detailed)
                 view.select_bone("boob_l");
+            view.focus_category("Hips & Legs");
+            view.show_character_chooser(shot.chooser);
             for (int frame = 0; frame < 4; ++frame)
             {
                 if (ui::skin().update())
                     ui::PanelView::apply_theme(dpi);
+                ui::portraits().update(ImGui::GetTime());
                 ImGui::NewFrame();
                 view.draw();
                 ImGui::Render();
                 handle_textures(ImGui::GetDrawData());
+            }
+            if (shot.chooser && (targets.asked.count("1A2B3C") == 0 || targets.asked["1A2B3C"] != "BP_Rokuv3_C_0" || targets.asked.count("4D5E6F")))
+            {
+                std::printf("  FAIL: portrait requests (want one for the player's engine name, none for Anca who has a picture)\n");
+                failures++;
+            }
+            if (shot.chooser && ui::portraits().loaded() < 2)
+            {
+                std::printf("  FAIL: portraits not shown in the character grid (%zu loaded)\n", ui::portraits().loaded());
+                failures++;
             }
             if (pass == 1 && &shot == &shots[0])
             {
@@ -461,7 +505,8 @@ int main(int argc, char** argv)
         handle_textures(ImGui::GetDrawData());
     }
     ui::skin().update();
-    const int user_textures = ImGui::GetPlatformIO().Textures.Size - ImGui::GetIO().Fonts->TexList.Size;
+    const int user_textures =
+        ImGui::GetPlatformIO().Textures.Size - ImGui::GetIO().Fonts->TexList.Size - static_cast<int>(ui::portraits().loaded()); // portraits are not the skin's
     std::printf("skin textures left after switching back: %d\n", user_textures);
     if (ui::skin().name() != "" || user_textures != 0)
     {
@@ -469,6 +514,7 @@ int main(int argc, char** argv)
         failures++;
     }
     ui::skin().shutdown();
+    ui::portraits().shutdown();
     ImGui::DestroyContext();
     return failures;
 }

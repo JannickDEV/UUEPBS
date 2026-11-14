@@ -47,10 +47,12 @@ target_compile_definitions(uuepbs_imgui PUBLIC IMGUI_DISABLE_OBSOLETE_FUNCTIONS 
 add_library(UUEPBS SHARED
     src/dllmain.cpp
     src/core/body_groups.cpp
+    src/core/character_names.cpp
     src/core/character_memory.cpp
     src/core/bridge.cpp
     src/core/mirror.cpp
     src/core/morphs.cpp
+    src/core/portrait_requests.cpp
     src/core/presets.cpp
     src/core/registry.cpp
     src/core/resolver.cpp
@@ -58,6 +60,7 @@ add_library(UUEPBS SHARED
     src/core/sculpt.cpp
     src/ui/image_decode.cpp
     src/ui/panel_view.cpp
+    src/ui/portraits.cpp
     src/ui/skin.cpp
     src/ui/soft_raster.cpp
     src/win/pose_hook.cpp

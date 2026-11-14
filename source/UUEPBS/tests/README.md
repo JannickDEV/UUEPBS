@@ -16,6 +16,13 @@ Host-side tests (Linux/macOS/WSL with g++ 13+ or clang 17+). None of them need W
     # hook finder against a real game exe on disk (expects GON's slot 374, +0x644/+0x648)
     g++ -std=c++23 -O2 -I$S test_resolver.cpp $S/core/*.cpp -o test_resolver && ./test_resolver path/to/Roku3-Win64-Shipping.exe
 
+    # portraits taken in the game (Scripts/uuepbs_portraits.lua) against a mocked engine: request file,
+    # head-shot calls, game-portrait path, PNG read-back fallback, giving up
+    lua portraits_test.lua ../../../mod/UUEPBS/Scripts /tmp/uuepbs_portraits
+
+    # names given to characters in the window (_characters/_names.txt) and portrait requests
+    g++ -std=c++23 -I$S test_names.cpp $S/core/*.cpp -o test_names && ./test_names
+
     # Lua <-> DLL file bridge
     g++ -std=c++23 -I$S bridge_peer.cpp $S/core/*.cpp -o bridge_peer
     g++ -std=c++23 -I$S test_bridge.cpp $S/core/*.cpp -o test_bridge
@@ -33,7 +40,7 @@ Host-side tests (Linux/macOS/WSL with g++ 13+ or clang 17+). None of them need W
     ./test_skin ../../../skins
 
     # UI preview + CPU renderer check (needs Dear ImGui 1.92.1 sources in IMGUI=...)
-    # Renders every tab (Simplified, Detailed > Bones, Detailed > Morphs, Presets, Status) with a reference
+    # Renders every tab (Body, Advanced > Bones, Advanced > Morphs, Presets, Status, Choose character) with a reference
     # rasteriser and with src/ui/soft_raster.cpp, first with the built-in look, then with the example skin
     # (written into a fresh skins folder the way the DLL does it). Fails if the two differ, if a frame drawn
     # from the quad cache differs from the first draw, or if switching skins leaks textures.
