@@ -116,19 +116,22 @@ namespace uuepbs::bridge
             else if (kind == "target" && f.size() >= 3)
             {
                 state.target = {std::string(f[1]), std::string(f[2]), f.size() >= 4 && !f[3].empty() ? std::string(f[3]) : std::string("player"),
-                                f.size() >= 5 ? std::string(f[4]) : std::string()};
+                                f.size() >= 5 ? std::string(f[4]) : std::string(), f.size() >= 6 ? std::string(f[5]) : std::string()};
             }
             else if (kind == "cand" && f.size() >= 3)
             {
-                state.candidates.push_back({std::string(f[1]), std::string(f[2]), f.size() >= 4 && !f[3].empty() ? std::string(f[3]) : std::string(f[1]), {}});
+                state.candidates.push_back({std::string(f[1]), std::string(f[2]), f.size() >= 4 && !f[3].empty() ? std::string(f[3]) : std::string(f[1]), {},
+                                            f.size() >= 5 ? std::string(f[4]) : std::string()});
             }
             else if (kind == "npc" && f.size() >= 3 && !f[1].empty() && !f[2].empty())
             {
-                state.npcs.push_back({std::string(f[1]), std::string(f[2]), f.size() >= 4 ? std::string(f[3]) : std::string(f[2])});
+                state.npcs.push_back({std::string(f[1]), std::string(f[2]), f.size() >= 4 ? std::string(f[3]) : std::string(f[2]),
+                                      f.size() >= 5 ? std::string(f[4]) : std::string()});
             }
             else if (kind == "party" && f.size() >= 3 && !f[1].empty() && !f[2].empty())
             {
-                state.party.push_back({std::string(f[1]), std::string(f[2]), f.size() >= 4 ? std::string(f[3]) : std::string(f[1])});
+                state.party.push_back({std::string(f[1]), std::string(f[2]), f.size() >= 4 ? std::string(f[3]) : std::string(f[1]),
+                                       f.size() >= 5 ? std::string(f[4]) : std::string()});
             }
             else if (kind == "switch" && f.size() >= 2 && !f[1].empty())
             {
@@ -146,6 +149,8 @@ namespace uuepbs::bridge
                 r.primary = f[3] == "1";
                 r.owner = f.size() >= 5 ? std::string(f[4]) : std::string();
                 r.actor = f.size() >= 6 && !f[5].empty() ? std::string(f[5]) : std::string("player");
+                r.engine = f.size() >= 7 ? std::string(f[6]) : std::string();
+                r.owner_engine = f.size() >= 8 ? std::string(f[7]) : std::string();
                 state.rigs.push_back(std::move(r));
                 rig = &state.rigs.back();
             }

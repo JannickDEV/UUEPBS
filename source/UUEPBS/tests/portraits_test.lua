@@ -190,5 +190,71 @@ requests("DEAD\tGone\t10\n")
 P.tick(80000)
 check(#calls == 0, "unknown character skipped")
 
+-- 8. preset thumbnails: a whole-body shot saved in _library, before any portrait; old requests are skipped
+os.execute('mkdir -p "' .. dir .. '/_library"')
+local thumbFolder = dir .. "/_library"
+local thumbFile = dir .. "/thumbnail_requests.txt"
+local function thumbs(text)
+    local f = assert(io.open(thumbFile, "wb"))
+    f:write("UUEPBS thumbnails 1\n" .. text)
+    f:close()
+end
+thumbs("auto\tOld preset\t100\n") -- left over from an earlier game session
+spawnWorks = true
+local function setup(portraitsOn)
+    P.setup({
+        say = function(fmt, ...) said[#said + 1] = string.format(fmt, ...) end,
+        chatter = function() end,
+        portraits = portraitsOn,
+        folder = folder,
+        request_file = reqFile,
+        thumb_folder = thumbFolder,
+        thumb_request_file = thumbFile,
+        profile = function() return profile end,
+        find_actor = function(id) return actors[id] end,
+    })
+end
+setup(true)
+actors.auto.GetActorBounds = function(_, onlyColliding, originOut, extentOut)
+    return { X = 0, Y = 0, Z = 88 }, { X = 30, Y = 30, Z = 90 }
+end
+calls, captures = {}, {}
+requests("")
+P.tick(90000)
+seq = table.concat(calls, ",")
+check(#calls == 0, "leftover thumbnail requests are not taken: " .. seq)
+calls = {}
+requests("7FF1\tAnca\t11\n") -- a portrait is waiting too
+thumbs("auto\tOld preset\t100\nauto\tCurvy\t101\n")
+P.tick(91000)
+seq = table.concat(calls, ",")
+check(seq:find("spawn,showonly Hero,capture,destroy", 1, true) and seq:find("export Curvy.auto.png", 1, true), "thumbnail taken first: " .. seq)
+check(not seq:find("Anca", 1, true), "portrait waits for the next tick")
+local cap = captures[1]
+check(cap and cap.FOVAngle == 40, "thumbnail field of view")
+local tf = io.open(thumbFolder .. "\\Curvy.auto.png", "rb")
+check(tf ~= nil, "thumbnail written to _library")
+if tf then tf:close() end
+-- framed from the bounds: 180 cm tall -> about 2.5 m away
+calls = {}
+P.tick(93000)
+seq = table.concat(calls, ",")
+check(seq:find("export Anca.auto.png", 1, true), "portrait after the thumbnail: " .. seq)
+
+-- 9. no bounds: fixed distance from the profile; thumbnails still work with portraits off
+actors.auto.GetActorBounds = nil
+profile.ThumbnailDistance = 300
+setup(false)
+calls, captures = {}, {}
+requests("7FF1\tAnca\t12\n")
+thumbs("auto\tTall legs\t102\n")
+P.tick(95000)
+seq = table.concat(calls, ",")
+check(seq:find("export Tall legs.auto.png", 1, true), "second thumbnail: " .. seq)
+calls = {}
+P.tick(97000)
+check(#calls == 0, "portraits off: no portrait taken")
+profile.ThumbnailDistance = nil
+
 print(failures == 0 and "portraits: all checks passed" or (failures .. " failure(s)"))
 os.exit(failures == 0 and 0 or 1)

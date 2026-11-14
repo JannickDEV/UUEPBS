@@ -2,6 +2,7 @@
 #include "looks.hpp"
 
 #include "json.hpp"
+#include "proportions.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -245,7 +246,7 @@ namespace uuepbs
         bool first = true;
         for (const auto& [key, entry] : book)
         {
-            if (entry.edit.is_neutral())
+            if (entry.edit.is_neutral() || is_scale_key(key))
             {
                 continue;
             }
@@ -268,6 +269,24 @@ namespace uuepbs
             out += ", \"children\": \"" + std::string(children_word(e.spread)) + "\" }";
         }
         out += first ? "}" : "\n  }";
+        if (has_proportions(book))
+        {
+            // Character Scale sliders (1 = unchanged). Older builds ignore this key.
+            out += ",\n  \"proportions\": {";
+            bool first_scale = true;
+            for (const ScaleSlider& sl : scale_sliders())
+            {
+                const auto it = book.find(scale_key(sl.id));
+                if (it == book.end() || std::fabs(it->second.edit.axis[0] - 1.0) < kScaleNeutralEps)
+                {
+                    continue;
+                }
+                out += first_scale ? "\n" : ",\n";
+                first_scale = false;
+                out += "    " + json_escape(sl.id) + ": " + json_number(it->second.edit.axis[0]);
+            }
+            out += first_scale ? "}" : "\n  }";
+        }
         if (with_morphs)
         {
             out += ",\n  \"morphs\": {";
@@ -340,7 +359,9 @@ namespace uuepbs
         const JsonValue* look_section = root.find("looks");
         const bool has_looks = look_section && look_section->kind == JsonValue::Kind::Object;
         const bool has_morphs = morph_section && morph_section->kind == JsonValue::Kind::Object;
-        if ((!bones || bones->kind != JsonValue::Kind::Object) && !has_morphs && !has_looks)
+        const JsonValue* scale_section = root.find("proportions");
+        const bool has_scale = scale_section && scale_section->kind == JsonValue::Kind::Object;
+        if ((!bones || bones->kind != JsonValue::Kind::Object) && !has_morphs && !has_scale && !has_looks)
         {
             message = "missing the \"bones\": { ... } section";
             return false;
@@ -486,10 +507,34 @@ namespace uuepbs
                 ++skipped;
                 continue;
             }
+            if (is_scale_key(bone))
+            {
+                ++skipped; // Character Scale values belong under "proportions"
+                continue;
+            }
             entry.edit.clamp();
             out[fold_case(bone)] = entry;
         }
-        message = std::to_string(out.size()) + " bone(s)";
+        const size_t bone_count = out.size();
+        size_t scale_count = 0;
+        if (has_scale)
+        {
+            for (const auto& [id, v] : scale_section->members)
+            {
+                if (v.kind != JsonValue::Kind::Number || !find_scale_slider(id))
+                {
+                    ++skipped;
+                    continue;
+                }
+                set_scale_value(out, id, v.number);
+                ++scale_count;
+            }
+        }
+        message = std::to_string(bone_count) + " bone(s)";
+        if (scale_count > 0)
+        {
+            message += ", " + std::to_string(scale_count) + " scale slider(s)";
+        }
         if (morph_count > 0)
         {
             message += ", " + std::to_string(morph_count) + " morph(s)";

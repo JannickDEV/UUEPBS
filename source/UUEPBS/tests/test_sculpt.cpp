@@ -3,6 +3,7 @@
 #include "core/character_memory.hpp"
 #include "core/mirror.hpp"
 #include "core/presets.hpp"
+#include "core/proportions.hpp"
 #include "core/sculpt.hpp"
 #include "core/registry.hpp"
 
@@ -969,6 +970,128 @@ int main()
         std::printf("hook cost: other mesh %.0f ns, tracked no edits %.0f ns, tracked 2 edits %.0f ns\n", untracked, idle, breasts);
         reg.clear_edits();
         reg.on_pose_finalized(comp);
+        reg.untrack_all();
+    }
+
+
+    // ---- Character Scale (proportions.hpp) ------------------------------------------------
+    {
+        const auto local = animate(s, 7);
+        const auto original = fk(s, local);
+
+        // Height scales every bone about the component origin; rotations stay put.
+        RigSculptor h;
+        CHECK(h.set_skeleton(s.names, s.parents));
+        h.bind(EditBook{}, 1, 1.25);
+        CHECK(h.planned_bones() == s.names.size());
+        std::vector<Xform> buf = original;
+        h.apply(buf.data(), (int)buf.size());
+        double err = 0;
+        for (size_t i = 0; i < buf.size(); ++i)
+            for (int a = 0; a < 3; ++a)
+            {
+                err = std::max(err, std::fabs(buf[i].pos[a] - original[i].pos[a] * 1.25));
+                err = std::max(err, std::fabs(buf[i].scl[a] - original[i].scl[a] * 1.25));
+            }
+        for (size_t i = 0; i < buf.size(); ++i)
+            for (int a = 0; a < 4; ++a)
+                err = std::max(err, std::fabs(buf[i].rot[a] - original[i].rot[a]));
+        std::printf("height 1.25: worst error %.3g\n", err);
+        CHECK(err < 1e-6);
+        // no compounding on a stale buffer, and back to 1 restores the pose
+        const std::vector<Xform> once = buf;
+        h.apply(buf.data(), (int)buf.size());
+        CHECK(worst(buf, once) < 1e-12);
+        h.bind(EditBook{}, 2, 1.0);
+        h.apply(buf.data(), (int)buf.size());
+        CHECK(worst(buf, original) < 1e-9);
+
+        // Height on top of bone edits == the bone edits, then scaled about the origin.
+        const EditBook edits = book_of({{"thigh_l", 1.0, 1.2, 1.2, Spread::Keep}, {"head", 0.9, 0.9, 0.9, Spread::Chain}});
+        RigSculptor plain;
+        CHECK(plain.set_skeleton(s.names, s.parents));
+        plain.bind(edits, 1);
+        std::vector<Xform> want = original;
+        plain.apply(want.data(), (int)want.size());
+        for (Xform& x : want)
+            for (int a = 0; a < 3; ++a)
+            {
+                x.pos[a] *= 0.8;
+                x.scl[a] *= 0.8;
+            }
+        h.forget_buffers();
+        h.bind(edits, 3, 0.8);
+        buf = original;
+        h.apply(buf.data(), (int)buf.size());
+        CHECK(worst(buf, want) < 1e-6);
+
+        // Pseudo entries: set, read, neutral removes, clamped to the slider range.
+        EditBook book = edits;
+        set_scale_value(book, "Leg_Length", 1.1);
+        set_scale_value(book, "height", 1.05);
+        set_scale_value(book, "head", 5.0);
+        CHECK(has_proportions(book));
+        CHECK(std::fabs(scale_value(book, "leg_length") - 1.1) < 1e-9);
+        CHECK(std::fabs(scale_value(book, "head") - 2.0) < 1e-9);
+        CHECK(bone_entry_count(book) == 2);
+        CHECK(is_scale_key("@SCALE:height") && !is_scale_key("thigh_l") && scale_id_of("@scale:head") == "head");
+        set_scale_value(book, "head", 1.0);
+        CHECK(book.count(scale_key("head")) == 0);
+        CHECK(!has_proportions(edits));
+
+        // Folding into bone edits: lengths multiply X only and keep the user's own edit.
+        const BodyMap map = resolve_body_groups(s.names, s.parents, BoneDictionary::builtin());
+        double world = 0;
+        const EditBook folded = apply_proportions(book, map, world);
+        CHECK(std::fabs(world - 1.05) < 1e-9);
+        CHECK(!has_proportions(folded));
+        const auto thigh = folded.find("thigh_l");
+        CHECK(thigh != folded.end() && std::fabs(thigh->second.edit.axis[0] - 1.1) < 1e-9 && std::fabs(thigh->second.edit.axis[1] - 1.2) < 1e-9 &&
+              thigh->second.edit.spread == Spread::Keep);
+        const auto calf = folded.find("calf_r");
+        CHECK(calf != folded.end() && std::fabs(calf->second.edit.axis[0] - 1.1) < 1e-9 && std::fabs(calf->second.edit.axis[2] - 1.0) < 1e-9 &&
+              calf->second.edit.spread == Spread::Keep);
+        CHECK(folded.count("foot_l") == 0);
+        CHECK(std::fabs(folded.at("head").edit.axis[0] - 0.9) < 1e-9); // head size untouched (reset to 1)
+
+        // Presets: "proportions" round-trips, never lands under "bones", and old files still load.
+        const std::string text = PresetShelf::serialize(book);
+        CHECK(text.find("\"proportions\"") != std::string::npos);
+        CHECK(text.find("@scale") == std::string::npos);
+        CHECK(text.find("\"version\": 2") != std::string::npos);
+        EditBook back;
+        std::string message;
+        CHECK(PresetShelf::parse(text, back, message));
+        CHECK(std::fabs(scale_value(back, "leg_length") - 1.1) < 1e-9 && std::fabs(scale_value(back, "height") - 1.05) < 1e-9);
+        CHECK(bone_entry_count(back) == 2);
+        CHECK(message.find("2 scale slider(s)") != std::string::npos);
+        CHECK(PresetShelf::parse(R"({"proportions": {"height": 0.9, "wings": 2}})", back, message));
+        CHECK(std::fabs(scale_value(back, "height") - 0.9) < 1e-9 && back.size() == 1 && message.find("1 unreadable") != std::string::npos);
+        CHECK(PresetShelf::parse(R"({"bones": {"head": {"scale": 1.1}}})", back, message));
+        CHECK(!has_proportions(back));
+        CHECK(PresetShelf::serialize(edits).find("proportions") == std::string::npos); // unchanged output without scale
+
+        // Registry: the pose hook folds the sliders in for every mesh of the character.
+        alignas(16) static unsigned char comp[0x1000] = {};
+        comp[0] = 0x44;
+        comp[0xC] = 11;
+        std::vector<Xform> pose = original;
+        auto put = [&](size_t off, auto v) { std::memcpy(comp + off, &v, sizeof(v)); };
+        put(0x600, RawArray{pose.data(), (int32_t)pose.size(), (int32_t)pose.size()});
+        put(0x610, RawArray{pose.data(), (int32_t)pose.size(), (int32_t)pose.size()});
+        put(0x648, (int32_t)0);
+        Registry& reg = Registry::instance();
+        reg.set_layout(PoseLayout{0x600, 0x648, 16, 96});
+        CHECK(reg.track((uintptr_t)comp, "Mesh", "Scale", s.names, s.parents, true, message));
+        reg.clear_edits();
+        const EditEntry tall = scale_entry("height", 1.1);
+        reg.set_bone(tall.bone, tall.edit);
+        reg.on_pose_finalized(comp);
+        const int32_t foot = [&] { for (size_t i = 0; i < s.names.size(); ++i) if (s.names[i] == "foot_l") return (int32_t)i; return -1; }();
+        CHECK(foot >= 0 && std::fabs(pose[foot].pos[2] - original[foot].pos[2] * 1.1) < 1e-6);
+        reg.clear_edits();
+        reg.on_pose_finalized(comp);
+        CHECK(worst(pose, original) < 1e-9);
         reg.untrack_all();
     }
 
