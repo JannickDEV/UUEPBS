@@ -2644,6 +2644,8 @@ local function build_state()
         "fps=" .. tostring(Config.WindowFps or 30),
         "key=" .. clean(Config.MenuKey or "F6"),
         "refresh_key=" .. clean(Config.RefreshKey == nil and "F7" or Config.RefreshKey),
+        "next_preset_key=" .. clean(Config.NextPresetKey or ""),
+        "prev_preset_key=" .. clean(Config.PrevPresetKey or ""),
         "compare_key=" .. clean(Config.CompareKey == nil and "F8" or Config.CompareKey),
         "game=" .. clean(projectName),
         "profile=" .. clean(Profile.name),
@@ -3100,7 +3102,7 @@ local function rest_of(params, first)
     return table.concat(parts, " ")
 end
 
-local usage = "uuepbs (or ubs) ui | status | rescan | list | load <name> | save <name> | on | off | compare [on|off] | reset [all] | diag | skin [name] | morph <name> [weight]"
+local usage = "uuepbs (or ubs) ui | status | rescan | list | load <name> | next | prev | save <name> | on | off | compare [on|off] | reset [all] | diag | skin [name] | morph <name> [weight]"
 
 local function console(_, params, out)
     local verb = string.lower(params[1] or "")
@@ -3124,7 +3126,7 @@ local function console(_, params, out)
         send_command("status", "", true)
     elseif verb == "load" or verb == "save" or verb == "skin" or verb == "morph" or verb == "reset" or verb == "compare" then
         send_command(verb, rest_of(params, 2), true)
-    elseif verb == "list" or verb == "on" or verb == "off" or verb == "diag" then
+    elseif verb == "list" or verb == "on" or verb == "off" or verb == "diag" or verb == "next" or verb == "prev" then
         send_command(verb, "", true)
     else
         reply(usage)

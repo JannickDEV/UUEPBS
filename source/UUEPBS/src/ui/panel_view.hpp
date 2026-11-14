@@ -14,6 +14,7 @@
 #include "../core/morphs.hpp"
 #include "../core/preset_library.hpp"
 #include "../core/presets.hpp"
+#include "../core/share_code.hpp"
 #include "../core/registry.hpp"
 #include "../core/symmetry.hpp"
 
@@ -66,6 +67,7 @@ namespace uuepbs::ui
         virtual std::string hotkey_text() = 0; // e.g. "F6"
         virtual std::string write_diagnostics() { return {}; } // returns where it was written
         virtual std::string refresh_hotkey_text() { return {}; } // e.g. "F7", empty = no hotkey
+        virtual std::string preset_hotkeys_text() { return {}; } // "previous preset PageUp, next preset PageDown", empty = none
         virtual std::string compare_hotkey_text() { return {}; } // CompareKey, e.g. "F8", empty = no hotkey
         // Who an actor key is across reloads (character_memory.hpp), "" when unknown. Renames are
         // stored under it, so they survive reloads.
@@ -200,6 +202,9 @@ namespace uuepbs::ui
         void load_preset(const std::string& name);
         void save_preset(const std::string& name);
         void draw_presets();
+        // "Share codes" block of the Presets tab: copy a preset as a one-line code, paste one in.
+        void draw_share_codes();
+        float share_codes_height() const;
         void draw_status();
         void draw_skin_picker();
         void draw_edited_characters();
@@ -297,6 +302,10 @@ namespace uuepbs::ui
         std::string m_picked{};
         std::string m_pending{};
 
+        // share codes
+        std::optional<share::Decoded> m_import{}; // last code pasted, until applied/saved/cleared
+        std::string m_import_error{};
+        char m_import_name[96]{};
         // undo / redo of slider edits (per character)
         EditHistory m_history{};
         std::string m_history_actor{kPlayerActor};

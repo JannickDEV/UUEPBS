@@ -34,6 +34,8 @@ Host-side tests (Linux/macOS/WSL with g++ 13+ or clang 17+). None of them need W
     # names given to characters in the window (_characters/_names.txt) and portrait requests
     g++ -std=c++23 -I$S test_names.cpp $S/core/*.cpp -o test_names && ./test_names
 
+    # preset share codes (encode/decode, damaged and hostile codes) and the next/previous preset order
+    g++ -std=c++23 -I$S test_share.cpp $S/core/*.cpp -o test_share && ./test_share
     # before/after compare: window switch, hold-to-compare key, what ends it, pose hook shows the original
     g++ -std=c++23 -I$S test_compare.cpp $S/core/*.cpp -o test_compare && ./test_compare
 

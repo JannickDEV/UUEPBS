@@ -2109,7 +2109,7 @@ namespace uuepbs::ui
 
         ImGui::Spacing();
         section_bar("Saved presets");
-        const float list_h = std::max(160.0f, ImGui::GetContentRegionAvail().y - ImGui::GetFrameHeightWithSpacing() * 4.5f);
+        const float list_h = std::max(160.0f, ImGui::GetContentRegionAvail().y - ImGui::GetFrameHeightWithSpacing() * 4.5f - share_codes_height());
         draw_preset_browser(list_h);
 
         const bool picked = !m_picked.empty() && std::find(m_presets.begin(), m_presets.end(), m_picked) != m_presets.end();
@@ -2190,10 +2190,148 @@ namespace uuepbs::ui
             ImGui::EndPopup();
         }
 
+        draw_share_codes();
+
         ImGui::Spacing();
         ImGui::PushTextWrapPos(0.0f);
         ImGui::TextColored(muted(), "Folder: %s", path_to_utf8(m_shelf->folder()).c_str());
+        const std::string keys = m_targets ? m_targets->preset_hotkeys_text() : std::string();
+        if (!keys.empty())
+        {
+            ImGui::TextColored(muted(), "Hotkeys: %s (NextPresetKey / PrevPresetKey in config.lua)", keys.c_str());
+        }
         ImGui::PopTextWrapPos();
+    }
+
+    float PanelView::share_codes_height() const
+    {
+        // section bar + button row + one line of status/hint (+ name/apply row when a code is waiting)
+        float rows = (m_import || !m_import_error.empty()) ? 4.2f : 3.2f;
+        if (m_targets && !m_targets->preset_hotkeys_text().empty())
+        {
+            rows += 1.0f;
+        }
+        return ImGui::GetFrameHeightWithSpacing() * rows;
+    }
+
+    void PanelView::draw_share_codes()
+    {
+        Skin& sk = skin();
+        ImGui::Spacing();
+        section_bar("Share codes");
+
+        auto copy_code = [&](const EditBook& book, const MorphBook& morphs, const std::string& name) {
+            if (book.empty() && morphs.empty())
+            {
+                set_message("Nothing to share: these sliders are all unchanged");
+                return;
+            }
+            const std::string code = share::encode(book, &morphs, name);
+            ImGui::SetClipboardText(code.c_str());
+            set_message("Preset code copied (" + std::to_string(code.size()) + " characters): paste it anywhere to share");
+        };
+
+        if (sk.button("Copy current sliders", "save"))
+        {
+            const std::string who = m_target.label.empty() ? std::string() : CharacterNames::instance().shown(m_target.label, m_target.key, identity_of(m_target.key));
+            copy_code(Registry::instance().edits(), Registry::instance().morphs(), PresetShelf::clean_name(m_preset_name).empty() ? who : m_preset_name);
+        }
+        tooltip("Copies the sliders of the character shown above as a code (starts with UUEPBS1.)");
+        ImGui::SameLine();
+        const bool picked = !m_picked.empty() && std::find(m_presets.begin(), m_presets.end(), m_picked) != m_presets.end();
+        ImGui::BeginDisabled(!picked);
+        if (sk.button("Copy picked preset", "load"))
+        {
+            EditBook book;
+            MorphBook morphs;
+            std::string message;
+            if (m_shelf->load(m_picked, book, message, &morphs))
+            {
+                copy_code(book, morphs, m_picked);
+            }
+            else
+            {
+                set_message(message);
+            }
+        }
+        ImGui::EndDisabled();
+        ImGui::SameLine();
+        if (sk.button("Paste code", "load"))
+        {
+            const char* clip = ImGui::GetClipboardText();
+            share::Decoded decoded;
+            std::string message;
+            m_import.reset();
+            m_import_error.clear();
+            if (share::decode(clip ? clip : "", decoded, message))
+            {
+                std::snprintf(m_import_name, sizeof(m_import_name), "%s", decoded.name.c_str());
+                m_import = std::move(decoded);
+            }
+            else
+            {
+                m_import_error = message;
+            }
+            set_message(message);
+        }
+        tooltip("Reads a preset code from the clipboard. Nothing changes until you Apply or Save it.");
+
+        if (!m_import_error.empty())
+        {
+            ImGui::PushTextWrapPos(0.0f);
+            ImGui::TextColored(warn(), "%s", m_import_error.c_str());
+            ImGui::PopTextWrapPos();
+            if (sk.button("Dismiss"))
+            {
+                m_import_error.clear();
+            }
+            return;
+        }
+        if (!m_import)
+        {
+            ImGui::TextColored(muted(), "Codes hold bones and morphs only, never files, so they are safe to paste.");
+            return;
+        }
+
+        ImGui::TextColored(muted(), "Pasted code: %s%s%s", m_import->name.empty() ? "unnamed" : m_import->name.c_str(), " - ", m_import->summary.c_str());
+        const std::string who =
+            m_target.label.empty() ? std::string("this character") : CharacterNames::instance().shown(m_target.label, m_target.key, identity_of(m_target.key));
+        const std::string apply = "Apply to " + who;
+        if (sk.button(apply.c_str(), "load"))
+        {
+            Registry::instance().replace_edits(m_import->bones);
+            Registry::instance().replace_morphs(m_import->morphs);
+            set_message("Applied the pasted code to " + who + " (" + m_import->summary + ")");
+        }
+        ImGui::SameLine();
+        const float save_w = sk.button_width("Save as preset", "save");
+        const float clear_w = sk.button_width("Clear");
+        ImGui::SetNextItemWidth(std::max(80.0f, ImGui::GetContentRegionAvail().x - save_w - clear_w - ImGui::GetStyle().ItemSpacing.x * 2));
+        ImGui::InputTextWithHint("##importname", "Name for the preset", m_import_name, sizeof(m_import_name));
+        ImGui::SameLine();
+        const std::string name = PresetShelf::clean_name(m_import_name);
+        const bool taken = !name.empty() && m_shelf->exists(name);
+        ImGui::BeginDisabled(name.empty() || taken);
+        if (sk.button("Save as preset", "save"))
+        {
+            std::string message;
+            if (m_shelf->save(name, m_import->bones, message, &m_import->morphs))
+            {
+                m_picked = name;
+            }
+            set_message(message);
+            refresh_presets();
+        }
+        ImGui::EndDisabled();
+        if (taken && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled | ImGuiHoveredFlags_DelayShort))
+        {
+            ImGui::SetTooltip("A preset with this name exists already: pick another name");
+        }
+        ImGui::SameLine();
+        if (sk.button("Clear"))
+        {
+            m_import.reset();
+        }
     }
 
     void PanelView::draw_skin_picker()

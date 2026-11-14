@@ -8,6 +8,13 @@ return {
     -- Handy in games that finish setting the character up late. "" turns it off.
     RefreshKey = "F7",
 
+    -- Load the next / previous saved preset (alphabetical, wraps around) onto the character picked in
+    -- the window (the player unless you picked someone else), without opening the window. Each character
+    -- keeps its own place in the list. Same key names as MenuKey; "" turns a key off.
+    -- Also available as console commands: ubs next / ubs prev.
+    NextPresetKey = "",
+    PrevPresetKey = "",
+
     -- Hold to compare: while this key is down the game shows the character's original body,
     -- and your sliders come back when you let go (nothing is changed or saved). The window's
     -- Before / After switch does the same with a click. "" turns the key off.
