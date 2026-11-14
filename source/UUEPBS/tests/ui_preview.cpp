@@ -340,6 +340,7 @@ int main(int argc, char** argv)
     view.configure(&shelf, &host, &targets, "v2.4.0", true);
     view.refresh_presets();
     view.set_message("Loaded 'Curvy' (7 bone(s), 4 morph(s))");
+    view.pick_preset("Curvy");
 
     struct Shot
     {

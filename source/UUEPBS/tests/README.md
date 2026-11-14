@@ -8,6 +8,9 @@ Host-side tests (Linux/macOS/WSL with g++ 13+ or clang 17+). None of them need W
     # pose maths, presets, registry (UE5 double and UE4 float poses), pose hook cost per call
     g++ -std=c++23 -O1 -I$S test_sculpt.cpp $S/core/*.cpp -o test_sculpt && ./test_sculpt
 
+    # undo/redo history, "Changed only" filter and preset details
+    g++ -std=c++23 -I$S test_changes.cpp $S/core/*.cpp -o test_changes && ./test_changes
+
     # left/right naming for common rigs + mirroring measured from the reference pose
     g++ -std=c++23 -I$S test_mirror.cpp $S/core/*.cpp -o test_mirror && ./test_mirror
     g++ -std=c++23 -I$S test_groups.cpp $S/core/*.cpp -o test_groups

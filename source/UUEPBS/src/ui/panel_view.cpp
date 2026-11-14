@@ -165,6 +165,13 @@ namespace uuepbs::ui
             m_rigs_time = now;
             m_mirror_text = reg.mirror_source();
             m_animated = reg.animated_morphs();
+            // Released or despawned characters lose their undo history (their address keys can be reused).
+            std::set<std::string> keep{kPlayerActor, reg.active_actor()};
+            for (const ActorSummary& a : m_edited)
+            {
+                keep.insert(a.key);
+            }
+            m_history.retain(keep);
         }
         if (m_targets && now - m_target_time > std::chrono::milliseconds(400))
         {
@@ -359,6 +366,7 @@ namespace uuepbs::ui
     void PanelView::draw()
     {
         sync();
+        track_history();
         Skin& sk = skin();
         const ImGuiViewport* vp = ImGui::GetMainViewport();
         ImGui::SetNextWindowPos(vp->WorkPos);
@@ -568,10 +576,11 @@ namespace uuepbs::ui
         }
         ImGui::PushFont(nullptr, base * 0.86f);
         const float rename_w = ImGui::CalcTextSize("Rename").x + style.FramePadding.x * 2.0f;
-        const std::string shown_note = fit_text(note, std::max(dpi_px(60.0f), ImGui::GetContentRegionAvail().x * 0.30f - rename_w));
+        const float history_w = undo_redo_width() + style.ItemSpacing.x; // Undo / Redo sit left of Rename
+        const std::string shown_note = fit_text(note, std::max(dpi_px(60.0f), ImGui::GetContentRegionAvail().x * 0.30f - rename_w - history_w));
         const float note_w = ImGui::CalcTextSize(shown_note.c_str()).x;
         ImGui::PopFont();
-        const float right_w = std::max(change_w, note_w + rename_w + style.ItemSpacing.x);
+        const float right_w = std::max(change_w, note_w + history_w + rename_w + style.ItemSpacing.x);
 
         ImGui::BeginGroup();
         const float text_w = std::max(dpi_px(80.0f), right_x - ImGui::GetCursorPosX() - right_w - style.ItemSpacing.x * 2.0f);
@@ -655,7 +664,7 @@ namespace uuepbs::ui
 
         ImGui::PushFont(nullptr, base * 0.86f);
         const float row_y = pad + ImGui::GetFrameHeight() + style.ItemSpacing.y * 0.75f;
-        ImGui::SetCursorPos(ImVec2(right_x - rename_w - style.ItemSpacing.x - note_w, row_y + (ImGui::GetFrameHeight() - ImGui::GetTextLineHeight()) * 0.5f));
+        ImGui::SetCursorPos(ImVec2(right_x - rename_w - history_w - style.ItemSpacing.x - note_w, row_y + (ImGui::GetFrameHeight() - ImGui::GetTextLineHeight()) * 0.5f));
         ImGui::TextColored(is_message ? accent() : muted(), "%s", shown_note.c_str());
         if (is_message)
         {
@@ -666,6 +675,8 @@ namespace uuepbs::ui
             const std::string tip = "Also keeping sliders on: " + others;
             tooltip(tip.c_str());
         }
+        ImGui::SetCursorPos(ImVec2(right_x - rename_w - history_w, row_y));
+        draw_undo_redo();
         ImGui::SetCursorPos(ImVec2(right_x - rename_w, row_y));
         ImGui::BeginDisabled(m_target.label.empty());
         if (sk.button("Rename", {}, ImVec2(rename_w, 0.0f)))
@@ -1308,6 +1319,9 @@ namespace uuepbs::ui
         const ImGuiStyle& style = ImGui::GetStyle();
         const bool reset_all = section_bar(cat.name.c_str(), "Reset", cat.changed > 0);
         ImGui::PushFont(nullptr, style.FontSizeBase * 0.86f);
+        draw_changed_only_filter();
+        ImGui::SameLine();
+        ImGui::AlignTextToFramePadding();
         ImGui::TextColored(muted(), cat.changed ? "%zu of %zu parts changed. Click a number to type it." : "%zu parts. Click a number to type it.",
                            cat.changed ? cat.changed : cat.parts, cat.parts);
         ImGui::PopFont();
@@ -1332,14 +1346,16 @@ namespace uuepbs::ui
         ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(style.ItemSpacing.x, dpi_px(12.0f)));
         sk.begin_child("##group", ImVec2(0, 0), ImGuiChildFlags_Borders | ImGuiChildFlags_AutoResizeY | ImGuiChildFlags_AlwaysUseWindowPadding);
         ImGui::PopStyleVar();
+        size_t shown = 0; // rows left after the "Changed only" filter
 
         for (const GroupBones& gb : m_body.groups)
         {
             const BodyGroup& g = gb.group;
-            if (g.section != cat.name)
+            if (g.section != cat.name || (m_simplified_changed_only && !group_changed(gb, m_book)))
             {
                 continue;
             }
+            ++shown;
             ImGui::PushID(g.title.c_str());
             BoneEdit s = scale_of(gb.bones.front(), g.spread);
             const double one[3] = {1.0, 1.0, 1.0};
@@ -1412,10 +1428,12 @@ namespace uuepbs::ui
 
         for (const MorphGroupMorphs& mg : m_morph_groups)
         {
-            if ((mg.group.section.empty() ? std::string("Morphs") : mg.group.section) != cat.name)
+            if ((mg.group.section.empty() ? std::string("Morphs") : mg.group.section) != cat.name ||
+                (m_simplified_changed_only && !morph_group_changed(mg, m_morphs)))
             {
                 continue;
             }
+            ++shown;
             ImGui::PushID(("morphgroup:" + mg.group.title).c_str());
             std::optional<double> current;
             for (const std::string& m : mg.morphs)
@@ -1462,6 +1480,10 @@ namespace uuepbs::ui
                 }
             }
             ImGui::PopID();
+        }
+        if (shown == 0)
+        {
+            ImGui::TextColored(muted(), "Nothing in %s is changed yet. Untick \"Changed only\" to see every part.", cat.name.c_str());
         }
         sk.end_child();
         ImGui::PopStyleVar();
@@ -1871,6 +1893,7 @@ namespace uuepbs::ui
             Registry::instance().replace_edits(std::move(book));
             Registry::instance().replace_morphs(std::move(morphs));
             std::snprintf(m_preset_name, sizeof(m_preset_name), "%s", name.c_str());
+            m_picked = name; // its details stay on show
         }
         set_message(message);
     }
@@ -1940,7 +1963,8 @@ namespace uuepbs::ui
         ImGui::Spacing();
         section_bar("Saved presets");
         const float list_h = std::max(120.0f, ImGui::GetContentRegionAvail().y - ImGui::GetFrameHeightWithSpacing() * 4.5f);
-        sk.begin_child("##presetlist", ImVec2(0, list_h), ImGuiChildFlags_Borders);
+        const float list_w = std::floor(ImGui::GetContentRegionAvail().x * 0.42f);
+        sk.begin_child("##presetlist", ImVec2(list_w, list_h), ImGuiChildFlags_Borders);
         if (m_presets.empty())
         {
             ImGui::TextColored(muted(), "No presets yet.");
@@ -1956,6 +1980,10 @@ namespace uuepbs::ui
                 }
             }
         }
+        sk.end_child();
+        ImGui::SameLine();
+        sk.begin_child("##presetdetails", ImVec2(0, list_h), ImGuiChildFlags_Borders);
+        draw_preset_details();
         sk.end_child();
 
         const bool picked = !m_picked.empty() && std::find(m_presets.begin(), m_presets.end(), m_picked) != m_presets.end();
@@ -2192,5 +2220,223 @@ namespace uuepbs::ui
                                     "pose updates on the next animated frame.",
                            key.c_str());
         ImGui::PopTextWrapPos();
+    }
+
+    // ---- undo / redo ----------------------------------------------------------
+
+    EditSnapshot PanelView::snapshot() const
+    {
+        return EditSnapshot{m_book, m_morphs};
+    }
+
+    void PanelView::track_history()
+    {
+        const std::string actor = Registry::instance().active_actor();
+        if (actor != m_history_actor)
+        {
+            m_history_actor = actor;
+            // The window's copies may still be the previous character's until the next sync.
+            m_book = Registry::instance().edits(&m_book_revision);
+            m_morphs = Registry::instance().morphs(&m_morph_revision);
+        }
+        // A slider being dragged or typed into is one step, recorded once it is let go.
+        m_history.observe(actor, snapshot(), ImGui::IsAnyItemActive());
+
+        const ImGuiIO& io = ImGui::GetIO();
+        if (io.WantTextInput || ImGui::IsAnyItemActive())
+        {
+            return; // text fields keep their own Ctrl+Z
+        }
+        if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_Z))
+        {
+            undo_edit();
+        }
+        else if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_Y) || ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_Z))
+        {
+            redo_edit();
+        }
+    }
+
+    void PanelView::apply_snapshot(const EditSnapshot& s)
+    {
+        Registry& reg = Registry::instance();
+        reg.replace_edits(s.bones);
+        reg.replace_morphs(s.morphs);
+        m_book = reg.edits(&m_book_revision);
+        m_morphs = reg.morphs(&m_morph_revision);
+    }
+
+    void PanelView::undo_edit()
+    {
+        if (const auto s = m_history.undo(m_history_actor, snapshot()))
+        {
+            apply_snapshot(*s);
+            set_message("Undone");
+        }
+    }
+
+    void PanelView::redo_edit()
+    {
+        if (const auto s = m_history.redo(m_history_actor, snapshot()))
+        {
+            apply_snapshot(*s);
+            set_message("Redone");
+        }
+    }
+
+    float PanelView::undo_redo_width() const
+    {
+        return skin().button_width("Undo", "undo") + skin().button_width("Redo", "redo") + ImGui::GetStyle().ItemSpacing.x;
+    }
+
+    void PanelView::draw_undo_redo()
+    {
+        Skin& sk = skin();
+        ImGui::BeginDisabled(!m_history.can_undo(m_history_actor));
+        if (sk.button("Undo", "undo"))
+        {
+            undo_edit();
+        }
+        ImGui::EndDisabled();
+        tooltip("Undo the last slider change of this character (Ctrl+Z).\nA whole drag, a preset load or a reset is one step.");
+        ImGui::SameLine();
+        ImGui::BeginDisabled(!m_history.can_redo(m_history_actor));
+        if (sk.button("Redo", "redo"))
+        {
+            redo_edit();
+        }
+        ImGui::EndDisabled();
+        tooltip("Redo what Undo took back (Ctrl+Y or Ctrl+Shift+Z).");
+    }
+
+    // ---- Body tab filter ------------------------------------------------------
+
+    void PanelView::draw_changed_only_filter()
+    {
+        skin().checkbox("Changed only", &m_simplified_changed_only);
+        tooltip("Show only the body parts (and morph groups) that differ from the game's own shape.");
+    }
+
+    // ---- preset details ----------------------------------------------------------
+
+    void PanelView::refresh_preset_details()
+    {
+        const auto now = Clock::now();
+        if (m_details_for == m_picked && now - m_details_time < std::chrono::seconds(2))
+        {
+            return;
+        }
+        m_details_for = m_picked;
+        m_details_time = now;
+        m_details = {};
+        m_details_ok = false;
+        m_details_error.clear();
+        if (m_picked.empty() || !m_shelf)
+        {
+            return;
+        }
+        EditBook book;
+        MorphBook morphs;
+        std::string message;
+        if (!m_shelf->load(m_picked, book, message, &morphs))
+        {
+            m_details_error = message;
+            return;
+        }
+        m_details = summarize_edits(book, morphs, m_body, m_morph_groups, m_skeleton.names, m_morph_names);
+        m_details_ok = true;
+    }
+
+    void PanelView::draw_preset_details()
+    {
+        refresh_preset_details();
+        if (m_picked.empty())
+        {
+            ImGui::TextColored(muted(), "Pick a preset to see what it changes.");
+            return;
+        }
+        if (!m_details_ok)
+        {
+            ImGui::PushTextWrapPos(0.0f);
+            ImGui::TextColored(warn(), "%s", m_details_error.c_str());
+            ImGui::PopTextWrapPos();
+            return;
+        }
+        const EditSummary& d = m_details;
+        ImGui::TextColored(accent(), "%s", m_picked.c_str());
+        ImGui::TextColored(muted(), "%zu bone%s, %zu morph%s", d.bones, d.bones == 1 ? "" : "s", d.morphs.size(), d.morphs.size() == 1 ? "" : "s");
+
+        auto part_row = [](const PartChange& p) {
+            std::string extra;
+            if (p.turn)
+            {
+                extra += ", rotated";
+            }
+            if (p.shift)
+            {
+                extra += ", moved";
+            }
+            ImGui::BulletText("%s  %.2fx%s", p.title.c_str(), p.scale, extra.c_str());
+        };
+        if (!d.parts.empty())
+        {
+            section_bar("Body parts");
+            for (const PartChange& p : d.parts)
+            {
+                part_row(p);
+                if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
+                {
+                    std::string tip = "Bones:";
+                    for (const std::string& b : p.bones)
+                    {
+                        tip += " " + b;
+                    }
+                    ImGui::SetTooltip("%s", tip.c_str());
+                }
+            }
+        }
+        if (!d.other_bones.empty())
+        {
+            section_bar("Other bones");
+            for (const PartChange& p : d.other_bones)
+            {
+                part_row(p);
+            }
+        }
+        if (!d.morphs.empty())
+        {
+            section_bar("Morphs");
+            for (const MorphChange& m : d.morphs)
+            {
+                const std::string group = m.group.empty() ? std::string() : "  [" + m.group + "]";
+                if (m.present)
+                {
+                    ImGui::BulletText("%s  %.2f%s", m.name.c_str(), m.weight, group.c_str());
+                }
+                else
+                {
+                    ImGui::TextColored(muted(), "  %s  %.2f  (not on this character)", m.name.c_str(), m.weight);
+                }
+            }
+        }
+        if (!d.missing.empty())
+        {
+            std::string list;
+            for (const std::string& b : d.missing)
+            {
+                list += (list.empty() ? "" : ", ") + b;
+            }
+            ImGui::Spacing();
+            ImGui::PushTextWrapPos(0.0f);
+            ImGui::TextColored(warn(), "Not on this character (%zu): %s", d.missing.size(), list.c_str());
+            ImGui::PopTextWrapPos();
+        }
+        if (d.morphs.empty())
+        {
+            ImGui::Spacing();
+            ImGui::PushTextWrapPos(0.0f);
+            ImGui::TextColored(muted(), "No morphs: loading it gives every morph back to the game.");
+            ImGui::PopTextWrapPos();
+        }
     }
 } // namespace uuepbs::ui
