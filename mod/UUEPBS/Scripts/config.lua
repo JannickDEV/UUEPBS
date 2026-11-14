@@ -91,6 +91,10 @@ return {
     -- Your own PNG/JPG there, named after the character, always wins. false = only your own images.
     AutoPortraits = true,
 
+    -- Looks tab (skin tone, sweat, hair colour): recolours the outfit's own material slots through
+    -- dynamic material instances. false = the tab's sliders do nothing in the game.
+    Looks = true,
+
     Verbose = false,
 
     -- Starting values for a new game profile. The first time the mod runs in a game it writes

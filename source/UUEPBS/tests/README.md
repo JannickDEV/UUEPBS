@@ -20,6 +20,12 @@ Host-side tests (Linux/macOS/WSL with g++ 13+ or clang 17+). None of them need W
     # head-shot calls, game-portrait path, PNG read-back fallback, giving up
     lua portraits_test.lua ../../../mod/UUEPBS/Scripts /tmp/uuepbs_portraits
 
+    # Looks tab: keys, summaries, presets' "looks" object, bridge report lines
+    g++ -std=c++23 -I$S test_looks.cpp $S/core/*.cpp -o test_looks && ./test_looks
+    # Looks applied in the game (Scripts/uuepbs_looks.lua) against a mocked engine: slot classing, parameter
+    # discovery, tan/sweat/hair maths, dynamic instances, reset, re-dressing, per-character reports
+    lua looks_test.lua ../../../mod/UUEPBS/Scripts
+
     # names given to characters in the window (_characters/_names.txt) and portrait requests
     g++ -std=c++23 -I$S test_names.cpp $S/core/*.cpp -o test_names && ./test_names
 
@@ -40,12 +46,12 @@ Host-side tests (Linux/macOS/WSL with g++ 13+ or clang 17+). None of them need W
     ./test_skin ../../../skins
 
     # UI preview + CPU renderer check (needs Dear ImGui 1.92.1 sources in IMGUI=...)
-    # Renders every tab (Body, Advanced > Bones, Advanced > Morphs, Presets, Status, Choose character) with a reference
+    # Renders every tab (Body, Looks, Advanced > Bones, Advanced > Morphs, Presets, Status, Choose character) with a reference
     # rasteriser and with src/ui/soft_raster.cpp, first with the built-in look, then with the example skin
     # (written into a fresh skins folder the way the DLL does it). Fails if the two differ, if a frame drawn
     # from the quad cache differs from the first draw, or if switching skins leaks textures.
     # Prints ms for the first draw, per drawn frame and per skipped (unchanged) frame.
-    g++ -std=c++23 -O2 -I$S -I$IMGUI ui_preview.cpp $S/ui/panel_view.cpp $S/ui/soft_raster.cpp $S/ui/skin.cpp $S/ui/image_decode.cpp $S/core/*.cpp \
+    g++ -std=c++23 -O2 -I$S -I$IMGUI ui_preview.cpp $S/ui/panel_view.cpp $S/ui/looks_view.cpp $S/ui/portraits.cpp $S/ui/soft_raster.cpp $S/ui/skin.cpp $S/ui/image_decode.cpp $S/core/*.cpp \
         $IMGUI/imgui.cpp $IMGUI/imgui_draw.cpp $IMGUI/imgui_tables.cpp $IMGUI/imgui_widgets.cpp -o ui_preview
     ./ui_preview 1.25        # writes preview_*.ppm, skin_preview_*.ppm and soft_*.ppm (font path inside is Linux-specific)
 

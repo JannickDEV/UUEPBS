@@ -15,6 +15,7 @@
 #include "ui/portraits.hpp"
 #include "core/bridge.hpp"
 #include "core/json.hpp"
+#include "core/looks.hpp"
 #include "core/morphs.hpp"
 #include "core/presets.hpp"
 #include "core/registry.hpp"
@@ -997,6 +998,7 @@ namespace
                 }
             }
             reg.set_animated_morphs(std::move(animated));
+            uuepbs::looks::Report::instance().set(state.looks);
         }
 
         Clock::time_point last_publish()
@@ -1253,6 +1255,7 @@ namespace
                     uuepbs::MorphBook morphs;
                     if (m_shelf.load(c.argument, book, message, &morphs))
                     {
+                        uuepbs::looks::keep_when_absent(morphs, reg.morphs());
                         reg.replace_edits(std::move(book));
                         reg.replace_morphs(std::move(morphs));
                     }

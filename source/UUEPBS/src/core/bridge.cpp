@@ -219,6 +219,10 @@ namespace uuepbs::bridge
                     }
                 }
             }
+            else if (kind == "looks" && f.size() >= 3 && !f[1].empty())
+            {
+                state.looks[std::string(f[1])] = std::string(f[2]);
+            }
             else if (kind == "cmd" && f.size() >= 3)
             {
                 Command c;

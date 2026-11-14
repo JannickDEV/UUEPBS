@@ -14,6 +14,7 @@ https://github.com/user-attachments/assets/4e4372bc-8a64-4255-b8ae-a33645ce187e
 * **Rename** a character: your name for it is shown everywhere in the window and saved in `UUEPBS Presets\_characters\_names.txt`; the game and engine names stay in tooltips and on the Status tab
 * Character portraits in the banner and the grid: your own PNG/JPG in `UUEPBS Presets\_portraits`, or taken automatically in the game (the game's own portrait when the profile names it, else a head shot). **Retake portrait** in the Rename window. `AutoPortraits = false` in `config.lua` turns the automatic part off
 * Bone tree and morph list moved to the **Advanced** tab (was the Detailed Panel). Skins keep working; tabs no longer show icons
+* **Looks** tab: **Skin** (skin tone, sweat) and **Hair** (hue, saturation, lightness), per character like the sliders: saved with the session, in an NPC's memory and in presets (`"looks"`). The outfit's own materials are recoloured, nothing is replaced
 
 ### V2.6.1 - Changelogs
 * Added full support for player and NPC that works simultaneously
@@ -74,6 +75,19 @@ https://github.com/user-attachments/assets/4e4372bc-8a64-4255-b8ae-a33645ce187e
     * A morph you move **replaces** the game's own value, even at 0. **Reset** gives it back, and the value the game had before comes back.
     * *Mirror left/right morphs* moves `…_L`/`…_R` twins together.
     * A **!** next to a name means the game keeps setting that morph itself (an animation or its own code). UUEPBS puts your value back each time it notices, but it may flicker or not stick.
+* **Looks** tab: pick **Skin** or **Hair** on the left, then move the sliders.
+  * **Skin tone** (below 0 tans, above 0 pales) and **Sweat** (a wet sheen) change every skin slot of the outfit (body, head, arms...), so the seams match. Eyes, mouths and clothes are left alone.
+  * **Hue**, **Saturation** and **Lightness** shift the hair's own colour (hair, brows, lashes), so strands keep their detail. MetaHuman-style hair (Melanin / Redness) works too.
+  * Looks belong to the character like its sliders: saved with the session, remembered for NPCs, and stored in presets. Loading a preset that has no looks keeps the current ones.
+  * How it works: each skin or hair material slot gets a dynamic material instance with shifted parameter values (tint colour, roughness, wetness...). Reset gives the slot its original material back. The line under the sliders says what was changed.
+  * If nothing changes in a game, its materials use other names. Set `Verbose = true` in `config.lua`: the log lists every skin/hair slot and its parameters. Then name them in the game profile:
+    ```json
+    "Looks": {
+      "Skin": { "Slots": ["*body*", "*head*"], "ExcludeSlots": ["*eye*"], "Tint": ["SkinColor"], "Wet": ["Wetness"], "Roughness": ["Roughness*"] },
+      "Hair": { "Slots": ["*hair*"], "Tint": ["RootColor", "TipColor"], "Melanin": ["Melanin"], "Redness": ["Redness"] }
+    }
+    ```
+    Slots match the slot or material name; parameter names without `*` are used even if the material does not list them. `Looks = false` in `config.lua` turns the feature off.
 * **Presets** tab: save, load (or double-click), delete and open the folder. Presets are JSON files in **`<Win64>\UUEPBS Presets`** and hold bones and morphs.
   The current sliders auto-save to `_last_session.json` and come back next time.
   Bone and morph names aren't case-sensitive, and names a character doesn't have are skipped, so one preset can be shared between characters on the same rig.
@@ -190,9 +204,11 @@ If a game update moves things, the check fails, the log says so, and you delete 
     "thigh_l": { "length": 1,    "width": 1.12, "depth": 1.12, "children": "keep_size" },
     "head":    { "length": 1, "width": 1, "depth": 1, "rotate": [0, 0, 10], "move": [0, 0, 1.5], "children": "scale_too" }
   },
-  "morphs": { "BreastSize": 0.8, "Belly": 0 }
+  "morphs": { "BreastSize": 0.8, "Belly": 0 },
+  "looks": { "skin.tone": -1.5, "skin.sweat": 1, "hair.lightness": 0.5 }
 }
 ```
+* `looks` (optional) holds the Looks tab: `skin.tone`, `skin.sweat`, `hair.hue`, `hair.saturation`, `hair.lightness`. Older builds ignore it.
 * `length`/`width`/`depth` are X/Y/Z scale. `rotate` is in degrees and `move` in cm, both optional.
 * `morphs` (optional) holds morph weights. A listed morph replaces the game's value, even at 0. Loading a preset without `morphs` gives every morph back to the game. Presets without morphs are still written as version 2, so older builds read them unchanged.
 * `children` is `scale_too`, `keep_size` or `this_bone_only`.
