@@ -1,5 +1,7 @@
 #include "panel_view.hpp"
 
+#include "../core/proportions.hpp"
+
 #include "../core/character_names.hpp"
 #include "../core/rig_names.hpp"
 #include "portraits.hpp"
@@ -455,6 +457,11 @@ namespace uuepbs::ui
             if (tab("Body###simplified", "simplified", Tab::Simplified))
             {
                 draw_simplified();
+                ImGui::EndTabItem();
+            }
+            if (tab("Character Scale###scale", "scale", Tab::Scale))
+            {
+                draw_scale();
                 ImGui::EndTabItem();
             }
             if (tab("Presets###presets", "presets", Tab::Presets))
@@ -1149,13 +1156,21 @@ namespace uuepbs::ui
 
     void PanelView::draw_category_rail(const std::vector<Category>& cats, float width)
     {
+        draw_rail("##categories", "BODY", cats, width, m_category,
+                  "Sliders belong to the character: the player's are saved with the session, NPCs are remembered by name. "
+                  "Save a preset to reuse a shape.");
+    }
+
+    void PanelView::draw_rail(const char* id, const char* heading, const std::vector<Category>& cats, float width, std::string& picked_name,
+                              const char* note)
+    {
         Skin& sk = skin();
         const ImGuiStyle& style = ImGui::GetStyle();
         ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0, 0, 0, 0));
-        ImGui::BeginChild("##categories", ImVec2(width, 0), ImGuiChildFlags_None);
+        ImGui::BeginChild(id, ImVec2(width, 0), ImGuiChildFlags_None);
         ImGui::PopStyleColor();
         ImGui::PushFont(nullptr, style.FontSizeBase * 0.78f);
-        ImGui::TextColored(muted(), "BODY");
+        ImGui::TextColored(muted(), "%s", heading);
         ImGui::PopFont();
         ImGui::Dummy(ImVec2(0.0f, dpi_px(2.0f)));
         const float row_h = std::floor(ImGui::GetFrameHeight() * 1.25f);
@@ -1164,12 +1179,12 @@ namespace uuepbs::ui
         for (const Category& c : cats)
         {
             ImGui::PushID(c.name.c_str());
-            const bool picked = c.name == m_category;
+            const bool picked = c.name == picked_name;
             const ImVec2 a = ImGui::GetCursorScreenPos();
             const float w = ImGui::GetContentRegionAvail().x;
             if (ImGui::InvisibleButton("##cat", ImVec2(w, row_h)))
             {
-                m_category = c.name;
+                picked_name = c.name;
             }
             const bool hovered = ImGui::IsItemHovered();
             const ImVec2 b(a.x + w, a.y + row_h);
@@ -1214,8 +1229,7 @@ namespace uuepbs::ui
         ImGui::Dummy(ImVec2(0.0f, dpi_px(10.0f)));
         ImGui::PushFont(nullptr, style.FontSizeBase * 0.86f);
         ImGui::PushTextWrapPos(0.0f);
-        ImGui::TextColored(muted(), "Sliders belong to the character: the player's are saved with the session, NPCs are remembered by name. "
-                                    "Save a preset to reuse a shape.");
+        ImGui::TextColored(muted(), "%s", note);
         ImGui::PopTextWrapPos();
         ImGui::PopFont();
         ImGui::EndChild();
@@ -1591,6 +1605,194 @@ namespace uuepbs::ui
                                m_morph_names.size(), m_morph_names.size() == 1 ? "" : "s");
             ImGui::PopTextWrapPos();
         }
+        ImGui::EndChild();
+    }
+
+    // ---- Character Scale tab ---------------------------------------------------------------
+    // Height scales the whole pose from the mesh origin; the proportion sliders multiply the
+    // bones of Body tab groups (proportions.hpp). Both sit on top of the Body and Advanced edits.
+
+    bool PanelView::scale_available(const ScaleSlider& sl) const
+    {
+        if (sl.groups.empty())
+        {
+            return true;
+        }
+        for (const char* title : sl.groups)
+        {
+            const std::string want = fold_case(title);
+            for (const GroupBones& gb : m_body.groups)
+            {
+                if (fold_case(gb.group.title) == want && !gb.bones.empty())
+                {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    void PanelView::write_scale(const ScaleSlider& sl, double value)
+    {
+        const EditEntry e = scale_entry(sl.id, value);
+        write(e.bone, e.edit); // 1.0 is neutral and clears it
+    }
+
+    std::vector<PanelView::Category> PanelView::scale_categories() const
+    {
+        std::vector<Category> out;
+        for (const ScaleSlider& sl : scale_sliders())
+        {
+            if (!scale_available(sl))
+            {
+                continue;
+            }
+            auto it = std::find_if(out.begin(), out.end(), [&](const Category& c) { return c.name == sl.section; });
+            if (it == out.end())
+            {
+                out.push_back(Category{sl.section});
+                it = out.end() - 1;
+            }
+            it->parts++;
+            it->changed += std::fabs(scale_value(m_book, sl.id) - 1.0) >= kScaleNeutralEps ? 1 : 0;
+        }
+        return out;
+    }
+
+    void PanelView::draw_scale()
+    {
+        if (m_skeleton.names.empty())
+        {
+            ImGui::TextWrapped("The sliders appear once a character's skeletal mesh has been found. Load a save or enter a level, or pick a character above.");
+            return;
+        }
+        const std::vector<Category> cats = scale_categories();
+        if (std::none_of(cats.begin(), cats.end(), [this](const Category& c) { return c.name == m_scale_section; }))
+        {
+            m_scale_section = cats.empty() ? std::string() : cats.front().name;
+        }
+        float rail_w = ImGui::CalcTextSize("Proportions").x;
+        rail_w = std::min(rail_w + ImGui::GetFontSize() * 6.0f, ImGui::GetContentRegionAvail().x * 0.29f);
+        draw_rail("##scale_sections", "CHARACTER SCALE", cats, rail_w, m_scale_section,
+                  "Applied on top of the Body and Advanced sliders, per character: saved with the session, in presets and in the "
+                  "character's memory. Height scales from the feet, so the character stays on the ground.");
+        ImGui::SameLine(0.0f, ImGui::GetStyle().ItemSpacing.x * 2.0f + 1.0f);
+        ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0, 0, 0, 0));
+        ImGui::BeginChild("##scale_parts", ImVec2(0, 0), ImGuiChildFlags_None);
+        ImGui::PopStyleColor();
+
+        Skin& sk = skin();
+        const ImGuiStyle& style = ImGui::GetStyle();
+        const auto cat = std::find_if(cats.begin(), cats.end(), [this](const Category& c) { return c.name == m_scale_section; });
+        if (cat != cats.end())
+        {
+            const bool reset_all = section_bar(cat->name.c_str(), "Reset", cat->changed > 0);
+            ImGui::PushFont(nullptr, style.FontSizeBase * 0.86f);
+            ImGui::PushTextWrapPos(0.0f);
+            if (cat->name == "Overall")
+            {
+                ImGui::TextColored(muted(), "The whole character and every mesh it wears, scaled from the feet. Collision and the camera stay as they are.");
+            }
+            else
+            {
+                ImGui::TextColored(muted(), "Lengths keep the hands, feet and head their own size. Hover a name to see its bones.");
+            }
+            ImGui::PopTextWrapPos();
+            ImGui::PopFont();
+            ImGui::Dummy(ImVec2(0.0f, dpi_px(4.0f)));
+
+            float label_w = 0.0f;
+            for (const ScaleSlider& sl : scale_sliders())
+            {
+                label_w = std::max(label_w, ImGui::CalcTextSize(sl.title).x);
+            }
+            label_w = std::min(label_w + ImGui::GetFontSize() * 1.6f, ImGui::GetContentRegionAvail().x * 0.34f);
+
+            ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(dpi_px(16.0f), dpi_px(14.0f)));
+            ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(style.ItemSpacing.x, dpi_px(12.0f)));
+            sk.begin_child("##scale_group", ImVec2(0, 0), ImGuiChildFlags_Borders | ImGuiChildFlags_AutoResizeY | ImGuiChildFlags_AlwaysUseWindowPadding);
+            ImGui::PopStyleVar();
+            for (const ScaleSlider& sl : scale_sliders())
+            {
+                if (cat->name != sl.section || !scale_available(sl))
+                {
+                    continue;
+                }
+                const double value = scale_value(m_book, sl.id);
+                const bool edited = std::fabs(value - 1.0) >= kScaleNeutralEps;
+                if (reset_all && edited)
+                {
+                    write_scale(sl, 1.0);
+                }
+                std::string tip = sl.hint;
+                if (!sl.groups.empty())
+                {
+                    tip += "\nBones:";
+                    for (const char* title : sl.groups)
+                    {
+                        for (const GroupBones& gb : m_body.groups)
+                        {
+                            if (fold_case(gb.group.title) == fold_case(title))
+                            {
+                                for (const std::string& b : gb.bones)
+                                {
+                                    tip += " " + b;
+                                }
+                            }
+                        }
+                    }
+                }
+                RowSpec spec;
+                spec.id = sl.id;
+                spec.title = sl.title;
+                spec.tip = tip;
+                spec.edited = edited && !reset_all;
+                spec.lo = static_cast<float>(sl.lo);
+                spec.hi = static_cast<float>(sl.hi);
+                spec.log = true;
+                spec.neutral = 1.0f;
+                spec.can_reset = edited && !reset_all;
+                spec.label_w = label_w;
+                float v = reset_all ? 1.0f : static_cast<float>(value);
+                const RowResult r = part_row(spec, v);
+                if (r.reset)
+                {
+                    write_scale(sl, 1.0);
+                }
+                else if (r.changed)
+                {
+                    write_scale(sl, v);
+                }
+            }
+            sk.end_child();
+            ImGui::PopStyleVar();
+        }
+
+        // Summary under the group, like the other tabs' footers.
+        size_t hidden = 0;
+        for (const ScaleSlider& sl : scale_sliders())
+        {
+            hidden += scale_available(sl) ? 0 : 1;
+        }
+        ImGui::Dummy(ImVec2(0.0f, dpi_px(8.0f)));
+        {
+            const ImVec2 a = ImGui::GetCursorScreenPos();
+            ImGui::GetWindowDrawList()->AddLine(a, ImVec2(a.x + ImGui::GetContentRegionAvail().x, a.y), u32(sk.color(Role::Border)), 1.0f);
+            ImGui::Dummy(ImVec2(0.0f, dpi_px(8.0f)));
+        }
+        ImGui::PushFont(nullptr, style.FontSizeBase * 0.86f);
+        ImGui::PushTextWrapPos(0.0f);
+        const double height = scale_value(m_book, "height");
+        const auto props = std::find_if(cats.begin(), cats.end(), [](const Category& c) { return c.name == "Proportions"; });
+        ImGui::TextColored(muted(), "Height %.0f%%. %zu of %zu proportion sliders changed.", height * 100.0, props != cats.end() ? props->changed : 0,
+                           props != cats.end() ? props->parts : 0);
+        if (hidden > 0)
+        {
+            ImGui::TextColored(muted(), "%zu slider%s hidden: this skeleton has no matching bones (see the Body tab's groups).", hidden,
+                               hidden == 1 ? "" : "s");
+        }
+        ImGui::PopTextWrapPos();
+        ImGui::PopFont();
         ImGui::EndChild();
     }
 

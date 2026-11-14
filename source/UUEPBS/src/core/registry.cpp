@@ -1,5 +1,7 @@
 #include "registry.hpp"
 
+#include "proportions.hpp"
+
 #include <algorithm>
 #include <cstring>
 
@@ -383,9 +385,32 @@ namespace uuepbs
         // Each mesh is sculpted with its own character's edits.
         const bool on = m_enabled.load(std::memory_order_relaxed);
         const uint64_t wanted = rig->actor->revision | (on ? 0 : kDisabledBit);
-        if (rig->sculptor.bound_revision() != wanted)
+        const EditBook& book = on ? rig->actor->book : m_empty_book;
+        const bool proportions = has_proportions(book);
+        const uint64_t body_rev = proportions ? BodyMapSource::instance().revision() : 0;
+        if (rig->sculptor.bound_revision() != wanted || rig->bound_body != body_rev)
         {
-            rig->sculptor.bind(on ? rig->actor->book : m_empty_book, wanted);
+            if (proportions)
+            {
+                // Character Scale: fold the proportion sliders into this rig's bone edits.
+                if (rig->body_revision != body_rev)
+                {
+                    BoneDictionary dict;
+                    std::vector<UserGroup> user;
+                    std::string status;
+                    BodyMapSource::instance().get(dict, user, status);
+                    rig->body = resolve_body_groups(rig->sculptor.names(), rig->sculptor.parents(), dict, user);
+                    rig->body_revision = body_rev;
+                }
+                double world = 1.0;
+                const EditBook folded = apply_proportions(book, rig->body, world);
+                rig->sculptor.bind(folded, wanted, world);
+            }
+            else
+            {
+                rig->sculptor.bind(book, wanted);
+            }
+            rig->bound_body = body_rev;
         }
         // No reference pose from Lua: measure mirroring from an early live frame instead
         // (before this frame's edits are applied).

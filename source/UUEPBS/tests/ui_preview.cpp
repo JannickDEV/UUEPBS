@@ -5,6 +5,7 @@
 #include "core/mirror.hpp"
 #include "core/presets.hpp"
 #include "core/registry.hpp"
+#include "core/proportions.hpp"
 #include "ui/panel_view.hpp"
 #include "ui/portraits.hpp"
 #include "ui/skin.hpp"
@@ -276,6 +277,11 @@ int main(int argc, char** argv)
         reg.replace_edits(b);
     }
 
+    for (const auto& [id, v] : {std::pair{"height", 1.06}, {"head", 0.94}, {"leg_length", 1.08}, {"arm_length", 1.04}})
+    {
+        const EditEntry e = scale_entry(id, v);
+        reg.set_bone(e.bone, e.edit);
+    }
     reg.on_pose_finalized(comp);
 
     // An NPC that was picked and edited earlier keeps its sliders (shown in Status > Edited characters).
@@ -370,10 +376,13 @@ int main(int argc, char** argv)
         int detail; // -1, or a PanelView::Detail
         const char* file;
         bool chooser{false}; // with the "Choose character" grid open
+        const char* scale_section{"Proportions"};
     };
     const Shot shots[] = {{ui::PanelView::Tab::Simplified, -1, "preview_simplified.ppm"},
                           {ui::PanelView::Tab::Detailed, 0, "preview_detailed.ppm"},
                           {ui::PanelView::Tab::Detailed, 1, "preview_morphs.ppm"},
+                          {ui::PanelView::Tab::Scale, -1, "preview_scale.ppm"},
+                          {ui::PanelView::Tab::Scale, -1, "preview_scale_overall.ppm", false, "Overall"},
                           {ui::PanelView::Tab::Presets, -1, "preview_presets.ppm"},
                           {ui::PanelView::Tab::Status, -1, "preview_status.ppm"},
                           {ui::PanelView::Tab::Simplified, -1, "preview_chooser.ppm", true}};
@@ -401,6 +410,7 @@ int main(int argc, char** argv)
             if (shot.tab == ui::PanelView::Tab::Detailed)
                 view.select_bone("boob_l");
             view.focus_category("Hips & Legs");
+            view.focus_scale_section(shot.scale_section);
             view.show_character_chooser(shot.chooser);
             for (int frame = 0; frame < 4; ++frame)
             {

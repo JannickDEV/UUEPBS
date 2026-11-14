@@ -40,7 +40,7 @@ Host-side tests (Linux/macOS/WSL with g++ 13+ or clang 17+). None of them need W
     ./test_skin ../../../skins
 
     # UI preview + CPU renderer check (needs Dear ImGui 1.92.1 sources in IMGUI=...)
-    # Renders every tab (Body, Advanced > Bones, Advanced > Morphs, Presets, Status, Choose character) with a reference
+    # Renders every tab (Body, Character Scale, Advanced > Bones, Advanced > Morphs, Presets, Status, Choose character) with a reference
     # rasteriser and with src/ui/soft_raster.cpp, first with the built-in look, then with the example skin
     # (written into a fresh skins folder the way the DLL does it). Fails if the two differ, if a frame drawn
     # from the quad cache differs from the first draw, or if switching skins leaks textures.
