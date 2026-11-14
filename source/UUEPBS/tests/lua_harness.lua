@@ -12,6 +12,65 @@ local function check(cond, msg)
     end
 end
 
+-- Readable names (Scripts/uuepbs_names.lua): cleanup rules, the profile "Names" table, the game's own
+-- name properties. Plain functions, checked in every mode.
+do
+    local N = dofile(scripts .. "/uuepbs_names.lua")
+    local function FText(s) return { ToString = function() return s end } end
+    for _, c in ipairs({
+        { "BP_Rokuv3_C_0", "Rokuv3" }, -- blueprint prefix, class suffix, instance number
+        { "BP_Guard_C_3", "Guard" },
+        { "00_EVE_01_Body", "Eve Body" }, -- sort number in front, variant number, all-capital name
+        { "SK_Shirt", "Shirt" },
+        { "SKM_Hero_Female", "Hero Female" },
+        { "Gatekeeper_church2_2147465868", "Gatekeeper church2" }, -- run-time number
+        { "Anca_243", "Anca" }, -- placed-in-level number
+        { "Appearance.EAppearanceSlot::Legs_C", "Legs" },
+        { "/Game/Chars/Eve/SK_Eve_Body.SK_Eve_Body", "Eve Body" }, -- a whole asset path
+        { "Default__BP_Guard_C", "Guard" },
+        { "BP_NPC_Merchant_C_2147482611", "NPC Merchant" }, -- acronyms stay capitals
+        { "PolarisCharacterActor_2147470001", "PolarisCharacterActor" },
+        { "lune_v2", "Lune v2" },
+        { "SkeletalMeshComponent_2147482611", nil }, -- engine names that say nothing
+        { "CharacterMesh0", nil },
+        { "BP_C_0", nil },
+        { "12345", nil },
+        { "", nil },
+    }) do
+        check(N.clean(c[1]) == c[2], string.format("clean(%q) = %s, expected %s", c[1], tostring(N.clean(c[1])), tostring(c[2])))
+    end
+    -- a mesh asset standing for a whole character drops the part words
+    check(N.clean("00_EVE_01_Body", true) == "Eve", "character from a body mesh: " .. tostring(N.clean("00_EVE_01_Body", true)))
+    check(N.clean("Maelle_v2_FaceMesh", true) == "Maelle v2", "character from a face mesh")
+    check(N.clean("SK_Body", true) == "Body", "a part word alone stays")
+    -- property values: FText / FString / FName come as objects with ToString
+    check(N.text_of(FText("  Eve \n")) == "Eve" and N.text_of("Lune") == "Lune", "text values trimmed")
+    check(N.text_of(FText("None")) == nil and N.text_of(FText("")) == nil and N.text_of(42) == nil and N.text_of(nil) == nil, "empty values ignored")
+    check(N.text_of(string.rep("x", 49)) == nil, "too long to be a name")
+    check(N.text_of({ ToString = function() error("invalid object") end }) == nil, "a value that fails to read is ignored")
+    -- the profile's Names table: exact names, then wildcards, then the longest plain prefix; not case-sensitive
+    local T = N.compile({ BP_Eve_C = "Eve", ["00_EVE_*"] = "Eve (casual)", BP_Guard = "Guard", BP_Guard_Captain = "Captain",
+        ["00_EVE_01_Body"] = "Eve exactly", Bad = "", _comment = "ignored" })
+    check(N.lookup(T, { "BP_Eve_C_0", "BP_Eve_C" }) == "Eve", "exact class name")
+    check(N.lookup(T, { "BP_X_C_0", "BP_X_C", "00_EVE_02_Face" }) == "Eve (casual)", "wildcard on a mesh name")
+    check(N.lookup(T, { "00_EVE_01_Body" }) == "Eve exactly", "an exact name beats a wildcard")
+    check(N.lookup(T, { "BP_Guard_Captain_C_4" }) == "Captain", "longest prefix wins")
+    check(N.lookup(T, { "bp_guard_c_1" }) == "Guard", "prefix, not case-sensitive")
+    check(N.lookup(T, { "Stranger" }) == nil and N.lookup(T, { "Bad" }) == nil and N.lookup(T, { "_comment" }) == nil, "no match")
+    check(N.compile({}) == nil and N.compile({ Bad = "" }) == nil and N.compile("x") == nil and N.lookup(nil, { "a" }) == nil, "empty table")
+    -- the game's own name: on the actor, else on its character data
+    local function read(h, p) return h[p] end
+    local function alive(o) return type(o) == "table" and o.IsValid ~= nil and o:IsValid() end
+    local valid = function() return true end
+    local n, how = N.from_object({ DisplayName = FText(""), CharacterData = { IsValid = valid, CharacterName = FText("Lune") } }, read, alive)
+    check(n == "Lune" and how == "CharacterData.CharacterName", "name from the character data: " .. tostring(n) .. " " .. tostring(how))
+    n, how = N.from_object({ CharacterName = "Verso", CharacterData = { IsValid = valid, CharacterName = FText("Lune") } }, read, alive)
+    check(n == "Verso" and how == "CharacterName", "the actor's own name first")
+    check(N.from_object({ DisplayName = FText("None"), CharacterData = { IsValid = function() return false end, DisplayName = "x" } }, read, alive) == nil,
+        "nothing usable: no name")
+    check(N.from_object({ DisplayName = FText("Character") }, read, alive) == nil, "an engine word is not a name")
+end
+
 -- skeleton + reference pose from roku_ref.txt
 local boneNames, boneParents, boneRef = {}, {}, {}
 for line in io.lines("roku_ref.txt") do
@@ -243,6 +302,10 @@ end
 local handJson = '{\n  "Project": "Polaris",\n  "Game": "TEKKEN 8",\n  "Target": "PolarisCharacterActor",\n'
     .. '  "TargetClassPath": "/Script/Polaris.PolarisCharacterActor",\n  "PrimaryComponent": "",\n  "IncludeComponents": [],\n'
     .. '  "ExcludeComponents": [],\n  "SameSkeletonOnly": true,\n  "BodyGroups": {},\n  "MorphGroups": {},\n  "ExcludeMorphs": []\n}\n'
+-- names: readable names in the labels (FriendlyNames on); the profile names the player pawn's class
+if mode == "names" then
+    realOpen(work .. "/Scripts/GameProfiles/SomeGame.json", "wb"):write('{\n  "Project": "SomeGame",\n  "Names": { "BP_Guard_C": "Captain Vey", "BP_Nobody*": "Nobody" }\n}\n'):close()
+end
 if mode == "tekkenjson" then
     realOpen(work .. "/Scripts/GameProfiles/Polaris.json", "wb"):write(handJson):close()
 end
@@ -268,7 +331,7 @@ print = function(s) printed[#printed + 1] = s end
 
 local function run_peer(rescan, pick, pickId, refresh, session, ui, morphs, keep, remember, relist)
     local report = work .. "/peer_report.txt"
-    os.execute(string.format('%s %s/native %d %d %s %d %s %d "%s" "%s" "%s" %d > %s', peer, work, rescan, pick, pickId, refresh, session or "dll1", ui or 0, morphs or "-", keep or "-", remember or "-", relist or 0, report))
+    os.execute(string.format((mode == "names" and "UUEPBS_PEER_ENGINE=1 " or "") .. '%s %s/native %d %d %s %d %s %d "%s" "%s" "%s" %d > %s', peer, work, rescan, pick, pickId, refresh, session or "dll1", ui or 0, morphs or "-", keep or "-", remember or "-", relist or 0, report))
     local h = realOpen(report, "rb")
     local out = h:read("a")
     h:close()
@@ -277,6 +340,11 @@ end
 
 -- GON runs with the smallest mesh budget (8) so a crowd overflows it
 local cfg = dofile(scripts .. "/config.lua")
+-- the timings below are written for a 400 ms poll and a 3 s watch (config.lua ships 600 / 5000)
+cfg.PollIntervalMs = 400
+cfg.WatchIntervalMs = 3000
+-- engine names in the labels everywhere except the "names" mode, which checks the readable ones
+cfg.FriendlyNames = mode == "names"
 if mode == "gon" then cfg.MaxTrackedMeshes = 8 end
 -- legacy: a config.lua from before 2.7, without the CharacterSwitchWatcher line (watcher stays off)
 if mode == "legacy" then cfg.CharacterSwitchWatcher = nil end
@@ -399,6 +467,70 @@ if mode == "tekkenedit" or mode == "nobody" then
         local _, again = next_pawn(4):gsub(HINT, "")
         check(again == 1, "said once")
     end
+    realPrint("lua harness OK (" .. mode .. ")")
+    os.exit(0)
+end
+
+-- names: the window gets readable labels, the engine names as a field of their own, and the same
+-- actor keys and identities as before (saved sliders and presets still match)
+if mode == "names" then
+    local function FText(t) return { ToString = function() return t end } end
+    local function esc(t) return (t:gsub("%p", "%%%0")) end
+    -- Roku: the game's own name, on its character data asset
+    actor.CharacterData = obj("PrimaryDataAsset /Game/Data/DA_Roku.DA_Roku", { DisplayName = FText("Roku") })
+    -- Eve: spawned with an engine-made name; only her mesh says who she is
+    local eve = obj("BP_NPC_C /Game/Maps/Lvl.Lvl:PersistentLevel.BP_NPC_C_2147482611")
+    local eveMesh = obj("SkeletalMesh /Game/Chars/Eve/00_EVE_01_Body.00_EVE_01_Body", { Skeleton = skeleton })
+    local eveBody = comp("SkeletalMeshComponent_2147482612", eve, eveMesh, boneNames, boneParents, false)
+    eve.Mesh = eveBody
+    eve._loc = { X = 1200, Y = 0, Z = 0 }
+    -- Anca: placed in the level (her object name is a name); the game names her a moment after loading
+    local anca = obj("BP_Villager_C /Game/Maps/Lvl.Lvl:PersistentLevel.Anca_243")
+    anca._loc = { X = 2000, Y = 0, Z = 0 }
+    allComps[#allComps + 1] = eveBody
+    extraChars = { eve, anca }
+    local eveId, ancaId = string.format("%X", eve._addr), string.format("%X", anca._addr)
+
+    loop()
+    local s = run_peer(0, 0, "none", 1)
+    loop()
+    s = run_peer(0, 0, "none", 1)
+    check(s:find("target auto Captain Vey (player) key=player\n", 1, true), "player pawn named by the profile's Names table:\n" .. s)
+    check(s:find("\ntarget_engine BP_Guard_C_3\n", 1, true), "engine name sent beside the label:\n" .. s)
+    check(s:find("\ncand Captain Vey (player) key=player\n", 1, true) and s:find("\ncand_engine player BP_Guard_C_3\n", 1, true), "player listed:\n" .. s)
+    check(s:find("\ncand Roku   0 m key=", 1, true), "the game's own name:\n" .. s)
+    check(s:find("\ncand Eve   12 m key=" .. eveId .. "\n", 1, true) and s:find("\ncand_engine " .. eveId .. " BP_NPC_C_2147482611\n", 1, true),
+        "engine-made name: named after her mesh:\n" .. s)
+    check(s:find("\ncand Anca   20 m key=" .. ancaId .. "\n", 1, true), "placed name cleaned up:\n" .. s)
+    check(not s:find(" = ", 1, true), "no identity suffix next to readable names:\n" .. s)
+    check(s:find("\nrig %x+ Roku v3 primary=1 owner=Captain Vey %(player%) [^\n]*actor=player\n"), "mesh labelled by its asset:\n" .. s)
+    check(s:find("\nrig_engine Roku v3 | CharacterMesh0 | Captain Vey (player) | BP_Guard_C_3\n", 1, true), "mesh engine names:\n" .. s)
+
+    -- picking Eve: her key and identity are the engine's, as before
+    run_peer(0, 1, eveId, 1)
+    loop()
+    s = run_peer(0, 1, eveId, 1)
+    check(s:find("target " .. eveId .. " Eve key=" .. eveId .. "\n", 1, true) and s:find("\ntarget_engine BP_NPC_C_2147482611\n", 1, true), "picked Eve:\n" .. s)
+    check(s:find("target identity [BP_NPC_C@00_EVE_01_Body]", 1, true), "identity unchanged (engine names):\n" .. s)
+    for _ = 1, 3 do loop() end
+    s = run_peer(0, 1, eveId, 1)
+    check(s:find("\nrig_engine Eve Body | SkeletalMeshComponent_2147482612 | Eve | BP_NPC_C_2147482611\n", 1, true), "engine-made mesh name replaced:\n" .. s)
+
+    -- Anca gets her name from the game after a moment: a cleaned-up name is looked at again (a few times)
+    anca.DisplayName = FText("Anca the Smith")
+    for _ = 1, 6 do loop() end -- 2.4 s
+    run_peer(0, 1, eveId, 2)
+    loop()
+    s = run_peer(0, 1, eveId, 2)
+    check(s:find("\ncand Anca the Smith   20 m key=" .. ancaId .. "\n", 1, true), "name set by the game later is picked up:\n" .. s)
+
+    -- FriendlyNames = false: engine names, as before 2.8 (read live, no restart needed)
+    cfg.FriendlyNames = false
+    run_peer(0, 1, eveId, 3)
+    loop()
+    s = run_peer(0, 1, eveId, 3)
+    check(s:find("\ncand BP_Guard_C_3 (player) key=player\n", 1, true) and s:find("\ncand Anca_243   20 m key=", 1, true), "engine names when off:\n" .. s)
+    check(s:find("\ncand BP_NPC_C_2147482611   12 m key=" .. eveId .. "\n", 1, true), "Eve by engine name:\n" .. s)
     realPrint("lua harness OK (" .. mode .. ")")
     os.exit(0)
 end

@@ -67,4 +67,7 @@ namespace uuepbs::ui
     };
 
     Portraits& portraits();
+    // Preset thumbnails for the preset browser ("<presets>/_library/", see core/preset_library.hpp):
+    // the same loader, looked up by preset name.
+    Portraits& preset_thumbnails();
 } // namespace uuepbs::ui

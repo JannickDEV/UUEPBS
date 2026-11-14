@@ -18,6 +18,13 @@ https://github.com/user-attachments/assets/4e4372bc-8a64-4255-b8ae-a33645ce187e
 * **Rename** a character: your name for it is shown everywhere in the window and saved in `UUEPBS Presets\_characters\_names.txt`; the game and engine names stay in tooltips and on the Status tab
 * Character portraits in the banner and the grid: your own PNG/JPG in `UUEPBS Presets\_portraits`, or taken automatically in the game (the game's own portrait when the profile names it, else a head shot). **Retake portrait** in the Rename window. `AutoPortraits = false` in `config.lua` turns the automatic part off
 * Bone tree and morph list moved to the **Advanced** tab (was the Detailed Panel). Skins keep working; tabs no longer show icons
+* Added Undo / Redo for slider edits (buttons in the character banner, **Ctrl+Z** / **Ctrl+Y** or **Ctrl+Shift+Z**), kept per character
+* Added a "Changed only" filter to the Body tab
+* Added preset details: the Presets tab shows which body parts, bones and morphs a preset changes before you load it
+* Added a preset browser: thumbnails in a grid (or a compact list), search by name or `#tag`, and tag chips to filter by. Tags are added and removed next to the preset details
+* Saving a preset takes a whole-body thumbnail of the character in the game (**Retake picture** takes a new one). Thumbnails and tags live in `UUEPBS Presets\_library`, so preset files stay exactly as before and share as before. `PresetThumbnails = false` in `config.lua` turns the pictures off
+* Added symmetry tools above the sliders: **Symmetry lock** (replaces the per-bone and per-morph mirror checkboxes), **Mirror L to R** / **Mirror R to L** for the whole character, and **Randomize** with adjustable **Limits**. Each action is one undo step
+* Readable character names: the Character list, the window header and the mesh labels show "Eve" or "Captain Vey" instead of engine names like `BP_Rokuv3_C_0`, `00_EVE_01_Body` or `SkeletalMeshComponent_2147...`. The name comes from the game itself when it has one (`DisplayName` / `CharacterName` on the character or its character data), else from the new `"Names"` table in the game profile, else from the engine name cleaned up. Saved sliders, remembered NPCs and presets are unaffected. `FriendlyNames = false` in `config.lua` brings the engine names back.
 
 ### V2.6.1 - Changelogs
 * Added full support for player and NPC that works simultaneously
@@ -61,26 +68,39 @@ https://github.com/user-attachments/assets/4e4372bc-8a64-4255-b8ae-a33645ce187e
   * Your own: put a PNG or JPG in **`UUEPBS Presets\_portraits\`** named after the character: its remembered name (identity), the name you gave it, its game name or its engine name, e.g. `Anca.png` or `BP_Rokuv3_C_0.jpg`. Case does not matter. Your images always win.
   * Automatic (while the window is open, one every 1.5 s at most): the script saves `<name>.auto.png` in the same folder. If the game profile names the character's own portrait texture, that one is used, e.g. `"PortraitTexture": ["CharacterData.FaceIcon"]` (property path from the character actor; a list tries each). Otherwise a small camera takes a head shot of only that character, tuned with `"PortraitBone"` (default: `head` and common variants), `"PortraitDistance"` (cm, default 60) and `"PortraitFov"` (degrees, default 30).
   * **Retake portrait** (in the Rename window) takes a new one. Delete a `.auto.png` to have it taken again next time. `AutoPortraits = false` in `config.lua` keeps only your own images.
+* **Preset browser** (Presets tab): every saved preset as a tile with its thumbnail, name and tags. Click to see what it changes, double-click (or **Load**) to load it. **Grid** / **List** switches the view.
+  * **Search** matches every word against the name and the tags (`hips roku`); `#word` only matches tags starting with it. The tag chips under the search box filter too (click again, or **Clear**, to drop them).
+  * **Tags**: type into **Add tag...** next to the preset details and press Enter (commas add several); click a tag's **x** to remove it. Saved in `UUEPBS Presets\_library\presets.json`, which you can also edit by hand.
+  * **Thumbnails**: saving a preset takes a whole-body picture of the current character (one every 1.5 s at most, while the window is open), saved as `_library\<preset>.auto.png`. Your own PNG/JPG named after the preset (`_library\Curvy.png`) always wins. **Retake picture** takes a new one of the character as it looks right now. The framing comes from the character's bounds; `"ThumbnailDistance"` (cm) and `"ThumbnailFov"` (degrees, default 40) in the game profile override it. Deleting a preset deletes its thumbnail and tags.
 * **Body** tab (called the Simplified Panel in 2.2–2.6): pick a category on the left (Head & Neck, Torso, Chest, Hips & Legs, Arms...), then use its curated sliders for the head, neck, rib cage, waist, hips, shoulders, breasts, butt, thighs, calves, arms and so on.
   A slider only appears when the skeleton has matching bones. Hover a slider's name to see which bones it drives.
   Left/right pairs and twist/roll/jiggle helper bones move together. **XYZ** splits the size into Length (X, along the bone), Width (Y) and Depth (Z).
   Scale sliders run from 0.1× to 10× on a log scale; the tick marks 1.0×. **Ctrl + mouse wheel** nudges a slider by 0.01, and **Ctrl + Shift + wheel** by 0.001.
   Click the number box next to a slider to type a value. **Reset** on the section bar resets the whole category.
   Morph groups from the game profile (`MorphGroups`, see below) appear here as extra sliders.
+  **Changed only** hides every body part and morph group that is still at the game's own shape.
+* **Undo / Redo** (buttons in the character banner, **Ctrl+Z** and **Ctrl+Y** / **Ctrl+Shift+Z** while the window has focus) step back and forth through slider changes.
+  A whole drag, a burst of Ctrl+wheel nudges, a preset load or a reset counts as one step. Each character has its own history (up to 100 steps), so undoing never touches another character's sliders.
+* **Symmetry tools** (row above the sliders on the Body and Advanced tabs):
+  * **Symmetry lock** (on by default): editing a left or right bone, or a `…_L`/`…_R` morph, under Advanced also gives its partner the mirror image. Body tab parts always move both sides together.
+  * **Mirror L to R** / **Mirror R to L** copy every edit on one side of the character onto the other side as a mirror image (bones and morphs). Edits on the receiving side are replaced, and a bone there whose partner is unedited goes back to the game's shape. Bones in the middle (spine, head) are not touched.
+  * **Randomize** (Body tab) gives every body part a random size, and morph groups a random weight, inside the **Limits**: *Size ±* (default 15 %), *Shape ±* (extra per-axis variation, default 5 %), the morph weight range (default 0–0.6), which of the two to touch, and *Only <category>* to leave the other categories alone. Both sides of a part always get the same values; rotations, moves and Children settings are kept.
+  * Each Mirror or Randomize click is exactly one undo step, so **Ctrl+Z** takes it back.
 * **Advanced** tab (called the Detailed Panel in 2.2–2.6, the Bones tab before). When the meshes have morph targets it has two sub-tabs, **Bones** and **Morphs**.
-  * **Bones:** every bone of the primary mesh, with search, "edited only" and mirror left/right.
+  * **Bones:** every bone of the primary mesh, with search and "edited only".
     * **Scale**, **Rotate** (roll/pitch/yaw in degrees, pivoting on the joint) and **Move** (cm), all in the bone's own axes (X runs along the bone).
     * **Children** mode:
       * *Scale children too* is the engine's behaviour.
       * *Keep children size* makes children follow the new shape without growing.
       * *This bone only* changes nothing below the bone.
-    * **Mirror to other side** gives the opposite bone the true mirror image. The per-bone axis conversion is measured from the skeleton's reference pose, or from the first animated frame if the game doesn't expose the reference pose.
+    * With **Symmetry lock** on, the opposite bone gets the true mirror image. The per-bone axis conversion is measured from the skeleton's reference pose, or from the first animated frame if the game doesn't expose the reference pose.
       The Status tab shows which one was used.
   * **Morphs:** every morph target on the tracked meshes, with search and "edited only". Sliders run 0–1; the box takes any value from −2 to 2 (empty = the game's value).
     * A morph you move **replaces** the game's own value, even at 0. **Reset** gives it back, and the value the game had before comes back.
-    * *Mirror left/right morphs* moves `…_L`/`…_R` twins together.
+    * With **Symmetry lock** on, `…_L`/`…_R` twins move together.
     * A **!** next to a name means the game keeps setting that morph itself (an animation or its own code). UUEPBS puts your value back each time it notices, but it may flicker or not stick.
-* **Presets** tab: save, load (or double-click), delete and open the folder. Presets are JSON files in **`<Win64>\UUEPBS Presets`** and hold bones and morphs.
+* **Presets** tab: save, load (or double-click), delete and open the folder. Clicking a preset once shows what it changes next to the list:
+  body parts with their size (and whether they are rotated or moved), other bones, morphs with their weights, and anything the current character doesn't have. Presets are JSON files in **`<Win64>\UUEPBS Presets`** and hold bones and morphs.
   The current sliders auto-save to `_last_session.json` and come back next time.
   Bone and morph names aren't case-sensitive, and names a character doesn't have are skipped, so one preset can be shared between characters on the same rig.
 * **Status** tab: hook details, the Lua link, mirroring, morph counts, the **window skin** picker, tracked meshes, **Rescan**, and **Write diagnostics**, which dumps what the hook finder sees into the log for bug reports.
@@ -149,6 +169,17 @@ Install the mod in as many games as you like; each one gets its own file.
 * **`MorphGroups`** adds sliders to the Simplified Panel. Each drives every morph whose name matches (names from Detailed Panel > Morphs; `*` = anything, `#` = digits, not case-sensitive).
 * **`ExcludeMorphs`** hides morphs from the window, e.g. corrective shapes and face visemes. Hidden morphs are never touched.
 
+**Character names in the window** (optional):
+```json
+"Names": {
+  "BP_Rokuv3_C": "Roku",
+  "00_EVE_*":    "Eve"
+}
+```
+* The window shows each character by a readable name. It uses, in this order: the game's own name for the character (`DisplayName`, `CharacterName` and similar, on the character or on its character data), then this table, then the engine name cleaned up (`BP_Guard_C_3` becomes "Guard", `00_EVE_01_Body` becomes "Eve").
+* **`Names`** maps engine names to the name you want. A key can be the character's object name (`BP_Eve_C_0`), its class (`BP_Eve_C`), or one of its mesh assets (`00_EVE_01_Body`). The engine names are in the tooltip of the Character list and on the Status tab. `*` matches anything, a plain key also matches every name that starts with it, and matching is not case-sensitive.
+* Only the labels change. Saved sliders, remembered NPCs and presets still go by the engine names, so renaming here loses nothing. Set `FriendlyNames = false` in `config.lua` to see the engine names in the list again.
+
 ### Simplified Panel mapping (bone dictionary)
 
 The Simplified Panel sliders (Thighs, Waist, Breasts, Biceps…) find their bones through **`Scripts\BoneDictionary.json`**.
@@ -203,6 +234,7 @@ If a game update moves things, the check fails, the log says so, and you delete 
 * `morphs` (optional) holds morph weights. A listed morph replaces the game's value, even at 0. Loading a preset without `morphs` gives every morph back to the game. Presets without morphs are still written as version 2, so older builds read them unchanged.
 * `children` is `scale_too`, `keep_size` or `this_bone_only`.
 * `"scale": 1.2` and `"scale": [1, 1.2, 1.2]` shortcuts work. Older `.rbs` files still load.
+* Thumbnails and tags are not part of the preset file; they live in `UUEPBS Presets\_library\` (see the preset browser above).
 ### Limits
 * The change is visual only. Collision capsules, physics bodies and hit boxes keep their original size.
 * <b>UUEPBS presets are generally not interchangeable between games, that is to say a preset made for Stellar Blade will not work with a preset made for Wuchang, and that won't work with a preset made for Expedition 33. This is simply because every UE game developer uses different practices and character rigs for the player. And thus there is no possibility to generalise the naming scheme of body models.</b>

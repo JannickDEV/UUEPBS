@@ -12,6 +12,7 @@
 #include "core/character_memory.hpp"
 #include "core/character_names.hpp"
 #include "core/portrait_requests.hpp"
+#include "core/preset_library.hpp"
 #include "ui/portraits.hpp"
 #include "core/bridge.hpp"
 #include "core/json.hpp"
@@ -191,7 +192,7 @@ namespace
             std::vector<uuepbs::ui::TargetChoice> out;
             for (const auto& c : m_state.candidates)
             {
-                out.push_back({c.id, c.label, c.key});
+                out.push_back({c.id, c.label, c.key, c.engine});
             }
             return out;
         }
@@ -199,7 +200,7 @@ namespace
         uuepbs::ui::TargetChoice current_target() override
         {
             std::lock_guard guard(m_lock);
-            return {m_state.target.id, m_state.target.label, m_state.target.key};
+            return {m_state.target.id, m_state.target.label, m_state.target.key, m_state.target.engine};
         }
 
         void pick_target(const std::string& id) override
@@ -238,6 +239,15 @@ namespace
             if (m_portrait_requests.add(id, stem, retake) && !m_portrait_requests.write(m_folder / L"portrait_requests.txt"))
             {
                 g_log.line("could not write portrait_requests.txt");
+            }
+        }
+
+        void request_thumbnail(const std::string& id, const std::string& preset) override
+        {
+            std::lock_guard guard(m_portrait_lock);
+            if (m_thumbnail_requests.add(id, preset) && !m_thumbnail_requests.write(m_folder / L"thumbnail_requests.txt"))
+            {
+                g_log.line("could not write thumbnail_requests.txt");
             }
         }
 
@@ -694,7 +704,7 @@ namespace
 
             setup(state);
             // The character picked in the window gets the sliders; others keep their own edits.
-            reg.set_active_actor(state.target.key, state.target.label, state.target.id);
+            reg.set_active_actor(state.target.key, state.target.label, state.target.id, state.target.engine);
             for (const std::string& key : state.gone)
             {
                 const auto edited = reg.edited_actors();
@@ -1407,6 +1417,7 @@ namespace
         std::mutex m_lock; // guards m_state, m_out
         std::mutex m_portrait_lock;
         uuepbs::PortraitRequests m_portrait_requests; // portraits the window asked the script to take
+        uuepbs::ThumbnailRequests m_thumbnail_requests; // preset thumbnails (same lock)
         uuepbs::bridge::LuaState m_state;
         uuepbs::bridge::DllState m_out;
         bool m_out_dirty{true};

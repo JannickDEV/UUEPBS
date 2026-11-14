@@ -483,7 +483,7 @@ namespace uuepbs
         }
     }
 
-    void Registry::set_active_actor(const std::string& key_in, const std::string& label, const std::string& pick_id)
+    void Registry::set_active_actor(const std::string& key_in, const std::string& label, const std::string& pick_id, const std::string& engine)
     {
         const std::string key = key_in.empty() ? std::string(kPlayerActor) : key_in;
         {
@@ -496,6 +496,10 @@ namespace uuepbs
             if (!pick_id.empty())
             {
                 a.pick_id = pick_id;
+            }
+            if (!engine.empty())
+            {
+                a.engine = engine;
             }
             if (m_active == key)
             {
@@ -541,7 +545,7 @@ namespace uuepbs
             {
                 continue;
             }
-            out.push_back({key, a.label, a.pick_id, a.book.size(), morphs, key == m_active, a.identity});
+            out.push_back({key, a.label, a.pick_id, a.book.size(), morphs, key == m_active, a.identity, a.engine});
         }
         // morphs only, character not known to the bone side (should not happen, but keep them)
         for (const auto& [key, n] : morph_counts)
