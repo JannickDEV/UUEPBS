@@ -59,6 +59,11 @@ https://github.com/user-attachments/assets/4e4372bc-8a64-4255-b8ae-a33645ce187e
 1. Install UE4SS for the game as usual, use experimental-latest releases.
 2. Extract UUEPBS folder to `Game-Name\<Win64>\ue4ss\Mods`, where Game-Name is the name of the game located inside its root folder.
 
+### Latest build
+Every push to `main` and every pull request is built by GitHub Actions (**Actions** tab > **Build** > pick a run > **Artifacts**).
+`UUEPBS-mod-<commit>` is the ready-to-drop mod: unzip it and copy the `UUEPBS` folder into `ue4ss\Mods` (it already has `native\UUEPBS.dll`).
+`UUEPBS-dll-<commit>` is the DLL alone. Downloading artifacts needs a GitHub login; they are kept for 90 days.
+
 ## Using it
 
 * **F6** opens and closes the window while the game or the window has focus. `MenuKey` in `config.lua` changes the key.
