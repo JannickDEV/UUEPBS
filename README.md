@@ -19,6 +19,7 @@ https://github.com/user-attachments/assets/4e4372bc-8a64-4255-b8ae-a33645ce187e
 * Character Scale > **Muscle**: **Overall muscle**, **Upper arm**, **Forearm**, **Waist**, **Neck**, **Thigh** and **Calf thickness**, **Shoulder bulk** and **Chest breadth**. They make limbs thicker without making them longer; hands, feet and the head keep their size and stay where they were. Muscle helper bones (biceps, quads, pecs...) grow along when the rig has them
 * Length and thickness sliders now work out which way each bone runs from the live pose instead of assuming X, so they also fit rigs whose bones run along Y or Z
 * **Bone-built Body sliders** ("universal morphs"): a mesh with anatomy bones but no morph target for them gets **Penis size / length / girth**, **Glans size**, **Testicle size** and **Vulva size** under Groin, found by bone name in any game. A real morph target for the same thing (`mGen_Balls`, `Penis_Length`...) always wins and hides the bone slider. Saved like the scale sliders (`"proportions"` in presets)
+* Morph sliders run from **−5 to 5** (was 0–1 on the slider, −2 to 2 typed), in presets and share codes too
 * **RaceMenu-style shape sliders**, built from the bones on any rig: **Breast width / projection / lift / cleavage**, **Nipple length**, **Waist width**, **Back width**, **Chest depth**, **Belly projection / lift**, **Hip width**, **Butt width / roundness / lift** and **Neck width**. Which way is up, forward and sideways is measured from the character's pose, so they work whatever way a rig's bones point; lifts and cleavage move the bones by a share of the character's height
 * One source per slider, in this order: a clearly named morph target of the mesh (`Morph_HipsWide` replaces *Hip width*, `Morph_BreastEnl` replaces the bone *Breast size*), then the bone-built slider, then morph targets with cryptic names (still under **Other**). A bone row you already edited stays visible
 * Body tab cleanup: sliders have character-creator names (*Thigh size*, *Breast size*), each category lists **Size** rows first and **Shape** rows (morphs) under them, every track lines up, and the bone / morph name lists moved out of the tooltips (Advanced lists them)
@@ -117,7 +118,7 @@ Every push to `main` and every pull request is built by GitHub Actions (**Action
       * *This bone only* changes nothing below the bone.
     * With **Symmetry lock** on, the opposite bone gets the true mirror image. The per-bone axis conversion is measured from the skeleton's reference pose, or from the first animated frame if the game doesn't expose the reference pose.
       The Status tab shows which one was used.
-  * **Morphs:** every morph target on the tracked meshes, with search and "edited only". Sliders run 0–1; the box takes any value from −2 to 2 (empty = the game's value).
+  * **Morphs:** every morph target on the tracked meshes, with search and "edited only". Sliders and the box run from −5 to 5 (empty = the game's value).
     * A morph you move **replaces** the game's own value, even at 0. **Reset** gives it back, and the value the game had before comes back.
     * With **Symmetry lock** on, `…_L`/`…_R` twins move together.
     * A **!** next to a name means the game keeps setting that morph itself (an animation or its own code). UUEPBS puts your value back each time it notices, but it may flicker or not stick.

@@ -29,9 +29,9 @@ namespace uuepbs::ui
         // Log scale from 0.1x to 10x puts 1.0x exactly in the middle of the slider.
         constexpr float kScaleMin = 0.10f;
         constexpr float kScaleMax = 10.0f;
-        // Morph sliders show 0..1; Ctrl+click can type anything in kMorphMin..kMorphMax.
-        constexpr float kMorphSliderMin = 0.0f;
-        constexpr float kMorphSliderMax = 1.0f;
+        // Morph sliders run over the whole kMorphMin..kMorphMax range (-5..5), 0 in the middle.
+        constexpr float kMorphSliderMin = static_cast<float>(kMorphMin);
+        constexpr float kMorphSliderMax = static_cast<float>(kMorphMax);
 
         bool contains_folded(const std::string& haystack, const std::string& folded_needle)
         {
@@ -2429,7 +2429,7 @@ namespace uuepbs::ui
         }
         ImGui::EndDisabled();
         ImGui::PushTextWrapPos(0.0f);
-        ImGui::TextColored(muted(), "A set morph replaces the game's value (even at 0); Reset gives it back. Type into a box for values outside 0..1.");
+        ImGui::TextColored(muted(), "A set morph replaces the game's value (even at 0); Reset gives it back. Sliders run from -5 to 5; click a box to type a value.");
         ImGui::PopTextWrapPos();
     }
 

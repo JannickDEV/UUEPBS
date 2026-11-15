@@ -34,8 +34,8 @@ namespace uuepbs
     // Keyed by case-folded morph name.
     using MorphBook = std::map<std::string, MorphEntry>;
 
-    constexpr double kMorphMin = -2.0; // typed values are clamped to this range
-    constexpr double kMorphMax = 2.0;
+    constexpr double kMorphMin = -5.0; // typed values are clamped to this range
+    constexpr double kMorphMax = 5.0;
     double clamp_morph(double weight);
 
     struct MorphGroup
