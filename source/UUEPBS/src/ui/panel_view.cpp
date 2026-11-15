@@ -1208,6 +1208,10 @@ namespace uuepbs::ui
         };
         for (const GroupBones& gb : m_body.groups)
         {
+            if (group_hidden(gb))
+            {
+                continue; // a named morph target does this part's job (draw_category)
+            }
             Category& c = slot(gb.group.section);
             c.parts++;
             c.changed += scale_of(gb.bones.front(), gb.group.spread).has_scale() ? 1 : 0;
@@ -1221,9 +1225,13 @@ namespace uuepbs::ui
         }
         for (const ScaleSlider* sl : m_body_sliders)
         {
+            if (slider_hidden(*sl))
+            {
+                continue;
+            }
             Category& c = slot(sl->section);
             c.parts++;
-            c.changed += std::fabs(scale_value(m_book, sl->id) - 1.0) >= kScaleNeutralEps ? 1 : 0;
+            c.changed += std::fabs(scale_value(m_book, sl->id) - sl->neutral()) >= kScaleNeutralEps ? 1 : 0;
         }
         // Head & Neck, Face, Torso, Chest, Hips & Legs, Arms, ... Groin, Other (morph_sort.hpp).
         std::stable_sort(out.begin(), out.end(), [](const Category& a, const Category& b) { return section_rank(a.name) < section_rank(b.name); });
@@ -1410,8 +1418,20 @@ namespace uuepbs::ui
                       u32(spec.edited ? accent() : ImGui::GetStyleColorVec4(ImGuiCol_Text)));
         ImGui::SetCursorScreenPos(ImVec2(p.x + bs + dpi_px(9.0f), p.y));
         ImGui::AlignTextToFramePadding();
-        ImGui::TextColored(spec.edited ? accent() : ImGui::GetStyleColorVec4(ImGuiCol_Text), "%s", spec.title.c_str());
-        tooltip(spec.tip.c_str());
+        // Long names (two morphs with the same label get their name added) are cut with "..."
+        // so they never run into the track; the tooltip has the whole name.
+        std::string shown = spec.title;
+        const float room = spec.label_w - bs - dpi_px(9.0f) - style.ItemSpacing.x;
+        if (spec.label_w > 0.0f && ImGui::CalcTextSize(shown.c_str()).x > room)
+        {
+            while (!shown.empty() && ImGui::CalcTextSize((shown + "...").c_str()).x > room)
+            {
+                shown.pop_back();
+            }
+            shown += "...";
+        }
+        ImGui::TextColored(spec.edited ? accent() : ImGui::GetStyleColorVec4(ImGuiCol_Text), "%s", shown.c_str());
+        tooltip(shown == spec.title ? spec.tip.c_str() : (spec.title + "\n" + spec.tip).c_str());
 
         const float box_w = std::floor(ImGui::CalcTextSize("0.000").x + style.FramePadding.x * 2.0f);
         const float xyz_w = spec.has_axes || spec.reserve_axes ? compact_button_width("XYZ", "xyz") + style.ItemSpacing.x : 0.0f;
@@ -1536,14 +1556,41 @@ namespace uuepbs::ui
         }
     } // namespace
 
+    bool PanelView::group_hidden(const GroupBones& gb) const
+    {
+        // Replaced by a named morph target, unless the bones were already edited (a preset, or
+        // before the morph showed up): then the row stays so the edit can be seen and reset.
+        return m_covered_groups.count(gb.group.title) > 0 && !group_changed(gb, m_book);
+    }
+
+    bool PanelView::slider_hidden(const ScaleSlider& sl) const
+    {
+        return m_covered_sliders.count(sl.id) > 0 && std::fabs(scale_value(m_book, sl.id) - sl.neutral()) < kScaleNeutralEps;
+    }
+
     void PanelView::refresh_body_sliders()
     {
+        // Per slider: a clearly named morph target first, then the bone-built slider; morphs with
+        // names nothing recognises stay in Other (last).
+        m_covered_groups.clear();
+        for (const GroupBones& gb : m_body.groups)
+        {
+            if (!gb.custom && group_covered(gb.group.title, m_morph_names))
+            {
+                m_covered_groups.insert(gb.group.title);
+            }
+        }
         m_body_sliders.clear();
+        m_covered_sliders.clear();
         for (const ScaleSlider& sl : scale_sliders())
         {
-            if (sl.body && !scale_slider_bones(sl, m_body).empty() && !scale_slider_covered(sl, m_morph_names))
+            if (sl.body && !scale_slider_bones(sl, m_body).empty())
             {
                 m_body_sliders.push_back(&sl);
+                if (scale_slider_covered(sl, m_morph_names))
+                {
+                    m_covered_sliders.insert(sl.id);
+                }
             }
         }
     }
@@ -1570,7 +1617,7 @@ namespace uuepbs::ui
         float label_w = ImGui::CalcTextSize("Depth").x;
         for (const GroupBones& gb : m_body.groups)
         {
-            if (gb.group.section == cat.name)
+            if (gb.group.section == cat.name && !group_hidden(gb))
             {
                 ++n_groups;
                 label_w = std::max(label_w, ImGui::CalcTextSize(friendly_group_title(gb.group.title).c_str()).x);
@@ -1578,7 +1625,7 @@ namespace uuepbs::ui
         }
         for (const ScaleSlider* sl : m_body_sliders)
         {
-            if (cat.name == sl->section)
+            if (cat.name == sl->section && !slider_hidden(*sl))
             {
                 ++n_shapes;
                 label_w = std::max(label_w, ImGui::CalcTextSize(sl->title).x);
@@ -1608,7 +1655,7 @@ namespace uuepbs::ui
         for (const GroupBones& gb : m_body.groups)
         {
             const BodyGroup& g = gb.group;
-            if (g.section != cat.name || (m_simplified_changed_only && !group_changed(gb, m_book)))
+            if (g.section != cat.name || group_hidden(gb) || (m_simplified_changed_only && !group_changed(gb, m_book)))
             {
                 continue;
             }
@@ -1687,20 +1734,21 @@ namespace uuepbs::ui
         {
             row_caption("SHAPE");
         }
-        // Bone-built "universal morphs" (Penis length, Testicle size...): only on meshes with
-        // the bones and no morph target for it (refresh_body_sliders).
+        // Bone-built sliders (Penis length, Breast cleavage...): only on meshes with the bones and
+        // no named morph target for it (refresh_body_sliders, slider_hidden).
         for (const ScaleSlider* sl : m_body_sliders)
         {
             const double value = scale_value(m_book, sl->id);
-            const bool edited = std::fabs(value - 1.0) >= kScaleNeutralEps;
-            if (cat.name != sl->section || (m_simplified_changed_only && !edited))
+            const bool edited = std::fabs(value - sl->neutral()) >= kScaleNeutralEps;
+            if (cat.name != sl->section || slider_hidden(*sl) || (m_simplified_changed_only && !edited))
             {
                 continue;
             }
             ++shown;
+            const double neutral = sl->neutral();
             if (reset_all && edited)
             {
-                write_scale(*sl, 1.0);
+                write_scale(*sl, neutral);
             }
             const size_t nb = scale_slider_bones(*sl, m_body).size();
             RowSpec spec;
@@ -1711,16 +1759,16 @@ namespace uuepbs::ui
             spec.edited = edited && !reset_all;
             spec.lo = static_cast<float>(sl->lo);
             spec.hi = static_cast<float>(sl->hi);
-            spec.log = true;
-            spec.neutral = 1.0f;
+            spec.log = !sl->offset();
+            spec.neutral = static_cast<float>(neutral);
             spec.can_reset = edited && !reset_all;
             spec.reserve_axes = n_groups > 0;
             spec.label_w = label_w;
-            float v = reset_all ? 1.0f : static_cast<float>(value);
+            float v = reset_all ? static_cast<float>(neutral) : static_cast<float>(value);
             const RowResult r = part_row(spec, v);
             if (r.reset)
             {
-                write_scale(*sl, 1.0);
+                write_scale(*sl, neutral);
             }
             else if (r.changed)
             {

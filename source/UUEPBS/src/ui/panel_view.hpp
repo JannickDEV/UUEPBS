@@ -165,6 +165,8 @@ namespace uuepbs::ui
         void write_scale(const ScaleSlider& sl, double value);
         void draw_category(const Category& cat);
         void refresh_body_sliders();
+        bool group_hidden(const GroupBones& gb) const;
+        bool slider_hidden(const ScaleSlider& sl) const; // replaced by a named morph and not set
         // One slider row:  label | hairline track | number box (click to type) | [XYZ] | Reset.
         struct RowResult
         {
@@ -278,6 +280,8 @@ namespace uuepbs::ui
         // Body tab "universal morphs" (bone-built sliders, proportions.hpp) this mesh gets:
         // it has the bones and no real morph target does the same job.
         std::vector<const ScaleSlider*> m_body_sliders{};
+        std::set<std::string> m_covered_sliders{}; // ids of bone-built sliders a named morph target replaces
+        std::set<std::string> m_covered_groups{}; // Body tab group titles a named morph target replaces
         std::string m_mirror_text{};
         std::string m_version{};
         bool m_topmost{true};

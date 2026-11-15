@@ -378,7 +378,8 @@ int main(int argc, char** argv)
     }
 
     for (const auto& [id, v] : {std::pair{"height", 1.06}, {"head", 0.94}, {"leg_length", 1.08}, {"arm_length", 1.04}, {"muscle", 1.12},
-                                {"upper_arm_girth", 1.15}, {"thigh_girth", 1.1}, {"penis_length", 1.2}})
+                                {"upper_arm_girth", 1.15}, {"thigh_girth", 1.1}, {"penis_length", 1.2},
+                                {"breast_cleavage", 0.3}, {"butt_lift", 0.25}, {"waist_width", 0.92}})
     {
         const EditEntry e = scale_entry(id, v);
         reg.set_bone(e.bone, e.edit);
@@ -523,6 +524,7 @@ int main(int argc, char** argv)
                           {ui::PanelView::Tab::Scale, -1, "preview_scale_muscle.ppm", false, 0, "Muscle"},
                           {ui::PanelView::Tab::Simplified, -1, "preview_body_groin.ppm", false, 0, "Proportions", "Groin"},
                           {ui::PanelView::Tab::Simplified, -1, "preview_body_chest.ppm", false, 0, "Proportions", "Chest"},
+                          {ui::PanelView::Tab::Simplified, -1, "preview_body_torso.ppm", false, 0, "Proportions", "Torso"},
                           {ui::PanelView::Tab::Presets, -1, "preview_presets.ppm"},
                           {ui::PanelView::Tab::Presets, -1, "preview_presets_list.ppm", false, 1},
                           {ui::PanelView::Tab::Presets, -1, "preview_presets_search.ppm", false, 2},

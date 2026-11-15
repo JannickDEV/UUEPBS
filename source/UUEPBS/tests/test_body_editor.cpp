@@ -151,11 +151,13 @@ int main()
         for (const ScaleSlider& sl : scale_sliders())
         {
             CHECK(find_scale_slider(sl.id) == &sl); // ids are unique
-            CHECK(sl.lo < 1.0 && sl.hi > 1.0);
+            CHECK(sl.lo < sl.neutral() && sl.hi > sl.neutral());
+            CHECK(sl.offset() == (sl.amount > 0.0));
             if (sl.body)
             {
                 ++body;
-                CHECK(!sl.parts.empty() && sl.groups.empty() && std::string(sl.section) == "Groin" && !sl.morph_words.empty());
+                CHECK(!sl.morph_words.empty());
+                CHECK(sl.parts.empty() != sl.groups.empty()); // bone parts (Groin) or Body tab groups (shape sliders)
                 for (const char* p : sl.parts)
                     CHECK(find_bone_part(p) != nullptr);
             }
@@ -169,7 +171,7 @@ int main()
                 CHECK(sl.axes == ScaleAxes::Girth && sl.spread == Spread::Keep);
             }
         }
-        CHECK(body == 6 && muscle == 9);
+        CHECK(body == 21 && muscle == 9);
     }
 
     // ---- Muscle: girth only, children keep their size -----------------------------------
@@ -334,6 +336,89 @@ int main()
         CHECK(PresetShelf::parse(text, back, message));
         CHECK(near(scale_value(back, "penis_length"), 1.5) && near(scale_value(back, "muscle"), 1.15) && near(scale_value(back, "testicle_size"), 1.2));
         CHECK(near(scale_value(back, "penis_girth"), 1.0));
+    }
+
+
+    // ---- RaceMenu-style shape sliders: directions measured from the pose -----------------
+    {
+        Skel s = load();
+        BodyMap map = resolve_body_groups(s.names, s.parents, BoneDictionary::builtin());
+        const std::vector<Xform> original = fk(s);
+        measure_long_axes(map, s.names, s.parents, original);
+        std::printf("measured height %.1f\n", map.height);
+        CHECK(map.height > 100.0 && map.height < 250.0);
+        const BoneFrame bl = frame_of(map, "boob_l"), br = frame_of(map, "boob_r");
+        CHECK(bl.up != 0 && bl.forward != 0 && bl.out != 0 && br.out != 0);
+        CHECK(std::abs(bl.up) != std::abs(bl.forward) && std::abs(bl.up) != std::abs(bl.out) && std::abs(bl.out) != std::abs(bl.forward));
+
+        auto run = [&](const EditBook& book) {
+            double world = 1.0;
+            RigSculptor rig;
+            rig.set_skeleton(s.names, s.parents);
+            rig.bind(apply_proportions(book, map, world), 1, world);
+            std::vector<Xform> pose = original;
+            rig.apply(pose.data(), (int)pose.size());
+            return pose;
+        };
+        const int L = index_of(s, "boob_l"), R = index_of(s, "boob_r");
+        auto horiz = [](const Xform& a, const Xform& b) { return std::hypot(a.pos[0] - b.pos[0], a.pos[1] - b.pos[1]); };
+
+        EditBook book;
+        set_scale_value(book, "breast_lift", 1.0);
+        std::vector<Xform> pose = run(book);
+        const double rise = pose[L].pos[2] - original[L].pos[2];
+        std::printf("breast lift 1.0: +%.2f cm (left), +%.2f cm (right)\n", rise, pose[R].pos[2] - original[R].pos[2]);
+        CHECK(std::fabs(rise - 0.02 * map.height) < 0.05 * map.height * 0.02 + 1e-6);
+        CHECK(std::fabs((pose[R].pos[2] - original[R].pos[2]) - rise) < 1e-6);
+
+        book.clear();
+        set_scale_value(book, "breast_cleavage", 1.0);
+        pose = run(book);
+        std::printf("breast cleavage 1.0: spacing %.2f -> %.2f cm\n", horiz(original[L], original[R]), horiz(pose[L], pose[R]));
+        CHECK(horiz(pose[L], pose[R]) < horiz(original[L], original[R]) - 1.0);
+        set_scale_value(book, "breast_cleavage", -1.0);
+        pose = run(book);
+        CHECK(horiz(pose[L], pose[R]) > horiz(original[L], original[R]) + 1.0);
+
+        book.clear();
+        set_scale_value(book, "hip_width", 1.25);
+        pose = run(book);
+        const int tl = index_of(s, "thigh_l"), tr = index_of(s, "thigh_r");
+        std::printf("hip width 1.25: thigh joints %.2f -> %.2f cm apart\n", horiz(original[tl], original[tr]), horiz(pose[tl], pose[tr]));
+        CHECK(horiz(pose[tl], pose[tr]) > horiz(original[tl], original[tr]) * 1.1);
+        CHECK(std::fabs(pose[tl].pos[2] - original[tl].pos[2]) < 0.5); // wider, not higher
+
+        book.clear();
+        set_scale_value(book, "breast_width", 1.3);
+        double world = 0;
+        const EditBook folded = apply_proportions(book, map, world);
+        const int out_axis = std::abs(bl.out) - 1;
+        for (int a = 0; a < 3; ++a)
+            CHECK(near(folded.at("boob_l").edit.axis[a], a == out_axis ? 1.3 : 1.0));
+
+        // Offsets save and load like the other sliders, negative values included.
+        book.clear();
+        set_scale_value(book, "breast_lift", -0.4);
+        set_scale_value(book, "butt_lift", 0.0); // neutral: not stored
+        CHECK(book.size() == 1 && near(scale_value(book, "breast_lift"), -0.4) && near(scale_value(book, "butt_lift"), 0.0));
+        EditBook back;
+        std::string message;
+        CHECK(PresetShelf::parse(PresetShelf::serialize(book), back, message));
+        CHECK(near(scale_value(back, "breast_lift"), -0.4));
+    }
+
+    // ---- priority: named morph > bone slider > cryptic morph ------------------------------
+    {
+        const std::vector<std::string> mesh = {"Morph_BreastEnl", "Morph_Buttocks", "Morph_HipsWide", "Morph_WaistNarr", "Breast_L_Lift",
+                                               "Belly", "Morph_NippleHei", "Morph_SHuge", "Morph_SFinery"};
+        CHECK(group_covered("Breasts", mesh) && group_covered("Butt", mesh) && group_covered("Belly", mesh));
+        CHECK(!group_covered("Hips", mesh) && !group_covered("Thighs", mesh) && !group_covered("Nipples", mesh));
+        CHECK(!group_covered("My custom group", mesh));
+        auto covered = [&](const char* id) { return scale_slider_covered(*find_scale_slider(id), mesh); };
+        CHECK(covered("hip_width") && covered("waist_width") && covered("breast_lift"));
+        CHECK(!covered("breast_width") && !covered("breast_cleavage") && !covered("butt_lift") && !covered("back_width"));
+        // Cryptic names (SHuge) never take a slider's place.
+        CHECK(!scale_slider_covered(*find_scale_slider("breast_projection"), {"Morph_SHuge", "Morph_SReduce"}));
     }
 
     std::printf(g_fail ? "\n%d FAILURE(S)\n" : "\nALL TESTS PASSED\n", g_fail);
