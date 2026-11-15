@@ -16,6 +16,10 @@ https://github.com/user-attachments/assets/4e4372bc-8a64-4255-b8ae-a33645ce187e
 * Proportions sit on top of the Body and Advanced sliders (they multiply, nothing is overwritten). Lengths stretch the limb bones only, so hands, feet and the head keep their size
 * Saved per character like the other sliders (session, NPC memory) and in presets as an optional `"proportions"` section; older builds ignore it
 * **Looks** tab: **Skin** (skin tone, sweat) and **Hair** (hue, saturation, lightness), per character like the sliders: saved with the session, in an NPC's memory and in presets (`"looks"`). The outfit's own materials are recoloured, nothing is replaced
+* Character Scale > **Muscle**: **Overall muscle**, **Upper arm**, **Forearm**, **Waist**, **Neck**, **Thigh** and **Calf thickness**, **Shoulder bulk** and **Chest breadth**. They make limbs thicker without making them longer; hands, feet and the head keep their size and stay where they were. Muscle helper bones (biceps, quads, pecs...) grow along when the rig has them
+* Length and thickness sliders now work out which way each bone runs from the live pose instead of assuming X, so they also fit rigs whose bones run along Y or Z
+* **Bone-built Body sliders** ("universal morphs"): a mesh with anatomy bones but no morph target for them gets **Penis size / length / girth**, **Glans size**, **Testicle size** and **Vulva size** under Groin, found by bone name in any game. A real morph target for the same thing (`mGen_Balls`, `Penis_Length`...) always wins and hides the bone slider. Saved like the scale sliders (`"proportions"` in presets)
+* Body tab cleanup: sliders have character-creator names (*Thigh size*, *Breast size*), each category lists **Size** rows first and **Shape** rows (morphs) under them, every track lines up, and the bone / morph name lists moved out of the tooltips (Advanced lists them)
 
 ### V2.7.0 - Changelogs
 * New window look: flat slate-navy theme with sharp corners, flush text tabs (**Body**, **Presets**, **Advanced**, **Status**) and 1px bordered groups
@@ -85,13 +89,14 @@ Every push to `main` and every pull request is built by GitHub Actions (**Action
   * **Tags**: type into **Add tag...** next to the preset details and press Enter (commas add several); click a tag's **x** to remove it. Saved in `UUEPBS Presets\_library\presets.json`, which you can also edit by hand.
   * **Thumbnails**: saving a preset takes a whole-body picture of the current character (one every 1.5 s at most, while the window is open), saved as `_library\<preset>.auto.png`. Your own PNG/JPG named after the preset (`_library\Curvy.png`) always wins. **Retake picture** takes a new one of the character as it looks right now. The framing comes from the character's bounds; `"ThumbnailDistance"` (cm) and `"ThumbnailFov"` (degrees, default 40) in the game profile override it. Deleting a preset deletes its thumbnail and tags.
 * **Body** tab (called the Simplified Panel in 2.2–2.6): pick a category on the left (Head & Neck, Torso, Chest, Hips & Legs, Arms...), then use its curated sliders for the head, neck, rib cage, waist, hips, shoulders, breasts, butt, thighs, calves, arms and so on.
-  A slider only appears when the skeleton has matching bones. Hover a slider's name to see which bones it drives.
+  A slider only appears when the skeleton has matching bones. Hover a slider's name for what it does and how many bones it drives (Advanced > Bones lists them).
   Left/right pairs and twist/roll/jiggle helper bones move together. **XYZ** splits the size into Length (X, along the bone), Width (Y) and Depth (Z).
   Scale sliders run from 0.1× to 10× on a log scale; the tick marks 1.0×. **Ctrl + mouse wheel** nudges a slider by 0.01, and **Ctrl + Shift + wheel** by 0.001.
   Click the number box next to a slider to type a value. **Reset** on the section bar resets the whole category.
   The mesh's morph targets get sliders here too, sorted by name into the body categories plus **Face**, **Body shape**, **Groin** and **Other** (`Morph_BreastEnl` becomes *Breast enlarge* under Chest, `Exp_BrowUpL` + `Exp_BrowUpR` become one *Brow up* slider under Face, names nothing matches land in Other).
   Correctives and clothing helpers (`Crctve_*`, `*Correct*`, `Morph_Helmet`...) stay under Advanced > Morphs only, because the game drives them. Morph groups from the game profile (`MorphGroups`, see below) come first and take their morphs out of the automatic sorting.
-  Hover a morph slider for the morph names it drives; under Advanced > Morphs the tooltip says where each morph sits on the Body tab, and the search also finds the readable names.
+  Under Advanced > Morphs the tooltip says where each morph sits on the Body tab, and the search also finds the readable names.
+  Anatomy bones without a morph target get bone-built sliders under Groin (*Penis size*, *Penis length*, *Penis girth*, *Glans size*, *Testicle size*, *Vulva size*), matched by bone name (`penis_01`, `Cock2`, `glans`, `testicle_l`, `scrotum`, `labia_l`...; `ball_l` toes are left alone). A morph target that does the same job hides the bone slider.
   **Changed only** hides every body part and morph group that is still at the game's own shape.
 * **Undo / Redo** (buttons in the character banner, **Ctrl+Z** and **Ctrl+Y** / **Ctrl+Shift+Z** while the window has focus) step back and forth through slider changes.
   A whole drag, a burst of Ctrl+wheel nudges, a preset load or a reset counts as one step. Each character has its own history (up to 100 steps), so undoing never touches another character's sliders.
@@ -113,7 +118,7 @@ Every push to `main` and every pull request is built by GitHub Actions (**Action
     * A morph you move **replaces** the game's own value, even at 0. **Reset** gives it back, and the value the game had before comes back.
     * With **Symmetry lock** on, `…_L`/`…_R` twins move together.
     * A **!** next to a name means the game keeps setting that morph itself (an animation or its own code). UUEPBS puts your value back each time it notices, but it may flicker or not stick.
-* **Character Scale** tab: **Height** (whole character, scaled from the feet) and broad proportions (head size, neck, shoulders, torso, arm and leg length, hands, feet).
+* **Character Scale** tab: **Height** (whole character, scaled from the feet), broad proportions (head size, neck, shoulders, torso, arm and leg length, hands, feet) and **Muscle** (thickness of the arms, legs, neck, waist, chest and shoulders without changing their length, plus *Overall muscle* for all of them at once).
   They apply on top of the Body and Advanced sliders and use the Body tab's bone groups, so a slider only appears when the skeleton has those bones. Collision and the camera don't change.
 * **Looks** tab: pick **Skin** or **Hair** on the left, then move the sliders.
   * **Skin tone** (below 0 tans, above 0 pales) and **Sweat** (a wet sheen) change every skin slot of the outfit (body, head, arms...), so the seams match. Eyes, mouths and clothes are left alone.

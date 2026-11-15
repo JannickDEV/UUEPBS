@@ -401,6 +401,26 @@ namespace uuepbs
                     BodyMapSource::instance().get(dict, user, status);
                     rig->body = resolve_body_groups(rig->sculptor.names(), rig->sculptor.parents(), dict, user);
                     rig->body_revision = body_rev;
+                    // Which way each bone runs, from this frame's pose (Length / Girth sliders).
+                    std::vector<Xform> live(static_cast<size_t>(pose.num));
+                    for (int32_t i = 0; i < pose.num; ++i)
+                    {
+                        if (m_layout.elem_size == 96)
+                        {
+                            live[i] = static_cast<const Xform*>(pose.data)[i];
+                        }
+                        else
+                        {
+                            const XformF& f = static_cast<const XformF*>(pose.data)[i];
+                            for (int a = 0; a < 4; ++a)
+                            {
+                                live[i].rot[a] = f.rot[a];
+                                live[i].pos[a] = f.pos[a];
+                                live[i].scl[a] = f.scl[a];
+                            }
+                        }
+                    }
+                    measure_long_axes(rig->body, rig->sculptor.names(), rig->sculptor.parents(), live);
                 }
                 double world = 1.0;
                 const EditBook folded = apply_proportions(book, rig->body, world);

@@ -11,28 +11,51 @@
 // already carries a book: per-character memory, the session, undo and presets.
 // Presets write them as a separate "proportions" object, never under "bones";
 // older builds ignore that key.
+//
+// The same mechanism carries the "Muscle" sliders (girth only: thicker limbs, same length)
+// and the Body tab's bone-built "universal morphs" (Penis length, Testicle size... for
+// meshes that have the bones but no morph target; see bone_parts.hpp).
 #pragma once
 
 #include "body_groups.hpp"
 #include "sculpt.hpp"
 
+#include <cstdint>
 #include <string>
 #include <string_view>
 #include <vector>
 
 namespace uuepbs
 {
+    // Which bone axes a slider scales. X runs along the bone (sculpt.hpp).
+    enum class ScaleAxes : uint8_t
+    {
+        Uniform, // size: X, Y and Z
+        Length,  // X only: longer, same thickness
+        Girth,   // Y and Z only: thicker, same length (muscle / bulk sliders)
+    };
+
     struct ScaleSlider
     {
         const char* id;      // preset key, e.g. "leg_length"
-        const char* section; // "Overall" or "Proportions"
+        const char* section; // Character Scale: "Overall", "Proportions", "Muscle"; Body tab: its category
         const char* title;
         const char* hint;
-        std::vector<const char*> groups; // Body tab group titles; empty = the whole character (height)
-        bool length_only;                // X (along the bone) only, else uniform
-        Spread spread;                   // for bones the Body tab or Advanced tab has not touched
+        std::vector<const char*> groups; // Body tab group titles; empty (and no part) = the whole character (height)
+        ScaleAxes axes;
+        Spread spread; // for bones the Body tab or Advanced tab has not touched
         double lo;
         double hi;
+        // Body tab groups scaled uniformly along with `groups` (muscle helper bones: biceps, quads...).
+        std::vector<const char*> helpers = {};
+        // Bone parts (bone_parts.hpp) the slider drives instead of / besides Body tab groups.
+        std::vector<const char*> parts = {};
+        // true = a Body tab slider ("universal morph"), false = Character Scale tab.
+        bool body = false;
+        // Body tab only: a real morph target naming one of `morph_words` (and one of
+        // `morph_dims`, see part_covered_by_morph) replaces this slider.
+        std::vector<const char*> morph_words = {};
+        std::vector<const char*> morph_dims = {};
     };
 
     constexpr const char* kScaleKeyPrefix = "@scale:";
@@ -61,5 +84,21 @@ namespace uuepbs
     // The book the sculptor should bind: real bone edits with the proportion multipliers
     // folded in, pseudo entries removed. `world` receives the height factor (1 = unchanged).
     // `map` must be resolved against the same skeleton the result is bound to.
+    // A Girth slider turns an edited bone's "scale children too" into "keep children size", so
+    // a thicker forearm never inflates the hand.
     EditBook apply_proportions(const EditBook& book, const BodyMap& map, double& world);
+
+    // Works out, for every bone, which of its local axes runs along it: the one pointing at its
+    // farthest child joint (a bone with no children: the direction it came from). Rigs disagree
+    // (UE mannequin: X, Blender exports: often Y, some rigs: Z), so Length and Girth sliders use
+    // this instead of assuming X. `component_pose` = component-space transforms, any pose.
+    void measure_long_axes(BodyMap& map, const std::vector<std::string>& names, const std::vector<int32_t>& parents,
+                           const std::vector<Xform>& component_pose);
+    // The measured axis of `bone` (0 when unknown).
+    int long_axis_of(const BodyMap& map, std::string_view bone);
+
+    // Bones a slider drives on this skeleton (groups, helpers and parts), display spelling.
+    std::vector<std::string> scale_slider_bones(const ScaleSlider& s, const BodyMap& map);
+    // A Body tab slider whose job a real morph target in `morphs` already does.
+    bool scale_slider_covered(const ScaleSlider& s, const std::vector<std::string>& morphs);
 } // namespace uuepbs

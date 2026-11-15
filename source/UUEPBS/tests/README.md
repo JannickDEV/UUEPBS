@@ -11,6 +11,9 @@ Host-side tests (Linux/macOS/WSL with g++ 13+ or clang 17+). None of them need W
     # Body tab sliders for morph targets sorted by name (81 morphs of a real mesh, pairs, labels, profile overrides)
     g++ -std=c++23 -I$S test_morph_sort.cpp $S/core/*.cpp -o test_morph_sort && ./test_morph_sort
 
+    # Character Scale > Muscle (girth only, measured bone axes) and the Body tab's bone-built sliders (Penis length...)
+    g++ -std=c++23 -I$S test_body_editor.cpp $S/core/*.cpp -o test_body_editor && ./test_body_editor
+
     # undo/redo history, "Changed only" filter and preset details
     g++ -std=c++23 -I$S test_changes.cpp $S/core/*.cpp -o test_changes && ./test_changes
 

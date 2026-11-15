@@ -393,6 +393,16 @@ namespace uuepbs
                         local.scl[a] /= ps.axis[a];
                     }
                 }
+                if (ps.spread != Spread::Solo)
+                {
+                    for (int a = 0; a < 3; ++a)
+                    {
+                        if (ps.joint[a] > 0.0 && std::isfinite(ps.joint[a]))
+                        {
+                            local.pos[a] *= ps.joint[a] / ps.axis[a]; // thicker, same joints
+                        }
+                    }
+                }
             }
 
             const int32_t slot = m_edit_slot[i];

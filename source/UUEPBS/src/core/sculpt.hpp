@@ -37,6 +37,9 @@ namespace uuepbs
         double turn[3]{0.0, 0.0, 0.0};  // rotation in degrees about X, Y, Z (applied X, then Y, then Z)
         double shift[3]{0.0, 0.0, 0.0}; // translation in cm along X, Y, Z
         Spread spread{Spread::Chain};
+        // Runtime only, never saved: how far the child joints move per axis (0 = with `axis`).
+        // Character Scale > Muscle thickens a bone without pushing its child joints sideways.
+        double joint[3]{0.0, 0.0, 0.0};
 
         static constexpr double kMaxTurn = 180.0;
         static constexpr double kMaxShift = 200.0;
