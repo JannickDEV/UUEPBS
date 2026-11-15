@@ -125,7 +125,7 @@ local profileFileName = profileKey:gsub('[<>:"/\\|?*]', "_") .. ".json"
 local profileFile = profileDir .. "\\" .. profileFileName
 local legacyProfileFile = modsDir .. "\\" .. LEGACY_MOD_FOLDER .. "\\Scripts\\GameProfiles\\" .. profileFileName
 local PROFILE_ORDER = { "Project", "Game", "Target", "TargetClassPath", "TargetPrefer", "PrimaryComponent", "IncludeComponents", "ExcludeComponents",
-    "SameSkeletonOnly", "WorldMeshSearch", "BodyGroups", "MorphGroups", "ExcludeMorphs", "Names", "Looks", "Hook", "_help" }
+    "SameSkeletonOnly", "WorldMeshSearch", "BodyGroups", "MorphGroups", "ExcludeMorphs", "AutoMorphGroups", "Names", "Looks", "Hook", "_help" }
 local PROFILE_HELP = "Target: actor class to edit (empty = the pawn you control). TargetClassPath: optional full path of that class. "
     .. "TargetPrefer: when several actors of the Target class exist, the default is the one with the lowest value of this "
     .. "number property (e.g. a fighting game's PlayerNumber, 0 = player 1). "
@@ -135,6 +135,7 @@ local PROFILE_HELP = "Target: actor class to edit (empty = the pawn you control)
     .. "(real bone names from the Detailed Panel, * wildcards allowed; [] hides a slider; new names add sliders). "
     .. "MorphGroups: Simplified Panel sliders for morph targets, e.g. {\"Breasts\": [\"BreastSize*\"]} (names from Detailed Panel > Morphs). "
     .. "ExcludeMorphs: morph names to hide, e.g. [\"*_corrective*\"]. "
+    .. "AutoMorphGroups: false = only MorphGroups put morphs on the Body tab (by default the rest are sorted into categories by name). "
     .. "Names: names shown in the window's character list, by engine name, e.g. {\"BP_Rokuv3_C\": \"Roku\", \"00_EVE_*\": \"Eve\"} "
     .. "(actor, class or mesh asset names; * wildcards allowed, a plain name also matches names that start with it). "
     .. "WorldMeshSearch: true = find meshes by searching every skeletal mesh in the world (slower; only for games where "

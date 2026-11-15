@@ -23,7 +23,7 @@ end() { echo "::endgroup::"; }
 CORE=("$S"/core/*.cpp)
 IMGUI_SRC=("$IMGUI/imgui.cpp" "$IMGUI/imgui_draw.cpp" "$IMGUI/imgui_tables.cpp" "$IMGUI/imgui_widgets.cpp")
 
-for t in sculpt changes symmetry mirror preset_library looks names share compare; do
+for t in sculpt changes symmetry mirror preset_library looks names share compare morph_sort; do
   step "test_$t"
   opt=""; [ "$t" = sculpt ] && opt="-O1"
   $CXX -std=c++23 $opt -I"$S" "test_$t.cpp" "${CORE[@]}" -o "$OUT/test_$t"

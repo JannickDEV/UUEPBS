@@ -8,6 +8,9 @@ Host-side tests (Linux/macOS/WSL with g++ 13+ or clang 17+). None of them need W
     # pose maths, presets, registry (UE5 double and UE4 float poses), pose hook cost per call
     g++ -std=c++23 -O1 -I$S test_sculpt.cpp $S/core/*.cpp -o test_sculpt && ./test_sculpt
 
+    # Body tab sliders for morph targets sorted by name (81 morphs of a real mesh, pairs, labels, profile overrides)
+    g++ -std=c++23 -I$S test_morph_sort.cpp $S/core/*.cpp -o test_morph_sort && ./test_morph_sort
+
     # undo/redo history, "Changed only" filter and preset details
     g++ -std=c++23 -I$S test_changes.cpp $S/core/*.cpp -o test_changes && ./test_changes
 

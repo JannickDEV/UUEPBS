@@ -54,6 +54,7 @@ add_library(UUEPBS SHARED
     src/core/looks.cpp
     src/core/bridge.cpp
     src/core/mirror.cpp
+    src/core/morph_sort.cpp
     src/core/morphs.cpp
     src/core/portrait_requests.cpp
     src/core/preset_library.cpp

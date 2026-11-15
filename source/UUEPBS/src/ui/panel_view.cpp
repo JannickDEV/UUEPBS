@@ -4,6 +4,7 @@
 
 #include "../core/character_names.hpp"
 #include "../core/looks.hpp"
+#include "../core/morph_sort.hpp"
 #include "../core/rig_names.hpp"
 #include "portraits.hpp"
 #include "skin.hpp"
@@ -202,7 +203,17 @@ namespace uuepbs::ui
                 }
             }
             m_morphs_hidden = all.size() - m_morph_names.size();
-            m_morph_groups = resolve_morph_groups(m_morph_names, m_morph_profile);
+            m_morph_groups = body_morph_groups(m_morph_names, m_morph_profile);
+            m_morph_place.clear();
+            for (const MorphGroupMorphs& mg : m_morph_groups)
+            {
+                const std::string where = (mg.group.section.empty() ? std::string("Morphs") : mg.group.section) + " > " + mg.group.title;
+                for (const std::string& m : mg.morphs)
+                {
+                    m_morph_place.emplace(fold_case(m), where);
+                }
+            }
+            m_morphs_advanced_only = m_morph_names.size() - std::min(m_morph_names.size(), m_morph_place.size());
         }
         if (reg.morph_revision() != m_morph_revision)
         {
@@ -1198,6 +1209,8 @@ namespace uuepbs::ui
             const bool set = std::any_of(mg.morphs.begin(), mg.morphs.end(), [this](const std::string& m) { return morph_of(m).has_value(); });
             c.changed += set ? 1 : 0;
         }
+        // Head & Neck, Face, Torso, Chest, Hips & Legs, Arms, ... Groin, Other (morph_sort.hpp).
+        std::stable_sort(out.begin(), out.end(), [](const Category& a, const Category& b) { return section_rank(a.name) < section_rank(b.name); });
         return out;
     }
 
@@ -1484,7 +1497,8 @@ namespace uuepbs::ui
         draw_changed_only_filter();
         ImGui::SameLine();
         ImGui::AlignTextToFramePadding();
-        ImGui::TextColored(muted(), cat.changed ? "%zu of %zu parts changed. Click a number to type it." : "%zu parts. Click a number to type it.",
+        ImGui::TextColored(muted(), cat.changed ? "%zu of %zu parts changed. Click a number to type it."
+                           : cat.parts == 1 ? "%zu part. Click a number to type it." : "%zu parts. Click a number to type it.",
                            cat.changed ? cat.changed : cat.parts, cat.parts);
         ImGui::PopFont();
         ImGui::Dummy(ImVec2(0.0f, dpi_px(4.0f)));
@@ -1500,7 +1514,10 @@ namespace uuepbs::ui
         }
         for (const MorphGroupMorphs& mg : m_morph_groups)
         {
-            label_w = std::max(label_w, ImGui::CalcTextSize(mg.group.title.c_str()).x);
+            if ((mg.group.section.empty() ? std::string("Morphs") : mg.group.section) == cat.name)
+            {
+                label_w = std::max(label_w, ImGui::CalcTextSize(mg.group.title.c_str()).x);
+            }
         }
         label_w = std::min(label_w + ImGui::GetFontSize() * 1.6f, ImGui::GetContentRegionAvail().x * 0.34f);
 
@@ -1688,12 +1705,23 @@ namespace uuepbs::ui
                 draw_category(c);
             }
         }
-        if (m_morph_groups.empty() && !m_morph_names.empty())
+        if (m_morphs_advanced_only > 0 && (m_category == cats.back().name || m_morph_groups.empty()))
         {
+            // Under the last category (usually "Other"): what the Body tab leaves out, and why.
             ImGui::Spacing();
             ImGui::PushTextWrapPos(0.0f);
-            ImGui::TextColored(muted(), "%zu morph target%s: see Advanced > Morphs. Add \"MorphGroups\" to the game profile to put sliders here.",
-                               m_morph_names.size(), m_morph_names.size() == 1 ? "" : "s");
+            if (!m_morph_profile.auto_groups)
+            {
+                ImGui::TextColored(muted(), "%zu more morph target%s under Advanced > Morphs (\"AutoMorphGroups\" is off in the game profile).",
+                                   m_morphs_advanced_only, m_morphs_advanced_only == 1 ? "" : "s");
+            }
+            else
+            {
+                ImGui::TextColored(muted(),
+                                   "%zu more morph target%s under Advanced > Morphs: correctives and clothing helpers the game drives itself. "
+                                   "\"MorphGroups\" in the game profile can bring them here.",
+                                   m_morphs_advanced_only, m_morphs_advanced_only == 1 ? "" : "s");
+            }
             ImGui::PopTextWrapPos();
         }
         ImGui::EndChild();
@@ -2141,7 +2169,12 @@ namespace uuepbs::ui
             }
             if (!contains_folded(m, needle))
             {
-                continue;
+                // also find "Breast enlarge" or "Chest" (the Body tab name of the slider)
+                const auto place = m_morph_place.find(fold_case(m));
+                if (needle.empty() || place == m_morph_place.end() || !contains_folded(place->second, needle))
+                {
+                    continue;
+                }
             }
             rows.push_back(&m);
         }
@@ -2172,6 +2205,10 @@ namespace uuepbs::ui
                 spec.tip = animated ? "The game keeps setting this morph itself (animation or its own code),\nso the slider may not stick. "
                                       "UUEPBS re-applies it each time it notices."
                                     : "Empty box = the game's own value.";
+                {
+                    const auto place = m_morph_place.find(fold_case(name));
+                    spec.tip += place != m_morph_place.end() ? "\nBody tab: " + place->second : std::string("\nNot on the Body tab (Advanced only).");
+                }
                 spec.edited = w.has_value();
                 spec.lo = kMorphSliderMin;
                 spec.hi = kMorphSliderMax;
@@ -3358,7 +3395,7 @@ namespace uuepbs::ui
         for (const MorphGroupMorphs& mg : m_morph_groups)
         {
             const std::string section = mg.group.section.empty() ? std::string("Morphs") : mg.group.section;
-            if (!mg.morphs.empty() && (!m_random_category_only || section == m_category))
+            if (!mg.morphs.empty() && mg.group.randomize && (!m_random_category_only || section == m_category))
             {
                 morphs.push_back(mg.morphs);
             }
@@ -3407,7 +3444,8 @@ namespace uuepbs::ui
             m_random.morph_lo = lo;
             m_random.morph_hi = hi;
         }
-        tooltip("Morph group sliders get a weight between these two values.");
+        tooltip("Morph group sliders get a weight between these two values.\n"
+                "Face, Groin and Other sliders, forms and pregnancy are left alone.");
         ImGui::EndDisabled();
         ImGui::EndDisabled();
         ImGui::Separator();
