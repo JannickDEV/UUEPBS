@@ -301,6 +301,8 @@ namespace uuepbs::ui
         std::vector<MorphGroupMorphs> m_morph_groups{};
         std::set<std::string> m_animated{};
         size_t m_morphs_hidden{0};
+        size_t m_morphs_advanced_only{0}; // morph targets with no Body tab slider (correctives, clothing helpers)
+        std::map<std::string, std::string> m_morph_place{}; // folded morph name -> "Chest > Breast enlarge"
         char m_morph_filter[64]{};
         bool m_morph_only_edited{false};
 

@@ -89,14 +89,16 @@ Every push to `main` and every pull request is built by GitHub Actions (**Action
   Left/right pairs and twist/roll/jiggle helper bones move together. **XYZ** splits the size into Length (X, along the bone), Width (Y) and Depth (Z).
   Scale sliders run from 0.1× to 10× on a log scale; the tick marks 1.0×. **Ctrl + mouse wheel** nudges a slider by 0.01, and **Ctrl + Shift + wheel** by 0.001.
   Click the number box next to a slider to type a value. **Reset** on the section bar resets the whole category.
-  Morph groups from the game profile (`MorphGroups`, see below) appear here as extra sliders.
+  The mesh's morph targets get sliders here too, sorted by name into the body categories plus **Face**, **Body shape**, **Groin** and **Other** (`Morph_BreastEnl` becomes *Breast enlarge* under Chest, `Exp_BrowUpL` + `Exp_BrowUpR` become one *Brow up* slider under Face, names nothing matches land in Other).
+  Correctives and clothing helpers (`Crctve_*`, `*Correct*`, `Morph_Helmet`...) stay under Advanced > Morphs only, because the game drives them. Morph groups from the game profile (`MorphGroups`, see below) come first and take their morphs out of the automatic sorting.
+  Hover a morph slider for the morph names it drives; under Advanced > Morphs the tooltip says where each morph sits on the Body tab, and the search also finds the readable names.
   **Changed only** hides every body part and morph group that is still at the game's own shape.
 * **Undo / Redo** (buttons in the character banner, **Ctrl+Z** and **Ctrl+Y** / **Ctrl+Shift+Z** while the window has focus) step back and forth through slider changes.
   A whole drag, a burst of Ctrl+wheel nudges, a preset load or a reset counts as one step. Each character has its own history (up to 100 steps), so undoing never touches another character's sliders.
 * **Symmetry tools** (row above the sliders on the Body and Advanced tabs):
   * **Symmetry lock** (on by default): editing a left or right bone, or a `…_L`/`…_R` morph, under Advanced also gives its partner the mirror image. Body tab parts always move both sides together.
   * **Mirror L to R** / **Mirror R to L** copy every edit on one side of the character onto the other side as a mirror image (bones and morphs). Edits on the receiving side are replaced, and a bone there whose partner is unedited goes back to the game's shape. Bones in the middle (spine, head) are not touched.
-  * **Randomize** (Body tab) gives every body part a random size, and morph groups a random weight, inside the **Limits**: *Size ±* (default 15 %), *Shape ±* (extra per-axis variation, default 5 %), the morph weight range (default 0–0.6), which of the two to touch, and *Only <category>* to leave the other categories alone. Both sides of a part always get the same values; rotations, moves and Children settings are kept.
+  * **Randomize** (Body tab) gives every body part a random size, and morph groups a random weight (automatic Face, Groin and Other sliders, forms and pregnancy are left alone), inside the **Limits**: *Size ±* (default 15 %), *Shape ±* (extra per-axis variation, default 5 %), the morph weight range (default 0–0.6), which of the two to touch, and *Only <category>* to leave the other categories alone. Both sides of a part always get the same values; rotations, moves and Children settings are kept.
   * Each Mirror or Randomize click is exactly one undo step, so **Ctrl+Z** takes it back.
 * **Advanced** tab (called the Detailed Panel in 2.2–2.6, the Bones tab before). When the meshes have morph targets it has two sub-tabs, **Bones** and **Morphs**.
   * **Bones:** every bone of the primary mesh, with search and "edited only".
@@ -193,10 +195,12 @@ Install the mod in as many games as you like; each one gets its own file.
   "Breasts": ["BreastSize*"],
   "Belly":   { "Morphs": ["Belly", "Tummy_Round"], "Section": "Body shape", "Hint": "Belly size" }
 },
-"ExcludeMorphs": ["*_corrective*", "Viseme_*"]
+"ExcludeMorphs": ["*_corrective*", "Viseme_*"],
+"AutoMorphGroups": true
 ```
 * **`MorphGroups`** adds sliders to the Simplified Panel. Each drives every morph whose name matches (names from Detailed Panel > Morphs; `*` = anything, `#` = digits, not case-sensitive).
 * **`ExcludeMorphs`** hides morphs from the window, e.g. corrective shapes and face visemes. Hidden morphs are never touched.
+* **`AutoMorphGroups`** (default `true`): morphs no `MorphGroups` entry claims are sorted onto the Body tab by name. `false` keeps only your own groups there.
 
 **Character names in the window** (optional):
 ```json

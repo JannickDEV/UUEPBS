@@ -80,6 +80,15 @@ namespace uuepbs
             }
             out.exclude = strings_of(ex);
         }
+        if (const JsonValue* autos = root.find("AutoMorphGroups"))
+        {
+            if (autos->kind != JsonValue::Kind::Bool)
+            {
+                message = "\"AutoMorphGroups\" must be true or false";
+                return false;
+            }
+            out.auto_groups = autos->boolean;
+        }
         if (const JsonValue* groups = root.find("MorphGroups"))
         {
             if (groups->kind != JsonValue::Kind::Object)
@@ -112,6 +121,10 @@ namespace uuepbs
             }
         }
         message = std::to_string(out.groups.size()) + " morph group(s), " + std::to_string(out.exclude.size()) + " morph exclusion(s)";
+        if (!out.auto_groups)
+        {
+            message += ", automatic morph sliders off";
+        }
         return true;
     }
 

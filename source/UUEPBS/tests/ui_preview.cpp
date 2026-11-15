@@ -376,7 +376,10 @@ int main(int argc, char** argv)
 
     // Morph targets as Lua would report them, a profile with MorphGroups and one exclusion.
     reg.set_morph_names({"BreastSize", "Breast_L_Lift", "Breast_R_Lift", "Belly", "HipWidth", "ThighThickness", "Muscle", "WaistNarrow",
-                         "Face_Smile", "Face_Blink_L", "Face_Blink_R", "Corrective_Elbow"});
+                         "Face_Smile", "Face_Blink_L", "Face_Blink_R", "Corrective_Elbow",
+                         // not in the profile: sorted onto the Body tab by name (core/morph_sort)
+                         "Morph_NippleHei", "Morph_WaistNarr", "Morph_HipsWide", "Morph_LegFat", "Morph_Chubby", "Form_Felian", "Look-Left",
+                         "Look-Right", "Exp_BrowUpL", "Exp_BrowUpR", "Oral_Open", "Speech_Ah", "Morph_SFinery", "Crctve_KneeCapL", "Morph_Helmet"});
     {
         MorphProfile mp;
         std::string mm;
@@ -482,8 +485,11 @@ int main(int argc, char** argv)
         bool chooser{false}; // with the "Choose character" grid open
         int presets{0};      // Presets tab: 0 grid, 1 list, 2 grid searched for "#roku" with the "fit" tag on
         const char* scale_section{"Proportions"};
+        const char* category{"Hips & Legs"}; // Body tab category on the right
     };
     const Shot shots[] = {{ui::PanelView::Tab::Simplified, -1, "preview_simplified.ppm"},
+                          {ui::PanelView::Tab::Simplified, -1, "preview_body_face.ppm", false, 0, "Proportions", "Face"},
+                          {ui::PanelView::Tab::Simplified, -1, "preview_body_other.ppm", false, 0, "Proportions", "Other"},
                           {ui::PanelView::Tab::Detailed, 0, "preview_detailed.ppm"},
                           {ui::PanelView::Tab::Detailed, 1, "preview_morphs.ppm"},
                           {ui::PanelView::Tab::Scale, -1, "preview_scale.ppm"},
@@ -517,7 +523,7 @@ int main(int argc, char** argv)
                 view.focus_detail(static_cast<ui::PanelView::Detail>(shot.detail));
             if (shot.tab == ui::PanelView::Tab::Detailed)
                 view.select_bone("boob_l");
-            view.focus_category("Hips & Legs");
+            view.focus_category(shot.category);
             view.focus_scale_section(shot.scale_section);
             view.show_character_chooser(shot.chooser);
             view.show_preset_list(shot.presets == 1);

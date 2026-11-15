@@ -12,6 +12,7 @@
 //   "MorphGroups":   { "Breasts": ["BreastSize*"], "Belly": { "Morphs": ["Belly"], "Section": "Body shape", "Hint": "..." } }
 //                    adds sliders to the Simplified Panel; one slider drives every matching morph.
 //   "ExcludeMorphs": ["*_corrective*", "Viseme_*"]   hides morphs from the window (Lua never touches them).
+//   "AutoMorphGroups": false   turns off the name-based Body tab sliders (morph_sort.hpp).
 // Patterns use the bone dictionary rules: case-insensitive, '*' = anything, '#' = digits.
 #pragma once
 
@@ -43,16 +44,19 @@ namespace uuepbs
         std::string section;
         std::string hint;
         std::vector<std::string> patterns;
+        bool randomize{true};  // Randomize may change it (automatic face / groin / other groups opt out)
+        bool automatic{false}; // made by body_morph_groups (morph_sort.hpp), not by the profile
     };
 
     struct MorphProfile
     {
         std::vector<MorphGroup> groups;
         std::vector<std::string> exclude;
+        bool auto_groups{true}; // "AutoMorphGroups": false = only the profile's groups reach the Body tab
         bool excluded(std::string_view morph) const;
     };
 
-    // Reads "MorphGroups" and "ExcludeMorphs" from a game profile (other keys are ignored).
+    // Reads "MorphGroups", "ExcludeMorphs" and "AutoMorphGroups" from a game profile (other keys are ignored).
     // false + message when the JSON is broken or a key has the wrong shape.
     bool parse_morph_profile(const std::string& profile_json, MorphProfile& out, std::string& message);
 
