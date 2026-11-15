@@ -29,9 +29,9 @@ namespace uuepbs::ui
         // Log scale from 0.1x to 10x puts 1.0x exactly in the middle of the slider.
         constexpr float kScaleMin = 0.10f;
         constexpr float kScaleMax = 10.0f;
-        // Morph sliders show 0..1; Ctrl+click can type anything in kMorphMin..kMorphMax.
-        constexpr float kMorphSliderMin = 0.0f;
-        constexpr float kMorphSliderMax = 1.0f;
+        // Morph sliders run over the whole kMorphMin..kMorphMax range (-5..5), 0 in the middle.
+        constexpr float kMorphSliderMin = static_cast<float>(kMorphMin);
+        constexpr float kMorphSliderMax = static_cast<float>(kMorphMax);
 
         bool contains_folded(const std::string& haystack, const std::string& folded_needle)
         {
@@ -178,7 +178,16 @@ namespace uuepbs::ui
                     m_bone_group[fold_case(b)] = gb.group.title;
                 }
             }
+            for (const PartBones& pb : m_body.parts)
+            {
+                const BonePart* part = find_bone_part(pb.id);
+                for (const std::string& b : pb.bones)
+                {
+                    m_bone_group.emplace(fold_case(b), part ? part->title : pb.id);
+                }
+            }
             m_body_revision = body_rev;
+            refresh_body_sliders();
         }
         if (reg.edit_revision() != m_book_revision)
         {
@@ -214,6 +223,7 @@ namespace uuepbs::ui
                 }
             }
             m_morphs_advanced_only = m_morph_names.size() - std::min(m_morph_names.size(), m_morph_place.size());
+            refresh_body_sliders();
         }
         if (reg.morph_revision() != m_morph_revision)
         {
@@ -1198,6 +1208,10 @@ namespace uuepbs::ui
         };
         for (const GroupBones& gb : m_body.groups)
         {
+            if (group_hidden(gb))
+            {
+                continue; // a named morph target does this part's job (draw_category)
+            }
             Category& c = slot(gb.group.section);
             c.parts++;
             c.changed += scale_of(gb.bones.front(), gb.group.spread).has_scale() ? 1 : 0;
@@ -1208,6 +1222,16 @@ namespace uuepbs::ui
             c.parts++;
             const bool set = std::any_of(mg.morphs.begin(), mg.morphs.end(), [this](const std::string& m) { return morph_of(m).has_value(); });
             c.changed += set ? 1 : 0;
+        }
+        for (const ScaleSlider* sl : m_body_sliders)
+        {
+            if (slider_hidden(*sl))
+            {
+                continue;
+            }
+            Category& c = slot(sl->section);
+            c.parts++;
+            c.changed += std::fabs(scale_value(m_book, sl->id) - sl->neutral()) >= kScaleNeutralEps ? 1 : 0;
         }
         // Head & Neck, Face, Torso, Chest, Hips & Legs, Arms, ... Groin, Other (morph_sort.hpp).
         std::stable_sort(out.begin(), out.end(), [](const Category& a, const Category& b) { return section_rank(a.name) < section_rank(b.name); });
@@ -1394,11 +1418,23 @@ namespace uuepbs::ui
                       u32(spec.edited ? accent() : ImGui::GetStyleColorVec4(ImGuiCol_Text)));
         ImGui::SetCursorScreenPos(ImVec2(p.x + bs + dpi_px(9.0f), p.y));
         ImGui::AlignTextToFramePadding();
-        ImGui::TextColored(spec.edited ? accent() : ImGui::GetStyleColorVec4(ImGuiCol_Text), "%s", spec.title.c_str());
-        tooltip(spec.tip.c_str());
+        // Long names (two morphs with the same label get their name added) are cut with "..."
+        // so they never run into the track; the tooltip has the whole name.
+        std::string shown = spec.title;
+        const float room = spec.label_w - bs - dpi_px(9.0f) - style.ItemSpacing.x;
+        if (spec.label_w > 0.0f && ImGui::CalcTextSize(shown.c_str()).x > room)
+        {
+            while (!shown.empty() && ImGui::CalcTextSize((shown + "...").c_str()).x > room)
+            {
+                shown.pop_back();
+            }
+            shown += "...";
+        }
+        ImGui::TextColored(spec.edited ? accent() : ImGui::GetStyleColorVec4(ImGuiCol_Text), "%s", shown.c_str());
+        tooltip(shown == spec.title ? spec.tip.c_str() : (spec.title + "\n" + spec.tip).c_str());
 
         const float box_w = std::floor(ImGui::CalcTextSize("0.000").x + style.FramePadding.x * 2.0f);
-        const float xyz_w = spec.has_axes ? compact_button_width("XYZ", "xyz") + style.ItemSpacing.x : 0.0f;
+        const float xyz_w = spec.has_axes || spec.reserve_axes ? compact_button_width("XYZ", "xyz") + style.ItemSpacing.x : 0.0f;
         const float reset_w = compact_button_width("Reset", "reset");
         ImGui::SameLine(p.x - ImGui::GetWindowPos().x + ImGui::GetScrollX() + spec.label_w);
         ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - box_w - xyz_w - reset_w - style.ItemSpacing.x * 2.0f - dpi_px(6.0f));
@@ -1457,6 +1493,12 @@ namespace uuepbs::ui
             }
             tooltip("Edit length / width / depth separately");
         }
+        else if (spec.reserve_axes)
+        {
+            // Keep every track in a category the same length, with or without an XYZ button.
+            ImGui::SameLine();
+            ImGui::Dummy(ImVec2(compact_button_width("XYZ", "xyz"), ImGui::GetFrameHeight()));
+        }
         ImGui::SameLine();
         ImGui::BeginDisabled(!spec.can_reset);
         r.reset = compact_button("Reset", "reset");
@@ -1488,6 +1530,71 @@ namespace uuepbs::ui
         }
     } // namespace
 
+    namespace
+    {
+        // Body tab label of a bone group: "Thighs" reads as "Thigh size", like a character creator.
+        // Titles from game profiles (and anything not listed) are shown as they are.
+        std::string friendly_group_title(const std::string& title)
+        {
+            static const std::map<std::string, const char*> names = {
+                {"head", "Head size"},       {"horns", "Horn size"},       {"ears", "Ear size"},         {"eyes", "Eye size"},
+                {"neck", "Neck size"},       {"rib cage", "Rib cage size"}, {"waist", "Waist size"},     {"belly", "Belly size"},
+                {"hips", "Hip size"},        {"shoulders", "Shoulder size"}, {"breasts", "Breast size"}, {"nipples", "Nipple size"},
+                {"butt", "Butt size"},       {"thighs", "Thigh size"},     {"calves", "Calf size"},      {"feet", "Foot size"},
+                {"upper arms", "Upper arm size"}, {"forearms", "Forearm size"}, {"hands", "Hand size"},
+            };
+            const auto it = names.find(fold_case(title));
+            return it != names.end() ? std::string(it->second) : title;
+        }
+
+        // Small muted caption between the size and the shape rows of a category.
+        void row_caption(const char* text)
+        {
+            ImGui::PushFont(nullptr, ImGui::GetStyle().FontSizeBase * 0.80f);
+            ImGui::TextColored(muted(), "%s", text);
+            ImGui::PopFont();
+        }
+    } // namespace
+
+    bool PanelView::group_hidden(const GroupBones& gb) const
+    {
+        // Replaced by a named morph target, unless the bones were already edited (a preset, or
+        // before the morph showed up): then the row stays so the edit can be seen and reset.
+        return m_covered_groups.count(gb.group.title) > 0 && !group_changed(gb, m_book);
+    }
+
+    bool PanelView::slider_hidden(const ScaleSlider& sl) const
+    {
+        return m_covered_sliders.count(sl.id) > 0 && std::fabs(scale_value(m_book, sl.id) - sl.neutral()) < kScaleNeutralEps;
+    }
+
+    void PanelView::refresh_body_sliders()
+    {
+        // Per slider: a clearly named morph target first, then the bone-built slider; morphs with
+        // names nothing recognises stay in Other (last).
+        m_covered_groups.clear();
+        for (const GroupBones& gb : m_body.groups)
+        {
+            if (!gb.custom && group_covered(gb.group.title, m_morph_names))
+            {
+                m_covered_groups.insert(gb.group.title);
+            }
+        }
+        m_body_sliders.clear();
+        m_covered_sliders.clear();
+        for (const ScaleSlider& sl : scale_sliders())
+        {
+            if (sl.body && !scale_slider_bones(sl, m_body).empty())
+            {
+                m_body_sliders.push_back(&sl);
+                if (scale_slider_covered(sl, m_morph_names))
+                {
+                    m_covered_sliders.insert(sl.id);
+                }
+            }
+        }
+    }
+
     void PanelView::draw_category(const Category& cat)
     {
         Skin& sk = skin();
@@ -1497,29 +1604,43 @@ namespace uuepbs::ui
         draw_changed_only_filter();
         ImGui::SameLine();
         ImGui::AlignTextToFramePadding();
-        ImGui::TextColored(muted(), cat.changed ? "%zu of %zu parts changed. Click a number to type it."
-                           : cat.parts == 1 ? "%zu part. Click a number to type it." : "%zu parts. Click a number to type it.",
+        ImGui::TextColored(muted(), cat.changed ? "%zu of %zu sliders changed. Click a number to type it."
+                           : cat.parts == 1 ? "%zu slider. Click a number to type it." : "%zu sliders. Click a number to type it.",
                            cat.changed ? cat.changed : cat.parts, cat.parts);
         ImGui::PopFont();
         ImGui::Dummy(ImVec2(0.0f, dpi_px(4.0f)));
 
-        // Label column: widest part name in this category.
+        auto morph_section = [](const MorphGroupMorphs& mg) { return mg.group.section.empty() ? std::string("Morphs") : mg.group.section; };
+
+        // What this category holds: bone sizes, bone-built shapes, morph shapes.
+        size_t n_groups = 0, n_shapes = 0;
         float label_w = ImGui::CalcTextSize("Depth").x;
         for (const GroupBones& gb : m_body.groups)
         {
-            if (gb.group.section == cat.name)
+            if (gb.group.section == cat.name && !group_hidden(gb))
             {
-                label_w = std::max(label_w, ImGui::CalcTextSize(gb.group.title.c_str()).x);
+                ++n_groups;
+                label_w = std::max(label_w, ImGui::CalcTextSize(friendly_group_title(gb.group.title).c_str()).x);
+            }
+        }
+        for (const ScaleSlider* sl : m_body_sliders)
+        {
+            if (cat.name == sl->section && !slider_hidden(*sl))
+            {
+                ++n_shapes;
+                label_w = std::max(label_w, ImGui::CalcTextSize(sl->title).x);
             }
         }
         for (const MorphGroupMorphs& mg : m_morph_groups)
         {
-            if ((mg.group.section.empty() ? std::string("Morphs") : mg.group.section) == cat.name)
+            if (morph_section(mg) == cat.name)
             {
+                ++n_shapes;
                 label_w = std::max(label_w, ImGui::CalcTextSize(mg.group.title.c_str()).x);
             }
         }
         label_w = std::min(label_w + ImGui::GetFontSize() * 1.6f, ImGui::GetContentRegionAvail().x * 0.34f);
+        const bool captions = n_groups > 0 && n_shapes > 0 && !m_simplified_changed_only;
 
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(dpi_px(16.0f), dpi_px(14.0f)));
         ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(style.ItemSpacing.x, dpi_px(12.0f)));
@@ -1527,10 +1648,14 @@ namespace uuepbs::ui
         ImGui::PopStyleVar();
         size_t shown = 0; // rows left after the "Changed only" filter
 
+        if (captions)
+        {
+            row_caption("SIZE");
+        }
         for (const GroupBones& gb : m_body.groups)
         {
             const BodyGroup& g = gb.group;
-            if (g.section != cat.name || (m_simplified_changed_only && !group_changed(gb, m_book)))
+            if (g.section != cat.name || group_hidden(gb) || (m_simplified_changed_only && !group_changed(gb, m_book)))
             {
                 continue;
             }
@@ -1543,15 +1668,14 @@ namespace uuepbs::ui
                 write_group(gb, one);
                 s = scale_of(gb.bones.front(), g.spread);
             }
-            std::string tip = g.hint + "\nBones:";
-            for (const std::string& b : gb.bones)
-            {
-                tip += " " + b;
-            }
+            // Friendly tooltip; the bones themselves are listed under Advanced > Bones.
+            std::string tip = g.hint;
+            tip += tip.empty() ? "" : "\n";
+            tip += gb.bones.size() == 1 ? "Drives 1 bone (see Advanced > Bones)." : "Drives " + std::to_string(gb.bones.size()) + " bones (see Advanced > Bones).";
             bool& open = m_group_open[g.title];
             RowSpec spec;
             spec.id = "size";
-            spec.title = g.title;
+            spec.title = friendly_group_title(g.title);
             spec.tip = tip;
             spec.edited = s.has_scale();
             spec.lo = kScaleMin;
@@ -1590,6 +1714,7 @@ namespace uuepbs::ui
                     sub.tip = a == 0 ? "Along the bone (X)" : a == 1 ? "Sideways (Y)" : "Front to back (Z)";
                     sub.edited = std::fabs(s.axis[a] - 1.0) > 1e-6;
                     sub.has_axes = false;
+                    sub.reserve_axes = true;
                     sub.can_reset = sub.edited;
                     sub.label_w = label_w - ImGui::GetFontSize();
                     float av = static_cast<float>(s.axis[a]);
@@ -1605,10 +1730,55 @@ namespace uuepbs::ui
             ImGui::PopID();
         }
 
+        if (captions)
+        {
+            row_caption("SHAPE");
+        }
+        // Bone-built sliders (Penis length, Breast cleavage...): only on meshes with the bones and
+        // no named morph target for it (refresh_body_sliders, slider_hidden).
+        for (const ScaleSlider* sl : m_body_sliders)
+        {
+            const double value = scale_value(m_book, sl->id);
+            const bool edited = std::fabs(value - sl->neutral()) >= kScaleNeutralEps;
+            if (cat.name != sl->section || slider_hidden(*sl) || (m_simplified_changed_only && !edited))
+            {
+                continue;
+            }
+            ++shown;
+            const double neutral = sl->neutral();
+            if (reset_all && edited)
+            {
+                write_scale(*sl, neutral);
+            }
+            const size_t nb = scale_slider_bones(*sl, m_body).size();
+            RowSpec spec;
+            spec.id = sl->id;
+            spec.title = sl->title;
+            spec.tip = std::string(sl->hint) + "\n" +
+                       (nb == 1 ? std::string("Drives 1 bone (see Advanced > Bones).") : "Drives " + std::to_string(nb) + " bones (see Advanced > Bones).");
+            spec.edited = edited && !reset_all;
+            spec.lo = static_cast<float>(sl->lo);
+            spec.hi = static_cast<float>(sl->hi);
+            spec.log = !sl->offset();
+            spec.neutral = static_cast<float>(neutral);
+            spec.can_reset = edited && !reset_all;
+            spec.reserve_axes = n_groups > 0;
+            spec.label_w = label_w;
+            float v = reset_all ? static_cast<float>(neutral) : static_cast<float>(value);
+            const RowResult r = part_row(spec, v);
+            if (r.reset)
+            {
+                write_scale(*sl, neutral);
+            }
+            else if (r.changed)
+            {
+                write_scale(*sl, v);
+            }
+        }
+
         for (const MorphGroupMorphs& mg : m_morph_groups)
         {
-            if ((mg.group.section.empty() ? std::string("Morphs") : mg.group.section) != cat.name ||
-                (m_simplified_changed_only && !morph_group_changed(mg, m_morphs)))
+            if (morph_section(mg) != cat.name || (m_simplified_changed_only && !morph_group_changed(mg, m_morphs)))
             {
                 continue;
             }
@@ -1625,11 +1795,9 @@ namespace uuepbs::ui
             }
             bool reset = reset_all && current.has_value();
             std::string tip = mg.group.hint;
-            tip += tip.empty() ? "Morphs:" : "\nMorphs:";
-            for (const std::string& m : mg.morphs)
-            {
-                tip += " " + m;
-            }
+            tip += tip.empty() ? "" : "\n";
+            tip += mg.morphs.size() == 1 ? "A morph target of this mesh (see Advanced > Morphs)."
+                                         : "Drives " + std::to_string(mg.morphs.size()) + " morph targets (see Advanced > Morphs).";
             RowSpec spec;
             spec.id = "morph";
             spec.title = mg.group.title;
@@ -1640,6 +1808,7 @@ namespace uuepbs::ui
             spec.neutral = 0.0f;
             spec.unset = !current.has_value();
             spec.can_reset = current.has_value();
+            spec.reserve_axes = n_groups > 0;
             spec.label_w = label_w;
             float v = static_cast<float>(current.value_or(0.0));
             const RowResult r = part_row(spec, v);
@@ -1662,7 +1831,7 @@ namespace uuepbs::ui
         }
         if (shown == 0)
         {
-            ImGui::TextColored(muted(), "Nothing in %s is changed yet. Untick \"Changed only\" to see every part.", cat.name.c_str());
+            ImGui::TextColored(muted(), "Nothing in %s is changed yet. Untick \"Changed only\" to see every slider.", cat.name.c_str());
         }
         sk.end_child();
         ImGui::PopStyleVar();
@@ -1733,6 +1902,10 @@ namespace uuepbs::ui
 
     bool PanelView::scale_available(const ScaleSlider& sl) const
     {
+        if (sl.body)
+        {
+            return false; // a Body tab slider (universal morph)
+        }
         if (sl.groups.empty())
         {
             return true;
@@ -1812,6 +1985,11 @@ namespace uuepbs::ui
             {
                 ImGui::TextColored(muted(), "The whole character and every mesh it wears, scaled from the feet. Collision and the camera stay as they are.");
             }
+            else if (cat->name == "Muscle")
+            {
+                ImGui::TextColored(muted(), "Thickness only: arms, legs, neck and chest get bulkier without getting longer, and the hands, feet and "
+                                            "head keep their size. Muscle helper bones (biceps, quads...) grow along when the rig has them.");
+            }
             else
             {
                 ImGui::TextColored(muted(), "Lengths keep the hands, feet and head their own size. Hover a name to see its bones.");
@@ -1823,9 +2001,12 @@ namespace uuepbs::ui
             float label_w = 0.0f;
             for (const ScaleSlider& sl : scale_sliders())
             {
-                label_w = std::max(label_w, ImGui::CalcTextSize(sl.title).x);
+                if (!sl.body)
+                {
+                    label_w = std::max(label_w, ImGui::CalcTextSize(sl.title).x);
+                }
             }
-            label_w = std::min(label_w + ImGui::GetFontSize() * 1.6f, ImGui::GetContentRegionAvail().x * 0.34f);
+            label_w = std::min(label_w + ImGui::GetFontSize() * 1.6f, ImGui::GetContentRegionAvail().x * 0.42f);
 
             ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(dpi_px(16.0f), dpi_px(14.0f)));
             ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(style.ItemSpacing.x, dpi_px(12.0f)));
@@ -1847,18 +2028,9 @@ namespace uuepbs::ui
                 if (!sl.groups.empty())
                 {
                     tip += "\nBones:";
-                    for (const char* title : sl.groups)
+                    for (const std::string& b : scale_slider_bones(sl, m_body))
                     {
-                        for (const GroupBones& gb : m_body.groups)
-                        {
-                            if (fold_case(gb.group.title) == fold_case(title))
-                            {
-                                for (const std::string& b : gb.bones)
-                                {
-                                    tip += " " + b;
-                                }
-                            }
-                        }
+                        tip += " " + b;
                     }
                 }
                 RowSpec spec;
@@ -1891,7 +2063,7 @@ namespace uuepbs::ui
         size_t hidden = 0;
         for (const ScaleSlider& sl : scale_sliders())
         {
-            hidden += scale_available(sl) ? 0 : 1;
+            hidden += sl.body || scale_available(sl) ? 0 : 1;
         }
         ImGui::Dummy(ImVec2(0.0f, dpi_px(8.0f)));
         {
@@ -1903,8 +2075,10 @@ namespace uuepbs::ui
         ImGui::PushTextWrapPos(0.0f);
         const double height = scale_value(m_book, "height");
         const auto props = std::find_if(cats.begin(), cats.end(), [](const Category& c) { return c.name == "Proportions"; });
-        ImGui::TextColored(muted(), "Height %.0f%%. %zu of %zu proportion sliders changed.", height * 100.0, props != cats.end() ? props->changed : 0,
-                           props != cats.end() ? props->parts : 0);
+        const auto muscle = std::find_if(cats.begin(), cats.end(), [](const Category& c) { return c.name == "Muscle"; });
+        ImGui::TextColored(muted(), "Height %.0f%%. %zu of %zu proportion and %zu of %zu muscle sliders changed.", height * 100.0,
+                           props != cats.end() ? props->changed : 0, props != cats.end() ? props->parts : 0,
+                           muscle != cats.end() ? muscle->changed : 0, muscle != cats.end() ? muscle->parts : 0);
         if (hidden > 0)
         {
             ImGui::TextColored(muted(), "%zu slider%s hidden: this skeleton has no matching bones (see the Body tab's groups).", hidden,
@@ -2255,7 +2429,7 @@ namespace uuepbs::ui
         }
         ImGui::EndDisabled();
         ImGui::PushTextWrapPos(0.0f);
-        ImGui::TextColored(muted(), "A set morph replaces the game's value (even at 0); Reset gives it back. Type into a box for values outside 0..1.");
+        ImGui::TextColored(muted(), "A set morph replaces the game's value (even at 0); Reset gives it back. Sliders run from -5 to 5; click a box to type a value.");
         ImGui::PopTextWrapPos();
     }
 

@@ -276,14 +276,14 @@ namespace uuepbs
             bool first_scale = true;
             for (const ScaleSlider& sl : scale_sliders())
             {
-                const auto it = book.find(scale_key(sl.id));
-                if (it == book.end() || std::fabs(it->second.edit.axis[0] - 1.0) < kScaleNeutralEps)
+                const double value = scale_value(book, sl.id);
+                if (book.count(scale_key(sl.id)) == 0 || std::fabs(value - sl.neutral()) < kScaleNeutralEps)
                 {
                     continue;
                 }
                 out += first_scale ? "\n" : ",\n";
                 first_scale = false;
-                out += "    " + json_escape(sl.id) + ": " + json_number(it->second.edit.axis[0]);
+                out += "    " + json_escape(sl.id) + ": " + json_number(value);
             }
             out += first_scale ? "}" : "\n  }";
         }

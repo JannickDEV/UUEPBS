@@ -164,6 +164,9 @@ namespace uuepbs::ui
         bool scale_available(const ScaleSlider& sl) const;
         void write_scale(const ScaleSlider& sl, double value);
         void draw_category(const Category& cat);
+        void refresh_body_sliders();
+        bool group_hidden(const GroupBones& gb) const;
+        bool slider_hidden(const ScaleSlider& sl) const; // replaced by a named morph and not set
         // One slider row:  label | hairline track | number box (click to type) | [XYZ] | Reset.
         struct RowResult
         {
@@ -185,6 +188,7 @@ namespace uuepbs::ui
             const char* unset_hint{"game"};
             bool has_axes{false};
             bool axes_open{false};
+            bool reserve_axes{false}; // no XYZ button, but leave its space (tracks line up)
             bool can_reset{false};
             float label_w{0.0f};
         };
@@ -273,6 +277,11 @@ namespace uuepbs::ui
         uint64_t m_body_revision{0};
         std::string m_body_status{};
         std::map<std::string, std::string> m_bone_group{}; // folded bone -> Simplified Panel group title
+        // Body tab "universal morphs" (bone-built sliders, proportions.hpp) this mesh gets:
+        // it has the bones and no real morph target does the same job.
+        std::vector<const ScaleSlider*> m_body_sliders{};
+        std::set<std::string> m_covered_sliders{}; // ids of bone-built sliders a named morph target replaces
+        std::set<std::string> m_covered_groups{}; // Body tab group titles a named morph target replaces
         std::string m_mirror_text{};
         std::string m_version{};
         bool m_topmost{true};

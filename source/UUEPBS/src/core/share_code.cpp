@@ -260,14 +260,14 @@ namespace uuepbs::share
             bool first_scale = true;
             for (const ScaleSlider& sl : scale_sliders())
             {
-                const auto it = bones.find(scale_key(sl.id));
-                if (it == bones.end() || std::fabs(it->second.edit.axis[0] - 1.0) < kScaleNeutralEps)
+                const double value = scale_value(bones, sl.id);
+                if (bones.count(scale_key(sl.id)) == 0 || std::fabs(value - sl.neutral()) < kScaleNeutralEps)
                 {
                     continue;
                 }
                 out += first_scale ? "" : ",";
                 first_scale = false;
-                out += escape(sl.id) + ":" + number(it->second.edit.axis[0]);
+                out += escape(sl.id) + ":" + number(value);
             }
             out += "}";
         }

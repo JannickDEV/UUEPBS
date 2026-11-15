@@ -316,6 +316,29 @@ int main(int argc, char** argv)
         }
         refpose.assign(names.size(), xf::identity());
     }
+    else
+    {
+        // Anatomy bones the reference skeleton lacks, so the Body tab shows its bone-built
+        // "universal morphs" (core/bone_parts.hpp) under Groin.
+        int pelvis = 0;
+        for (int i = 0; i < (int)names.size(); ++i)
+            if (names[i] == "pelvis")
+                pelvis = i;
+        auto add_bone = [&](const char* n, int parent, double x) {
+            Xform b = xf::identity();
+            b.pos[0] = x;
+            names.push_back(n);
+            parents.push_back(parent);
+            refpose.push_back(b);
+            return (int)names.size() - 1;
+        };
+        const int p1 = add_bone("Penis_01", pelvis, 4.0);
+        const int p2 = add_bone("Penis_02", p1, 3.0);
+        const int p3 = add_bone("Penis_03", p2, 3.0);
+        add_bone("Penis_Glans", p3, 2.5);
+        add_bone("Testicle_L", pelvis, 3.0);
+        add_bone("Testicle_R", pelvis, 3.0);
+    }
     const int nb = (int)names.size();
     static std::vector<Xform> pose;
     pose.assign(names.size(), xf::identity());
@@ -354,7 +377,9 @@ int main(int argc, char** argv)
         reg.replace_edits(b);
     }
 
-    for (const auto& [id, v] : {std::pair{"height", 1.06}, {"head", 0.94}, {"leg_length", 1.08}, {"arm_length", 1.04}})
+    for (const auto& [id, v] : {std::pair{"height", 1.06}, {"head", 0.94}, {"leg_length", 1.08}, {"arm_length", 1.04}, {"muscle", 1.12},
+                                {"upper_arm_girth", 1.15}, {"thigh_girth", 1.1}, {"penis_length", 1.2},
+                                {"breast_cleavage", 0.3}, {"butt_lift", 0.25}, {"waist_width", 0.92}})
     {
         const EditEntry e = scale_entry(id, v);
         reg.set_bone(e.bone, e.edit);
@@ -379,7 +404,9 @@ int main(int argc, char** argv)
                          "Face_Smile", "Face_Blink_L", "Face_Blink_R", "Corrective_Elbow",
                          // not in the profile: sorted onto the Body tab by name (core/morph_sort)
                          "Morph_NippleHei", "Morph_WaistNarr", "Morph_HipsWide", "Morph_LegFat", "Morph_Chubby", "Form_Felian", "Look-Left",
-                         "Look-Right", "Exp_BrowUpL", "Exp_BrowUpR", "Oral_Open", "Speech_Ah", "Morph_SFinery", "Crctve_KneeCapL", "Morph_Helmet"});
+                         "Look-Right", "Exp_BrowUpL", "Exp_BrowUpR", "Oral_Open", "Speech_Ah", "Morph_SFinery", "Crctve_KneeCapL", "Morph_Helmet",
+                         // a real testicle morph: wins over the bone-built Testicle size slider
+                         "mGen_Balls"});
     {
         MorphProfile mp;
         std::string mm;
@@ -494,6 +521,10 @@ int main(int argc, char** argv)
                           {ui::PanelView::Tab::Detailed, 1, "preview_morphs.ppm"},
                           {ui::PanelView::Tab::Scale, -1, "preview_scale.ppm"},
                           {ui::PanelView::Tab::Scale, -1, "preview_scale_overall.ppm", false, 0, "Overall"},
+                          {ui::PanelView::Tab::Scale, -1, "preview_scale_muscle.ppm", false, 0, "Muscle"},
+                          {ui::PanelView::Tab::Simplified, -1, "preview_body_groin.ppm", false, 0, "Proportions", "Groin"},
+                          {ui::PanelView::Tab::Simplified, -1, "preview_body_chest.ppm", false, 0, "Proportions", "Chest"},
+                          {ui::PanelView::Tab::Simplified, -1, "preview_body_torso.ppm", false, 0, "Proportions", "Torso"},
                           {ui::PanelView::Tab::Presets, -1, "preview_presets.ppm"},
                           {ui::PanelView::Tab::Presets, -1, "preview_presets_list.ppm", false, 1},
                           {ui::PanelView::Tab::Presets, -1, "preview_presets_search.ppm", false, 2},

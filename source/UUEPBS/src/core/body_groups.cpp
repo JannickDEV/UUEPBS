@@ -532,6 +532,8 @@ namespace uuepbs
                 map.groups.push_back(std::move(r));
             }
         }
+        // 5) Anatomy parts (genitals...) among the bones no group took.
+        map.parts = resolve_bone_parts(names, &dict.rules, &taken);
         return map;
     }
 
