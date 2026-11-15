@@ -41,7 +41,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          short=$(git rev-parse --short HEAD)
+          # On a PR the checkout is GitHub's test merge; name the build after the PR's own commit.
+          sha="${{ github.event.pull_request.head.sha || github.sha }}"
+          short=${sha:0:7}
           echo "SHORT_SHA=$short" >> "$GITHUB_ENV"
           mkdir -p dist
           cp -r mod/UUEPBS dist/UUEPBS
@@ -49,7 +51,7 @@ jobs:
           cp build/Release/UUEPBS.dll dist/UUEPBS/native/UUEPBS.dll
           cat > dist/UUEPBS/BUILD.txt <<TXT
           UUEPBS build ${short}
-          Commit: ${GITHUB_SHA}
+          Commit: ${sha}
           Ref: ${GITHUB_REF}
           Built: $(date -u +%Y-%m-%dT%H:%M:%SZ) by GitHub Actions (MSVC x64 Release, Dear ImGui ${IMGUI_TAG})
 
