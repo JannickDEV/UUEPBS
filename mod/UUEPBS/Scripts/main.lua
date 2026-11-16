@@ -2035,6 +2035,21 @@ do
                 end
             end
         end
+        -- Scene copies (uuepbs_copies.lua): the same character in cutscenes and menu previews,
+        -- sent as extra meshes of that character after every character's own meshes.
+        if late.copies then
+            late.copies.set_sources(rigs, plannedAddr)
+            local used = {}
+            for _, r in ipairs(late.copies.rigs()) do
+                if #rigs >= MAX_MESHES then
+                    break
+                end
+                local k = r.actorKey .. "|" .. r.baseLabel
+                used[k] = (used[k] or 0) + 1
+                r.label = used[k] > 1 and (r.baseLabel .. " " .. used[k]) or r.baseLabel
+                rigs[#rigs + 1] = r
+            end
+        end
         local text = table.concat(leftOut, ", ")
         if text ~= leftOutText then
             leftOutText = text
@@ -2046,6 +2061,7 @@ do
         stateDirty = true
         rigsChanged = true
     end
+    late.assemble = assemble
 
     local function queue_key(key)
         if queued[key] or not planByKey[key] then
@@ -2974,6 +2990,54 @@ if Config.Looks ~= false then
     end
 end
 
+-- Scene copies (uuepbs_copies.lua): the edited character as cutscenes and menu previews show it
+-- (their own actors with the same mesh assets) gets the same sliders. Kept in `late` (local limit).
+if Config.SceneCopies ~= false then
+    local okC, mod = pcall(require, "uuepbs_copies")
+    if okC and type(mod) == "table" then
+        late.copies = mod
+        mod.setup({
+            say = say,
+            chatter = chatter,
+            match = Config.SceneCopyMatch,
+            alive = alive,
+            address_num = address_num,
+            mesh_prop = mesh_prop,
+            name_of = name_of,
+            full_name = full_name,
+            is_default_object = is_default_object,
+            still = still,
+            each_of = each_of,
+            now_ms = now_ms,
+            skel_class = function()
+                return engine_class("/Script/Engine.SkeletalMeshComponent")
+            end,
+            controller = function()
+                return (cachedController and alive(cachedController)) and cachedController or nil
+            end,
+            find_all = function()
+                return FindAllOf("SkeletalMeshComponent")
+            end,
+            -- A copy's mesh as a rig of the character it copies (never its main mesh).
+            build = function(comp, src)
+                local ok, h = pcall(read_hierarchy, comp, false)
+                if not ok or not h then
+                    return nil
+                end
+                local okm, morphs = pcall(read_morph_names, comp)
+                morphs = okm and morphs or nil
+                local engine = name_of(comp)
+                local base = late.mesh_label(comp, engine) .. " (scene copy)"
+                return { comp = comp, address = address_of(comp), label = base, baseLabel = base, primary = false, hierarchy = h,
+                    morphs = morphs, morphSet = morph_set(morphs), actorKey = src.key, ownerLabel = src.ownerLabel,
+                    engine = engine, ownerEngine = src.ownerEngine, full = full_name(comp), meshAddr = mesh_prop(comp), copy = true }
+            end,
+        })
+    else
+        say("scene copies off: %s", tostring(mod))
+    end
+end
+
 local function tick()
     local ok, err = pcall(function()
         if pendingProfileText then
@@ -3023,6 +3087,9 @@ local function tick()
         -- spread over several ticks instead of landing in one frame.
         if process_queue() then
             schedule_scan(0)
+        end
+        if late.copies and late.copies.tick(t) then
+            late.assemble() -- a cutscene / menu copy of an edited character came or went
         end
         if rigsChanged then
             rigsChanged = false
@@ -3127,6 +3194,36 @@ pcall(function()
     end)
 end)
 
+-- Scene copies: new skeletal meshes are looked at once their mesh is set (a few property reads);
+-- blueprints that put a mesh on a component, and scene captures (3D menu previews), start a short search.
+if late.copies then
+    pcall(function()
+        NotifyOnNewObject("/Script/Engine.SkeletalMeshComponent", function(obj)
+            late.copies.offer(obj)
+            return false
+        end)
+    end)
+    pcall(function()
+        NotifyOnNewObject("/Script/Engine.SceneCaptureComponent2D", function()
+            late.copies.poke("scene capture created")
+            return false
+        end)
+    end)
+    pcall(function() -- a function of its own: main.lua's main chunk is at Lua's limit of 200 locals
+        for _, fn in ipairs({ "/Script/Engine.SkeletalMeshComponent:SetSkeletalMesh", "/Script/Engine.SkeletalMeshComponent:SetSkeletalMeshAsset",
+            "/Script/Engine.SkinnedMeshComponent:SetSkinnedMeshAsset", "/Script/Engine.SkinnedMeshComponent:SetSkeletalMesh" }) do
+            pcall(RegisterHook, fn, function(self)
+                local okG, c = pcall(function()
+                    return self:get()
+                end)
+                if okG then
+                    late.copies.offer(c)
+                end
+            end)
+        end
+    end)
+end
+
 ---------------------------------------------------------------------------
 -- Console: uuepbs <command>  (ubs for short)
 ---------------------------------------------------------------------------
@@ -3138,7 +3235,7 @@ local function rest_of(params, first)
     return table.concat(parts, " ")
 end
 
-local usage = "uuepbs (or ubs) ui | status | rescan | list | load <name> | next | prev | save <name> | on | off | compare [on|off] | reset [all] | diag | skin [name] | morph <name> [weight]"
+local usage = "uuepbs (or ubs) ui | status | rescan | copies | list | load <name> | next | prev | save <name> | on | off | compare [on|off] | reset [all] | diag | skin [name] | morph <name> [weight]"
 
 local function console(_, params, out)
     local verb = string.lower(params[1] or "")
@@ -3159,7 +3256,20 @@ local function console(_, params, out)
         reply(string.format("script v%s, game '%s', profile '%s', character '%s', %d other edited character(s), %d mesh(es), hook %s", VERSION,
             projectName, Profile.name, targetInfo.label, math.max(0, #keptOrder - (keptSet[targetInfo.key] and 1 or 0)), #rigs, hookState))
         reply(scan_status())
+        if late.copies then
+            reply(late.copies.status())
+        end
         send_command("status", "", true)
+    elseif verb == "copies" then
+        if late.copies then
+            late.copies.search_now()
+            if late.copies.tick(now_ms()) then
+                late.assemble()
+            end
+            reply(late.copies.status())
+        else
+            reply("scene copies are off (SceneCopies in config.lua)")
+        end
     elseif verb == "load" or verb == "save" or verb == "skin" or verb == "morph" or verb == "reset" or verb == "compare" then
         send_command(verb, rest_of(params, 2), true)
     elseif verb == "list" or verb == "on" or verb == "off" or verb == "diag" or verb == "next" or verb == "prev" then

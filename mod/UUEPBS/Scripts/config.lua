@@ -92,6 +92,16 @@ return {
     -- body, hands, outfit pieces...). Characters that would not fit whole are left alone, farthest first.
     -- 8-64; the DLL never tracks more than 64.
     MaxTrackedMeshes = 64,
+    -- Scene copies: cutscenes, inventory / equipment screens and other menus often show the character
+    -- through an actor of their own that uses the same meshes. Those copies get the same sliders, so the
+    -- body doesn't snap back to its original sizes there. A copy has to share at least two of the
+    -- character's sculpted meshes (one when the character only has one) and must not be an AI-controlled
+    -- NPC sharing a single mesh. "ubs copies" searches for copies now and shows what was found.
+    -- false = only the characters themselves are sculpted.
+    SceneCopies = true,
+    -- "outfit" (the rule above) or "mesh": one shared mesh is enough, for games whose cutscene / menu
+    -- copies only reuse the body. Careful: NPCs that share the body mesh with the character then match too.
+    SceneCopyMatch = "outfit",
 
     -- How often the script talks to the DLL (console commands, picker, rescans).
     PollIntervalMs = 600,

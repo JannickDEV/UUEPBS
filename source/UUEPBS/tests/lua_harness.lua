@@ -1458,6 +1458,124 @@ if mode == "gon" then
     check(charSearches == cs, "no character sweeps for party-member files: " .. (charSearches - cs))
 end
 
+-- Scene copies (Scripts/uuepbs_copies.lua): cutscenes and menu previews show the character through
+-- actors of their own with the same mesh assets; those meshes get the character's sliders too.
+if mode == "gon" then
+    local SKEL = "/Script/Engine.SkeletalMeshComponent"
+    check(notifies[SKEL] ~= nil and notifies["/Script/Engine.SceneCaptureComponent2D"] ~= nil, "new meshes and scene captures watched")
+    local remember = "player@Lune_FaceMesh,player@Maelle_v2_FaceMesh"
+    -- the player has one mesh: a preview actor with just that body is a copy, an AI-controlled NPC sharing it is not
+    local aiNpc = obj("BP_Guard_C /Game/Maps/Lvl.Lvl:PersistentLevel.BP_Guard_C_8", { Controller = obj("AIController /Game/Maps/Lvl.Lvl:PersistentLevel.AIController_8") })
+    local aiBody = comp("CharacterMesh0", aiNpc, bodyMesh, boneNames, boneParents, false)
+    local doll = obj("BP_InventoryDoll_C /Game/UI/Inv.Inv:PersistentLevel.BP_InventoryDoll_C_0")
+    local dollBody = comp("PreviewBody", doll, bodyMesh, boneNames, boneParents, false)
+    for _, c in ipairs({ aiBody, dollBody }) do
+        allComps[#allComps + 1] = c
+        notifies[SKEL](c)
+    end
+    for _ = 1, 3 do loop() end
+    s = run_peer(5, 4, "auto", 5, "dll1", 0, "-", "-", remember)
+    check(s:find("rig %x+ PreviewBody %(scene copy%) primary=0 owner=BP_Rokuv3_C_1 %(player%)") and not s:find("rig %x+ CharacterMesh0 %(scene copy%)"),
+        "one-mesh character: the preview is a copy, the AI NPC is not:\n" .. s)
+    aiNpc._valid, aiBody._valid, doll._valid, dollBody._valid = false, false, false, false
+    for _ = 1, 2 do loop() end
+    -- the player wears a shirt again: body + shirt are its sculpted mesh assets
+    local shirt2 = comp("C_shirt1", actor, shirtMesh, boneNames, boneParents, false)
+    allComps[#allComps + 1] = shirt2
+    run_peer(6, 4, "auto", 5, "dll1", 0, "-", "-", remember)
+    for _ = 1, 4 do loop() end
+    s = run_peer(6, 4, "auto", 5, "dll1", 0, "-", "-", remember)
+    check(s:find("rig %x+ C_shirt1 primary=0 owner=BP_Rokuv3_C_1 %(player%)") and not s:find("scene copy", 1, true), "player with body and shirt, no copies yet:\n" .. s)
+    local scans0 = scanCalls
+    -- a cutscene actor appears: its body and shirt are copies; its hair (not sculpted on the player) is not
+    local cine = obj("BP_Cine_Roku_C /Game/Cine/Seq.Seq:PersistentLevel.BP_Cine_Roku_C_2147480001")
+    local cineBody = comp("SkeletalMeshComponent_7", cine, bodyMesh, boneNames, boneParents, false)
+    local cineShirt = comp("Shirt", cine, shirtMesh, boneNames, boneParents, false)
+    local cineHair = comp("Hair", cine, hairMesh, { "root", "fringe_01" }, { -1, 0 }, false)
+    -- an NPC that shares only the body mesh, controlled by an AI, and one nobody controls
+    local guard2 = obj("BP_Guard_C /Game/Maps/Lvl.Lvl:PersistentLevel.BP_Guard_C_9", { Controller = obj("AIController /Game/Maps/Lvl.Lvl:PersistentLevel.AIController_9") })
+    local guard2Body = comp("CharacterMesh0", guard2, bodyMesh, boneNames, boneParents, false)
+    local statue = obj("BP_Statue_C /Game/Maps/Lvl.Lvl:PersistentLevel.BP_Statue_C_1")
+    local statueBody = comp("Body", statue, bodyMesh, boneNames, boneParents, false)
+    -- an AI-controlled actor wearing the whole outfit (a cutscene character possessed by an AI) is a copy
+    local cine2 = obj("BP_Cine_Roku_C /Game/Cine/Seq.Seq:PersistentLevel.BP_Cine_Roku_C_2147480002", { Controller = obj("AIController /Game/Cine/Seq.Seq:PersistentLevel.AIController_2") })
+    local cine2Body = comp("CharacterMesh0", cine2, bodyMesh, boneNames, boneParents, false)
+    local cine2Shirt = comp("Shirt", cine2, shirtMesh, boneNames, boneParents, false)
+    -- and the player's own pawn while someone else... is the player: never a copy (it is sculpted already)
+    for _, c in ipairs({ cineBody, cineShirt, cineHair, guard2Body, statueBody, cine2Body, cine2Shirt }) do
+        allComps[#allComps + 1] = c
+        notifies[SKEL](c) -- constructed: the mesh is looked at a moment later
+    end
+    notifies[SKEL](body) -- an already sculpted mesh offered again is ignored
+    run_peer(6, 4, "auto", 5, "dll1", 0, "BreastSize=0.7", "-", remember)
+    for _ = 1, 3 do loop() end
+    s = run_peer(6, 4, "auto", 5, "dll1", 0, "BreastSize=0.7", "-", remember)
+    local _, copiesSent = s:gsub("\nrig [^\n]*%(scene copy%)", "")
+    check(copiesSent == 4, "two copies with body and shirt each:\n" .. s)
+    check(s:find("rig %x+ SkeletalMeshComponent_7 %(scene copy%) primary=0 owner=BP_Rokuv3_C_1 %(player%)"), "copy sent as the player's mesh:\n" .. s)
+    check(s:find("rig %x+ Shirt %(scene copy%) 2 primary=0"), "same label twice: numbered:\n" .. s)
+    check(not s:find("Hair", 1, true) and not s:find("BP_Guard_C_9", 1, true) and not s:find("\n[^\n]*Body %(scene copy%)"), "hair, AI NPC and statue left alone:\n" .. s)
+    check(cineBody._morphs.BreastSize == 0.7 and body._morphs.BreastSize == 0.7, "morphs reach the copy: " .. tostring(cineBody._morphs.BreastSize))
+    check(guard2Body._morphs.BreastSize == nil and statueBody._morphs.BreastSize == nil, "not the NPCs sharing a mesh")
+    check(scanCalls == scans0, "new meshes found without a world search: " .. (scanCalls - scans0))
+    check(table.concat(printed, ""):find("scene copy of BP_Rokuv3_C_1 (player) found: 2 mesh(es) on BP_Cine_Roku_C_2147480001", 1, true), "found logged")
+    -- the cutscene ends: its actor goes, its copies are dropped and their morphs left alone
+    cine._valid, cineBody._valid, cineShirt._valid, cineHair._valid = false, false, false, false
+    cine2._valid, cine2Body._valid, cine2Shirt._valid = false, false, false
+    for _ = 1, 2 do loop() end
+    s = run_peer(6, 4, "auto", 5, "dll1", 0, "BreastSize=0.7", "-", remember)
+    check(not s:find("scene copy", 1, true), "copies gone with their actor:\n" .. s)
+    -- a menu preview that existed before (only its mesh was set by native code): found by the search that
+    -- starts when the camera moves to another actor, and the one while the character is out of view
+    local preview = obj("BP_MenuPreview_C /Game/UI/Menu.Menu:PersistentLevel.BP_MenuPreview_C_0")
+    local previewBody = comp("Mesh", preview, bodyMesh, boneNames, boneParents, false)
+    local previewShirt = comp("Outfit", preview, shirtMesh, boneNames, boneParents, false)
+    allComps[#allComps + 1] = previewBody
+    allComps[#allComps + 1] = previewShirt
+    local view = actor
+    pc.GetViewTarget = function() return view end
+    local rendered = true
+    body.WasRecentlyRendered = function() return rendered end
+    for _ = 1, 80 do loop() end -- 32 s: the calls that failed before (not mocked yet) are tried again
+    check(scanCalls == scans0, "no search while the camera stays on the character: " .. (scanCalls - scans0))
+    view = obj("CineCameraActor /Game/Cine/Seq.Seq:PersistentLevel.CineCameraActor_1")
+    for _ = 1, 15 do loop() end
+    s = run_peer(6, 4, "auto", 5, "dll1", 0, "BreastSize=0.7", "-", remember)
+    local _, previewSent = s:gsub("\nrig [^\n]*%(scene copy%)", "")
+    check(previewSent == 2 and s:find("rig %x+ Mesh %(scene copy%)"), "menu preview found by the camera search:\n" .. s)
+    check(scanCalls - scans0 >= 1 and scanCalls - scans0 <= 3, "a short burst of searches: " .. (scanCalls - scans0))
+    check(previewBody._morphs.BreastSize == 0.7, "morphs reach the preview")
+    local burstEnd = scanCalls
+    for _ = 1, 30 do loop() end
+    check(scanCalls == burstEnd, "no more searches once the burst is over: " .. (scanCalls - burstEnd))
+    -- the character out of view (menu, loading screen): a burst, then a search every few seconds, a limited number of times
+    rendered = false
+    for _ = 1, 150 do loop() end -- 60 s
+    local awaySearches = scanCalls - burstEnd
+    check(awaySearches >= 4 and awaySearches <= 3 + 10, "searches while out of view are limited: " .. awaySearches)
+    rendered = true
+    view = actor
+    for _ = 1, 15 do loop() end
+    local back = scanCalls
+    for _ = 1, 30 do loop() end
+    check(scanCalls == back, "idle again once back in view: " .. (scanCalls - back))
+    -- the preview's mesh is swapped for another character's: dropped
+    previewBody.SkeletalMeshAsset = hairMesh
+    loop()
+    s = run_peer(6, 4, "auto", 5, "dll1", 0, "BreastSize=0.7", "-", remember)
+    check(not s:find("rig %x+ Mesh %(scene copy%)") and s:find("Outfit (scene copy)", 1, true), "copy with another mesh dropped:\n" .. s)
+    -- console: ubs copies searches now and reports
+    printed = {}
+    console.ubs("ubs copies", { "copies" }, { Log = function() end })
+    check(table.concat(printed, ""):find("scene copies: 1 mesh(es) now", 1, true), "ubs copies:\n" .. table.concat(printed, ""))
+    -- clean up for the checks below
+    preview._valid, previewBody._valid, previewShirt._valid = false, false, false
+    guard2._valid, guard2Body._valid, statue._valid, statueBody._valid = false, false, false, false
+    pc.GetViewTarget, body.WasRecentlyRendered = nil, nil
+    run_peer(6, 4, "auto", 5, "dll1", 0, "-", "-", remember)
+    for _ = 1, 15 do loop() end
+end
+
 -- DLL restarted (new session) must not replay old counters
 run_peer(5, 9, guardId, 3, "dll2")
 before = scanCalls

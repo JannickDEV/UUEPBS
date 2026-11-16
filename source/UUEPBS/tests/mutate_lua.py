@@ -1,4 +1,4 @@
-"""Mutation check for the Lua harness: breaks one behaviour of Scripts/main.lua at a time and
+"""Mutation check for the Lua harness: breaks one behaviour of Scripts/main.lua (or another script) at a time and
 expects lua_harness.lua to fail. Run from this folder:
 
     python mutate_lua.py ../../../mod/UUEPBS/Scripts ./bridge_peer /tmp/uuepbs [lua]
@@ -155,21 +155,43 @@ M = [
      "                    local shown = late.mesh_label(comp, label)", "                    local shown = label"),
     ("2.7.3: the choice not logged",
      "            say(\"%s (pick another in the window's Character list)\", text)", "            local _ = text"),
+    ("2.8: scene copies not sent to the DLL",
+     "                rigs[#rigs + 1] = r\n            end\n        end\n", "            end\n        end\n"),
+    ("2.8: scene copies coming and going not noticed",
+     "        if late.copies and late.copies.tick(t) then", "        if late.copies and late.copies.tick(t) and false then"),
+    ("2.8: new meshes not offered as scene copies",
+     "            late.copies.offer(obj)\n", "\n"),
+    # Scripts/uuepbs_copies.lua
+    ("2.8: an AI-controlled NPC sharing the body is a copy",
+     "        need = 2 -- an NPC", "        need = need -- an NPC", "uuepbs_copies.lua"),
+    ("2.8: one shared mesh is enough",
+     "    local need = math.min(2, keyAssets[src.key] or 1)", "    local need = 1", "uuepbs_copies.lua"),
+    ("2.8: copies kept after their actor went",
+     "        if not ctx.still(c.comp, c.full) then\n            drop(a, \"gone\")", "        if false then\n            drop(a, \"gone\")", "uuepbs_copies.lua"),
+    ("2.8: copies kept after a mesh swap",
+     "        elseif ctx.mesh_prop(c.comp) ~= c.asset then", "        elseif false then", "uuepbs_copies.lua"),
+    ("2.8: no search when the camera moves",
+     "    if vt and lastView and vt ~= lastView then", "    if false then", "uuepbs_copies.lua"),
+    ("2.8: searches while out of view never stop",
+     "and away.count < AWAY_MAX then", "then", "uuepbs_copies.lua"),
 ]
 
 bad = 0
 tmp = tempfile.mkdtemp(prefix="uuepbs_mut_")
 try:
-    for name, old, new in M:
-        if base.count(old) != 1:
+    for entry in M:
+        name, old, new = entry[:3]
+        fname = entry[3] if len(entry) > 3 else "main.lua"
+        text = base if fname == "main.lua" else open(os.path.join(scripts, fname), encoding="utf-8").read()
+        if text.count(old) != 1:
             print("PATTERN?", name)
             bad += 1
             continue
         target = os.path.join(tmp, "Scripts")
         shutil.rmtree(target, ignore_errors=True)
         shutil.copytree(scripts, target)
-        with open(os.path.join(target, "main.lua"), "w", encoding="utf-8") as f:
-            f.write(base.replace(old, new))
+        with open(os.path.join(target, fname), "w", encoding="utf-8") as f:
+            f.write(text.replace(old, new))
         caught = None
         for mode in ["gon", "generic", "nodir", "broken", "legacy", "polaris", "tekkenjson", "tekkenedit", "nobody", "names"]:
             r = subprocess.run([lua, "lua_harness.lua", target, peer, work, mode], capture_output=True, text=True)
