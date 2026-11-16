@@ -2054,7 +2054,130 @@ namespace uuepbs::ui
             it->parts++;
             it->changed += std::fabs(scale_value(m_book, sl.id) - sl.neutral()) >= kScaleNeutralEps ? 1 : 0;
         }
+        // Hand Contact and other animation fixes (not per-character sliders: one setting for every character)
+        HandOptions hands;
+        bool custom = false;
+        if (m_targets && m_targets->hand_contact(hands, custom))
+        {
+            Category c{"Animation"};
+            c.parts = 1;
+            out.push_back(c);
+        }
         return out;
+    }
+
+    void PanelView::draw_animation_fixes()
+    {
+        Skin& sk = skin();
+        const ImGuiStyle& style = ImGui::GetStyle();
+        HandOptions o;
+        bool custom = false;
+        if (!m_targets || !m_targets->hand_contact(o, custom))
+        {
+            return;
+        }
+        if (section_bar("Animation", "Use config.lua", custom))
+        {
+            m_targets->reset_hand_contact();
+            set_message("Hand Contact: back to the config.lua values");
+            return;
+        }
+        ImGui::PushFont(nullptr, style.FontSizeBase * 0.86f);
+        ImGui::PushTextWrapPos(0.0f);
+        ImGui::TextColored(muted(), "The game's animations are made for its own body. Hand Contact keeps hands that touch the body "
+                                    "(a hand on the hip, chest or anywhere else) on the edited body: the hand follows the body part it "
+                                    "rests on, and the arm bends to reach it. Works in every game and for every character; hands away "
+                                    "from the body are left alone.");
+        ImGui::PopTextWrapPos();
+        ImGui::PopFont();
+        ImGui::Dummy(ImVec2(0.0f, dpi_px(4.0f)));
+
+        bool changed = false;
+        bool on = o.enabled;
+        if (sk.checkbox("Hand Contact: keep hands on the body", &on))
+        {
+            o.enabled = on;
+            changed = true;
+            set_message(on ? "Hand Contact on" : "Hand Contact off");
+        }
+        tooltip("For every character. Remembered in the presets folder (_hand_contact.txt) and preferred over config.lua "
+                "(HandContact*). Console: ubs hands shows what each character plays and where each hand rests.");
+
+        const char* titles[] = {"Strength", "Contact distance", "Shoulder help", "Arm stretch"};
+        float label_w = 0.0f;
+        for (const char* t : titles)
+        {
+            label_w = std::max(label_w, ImGui::CalcTextSize(t).x);
+        }
+        label_w = std::min(label_w + ImGui::GetFontSize() * 1.6f, ImGui::GetContentRegionAvail().x * 0.42f);
+        const HandOptions def{};
+        auto row = [&](const char* id, const char* title, const char* tip, double& value, float lo, float hi, double neutral, const char* fmt,
+                       float shown_scale) {
+            RowSpec spec;
+            spec.id = id;
+            spec.title = title;
+            spec.tip = tip;
+            spec.edited = std::fabs(value - neutral) > 1.0e-4;
+            spec.lo = lo * shown_scale;
+            spec.hi = hi * shown_scale;
+            spec.neutral = static_cast<float>(neutral) * shown_scale;
+            spec.format = fmt;
+            spec.can_reset = spec.edited;
+            spec.label_w = label_w;
+            float v = static_cast<float>(value) * shown_scale;
+            const RowResult r = part_row(spec, v);
+            if (r.reset)
+            {
+                value = neutral;
+                changed = true;
+            }
+            else if (r.changed)
+            {
+                value = v / shown_scale;
+                changed = true;
+            }
+        };
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(dpi_px(16.0f), dpi_px(14.0f)));
+        ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(style.ItemSpacing.x, dpi_px(12.0f)));
+        sk.begin_child("##hand_group", ImVec2(0, 0), ImGuiChildFlags_Borders | ImGuiChildFlags_AutoResizeY | ImGuiChildFlags_AlwaysUseWindowPadding);
+        ImGui::PopStyleVar();
+        ImGui::BeginDisabled(!o.enabled);
+        row("hand_strength", "Strength", "How much of the correction is used. 100% puts the hand exactly where the edited body has that spot.",
+            o.strength, 0.0f, 1.0f, def.strength, "%.0f%%", 100.0f);
+        row("hand_far", "Contact distance",
+            "How close to the body (in the game's own animation) a hand has to be to count as touching it, as a share of the arm's "
+            "length. Larger catches hands hovering near the body too; smaller only hands right on it.",
+            o.fade_out, 0.1f, 1.5f, def.fade_out, "%.0f%%", 100.0f);
+        row("hand_shoulder", "Shoulder help",
+            "When the edited body puts the spot out of the arm's reach (a longer torso, a bigger body part), the shoulder may turn "
+            "toward it by up to this much.",
+            o.shoulder_turn, 0.0f, 60.0f, def.shoulder_turn, "%.0f deg", 1.0f);
+        row("hand_stretch", "Arm stretch",
+            "If the shoulder alone is not enough, the arm may grow by up to this much to reach. 1.00x never stretches.", o.stretch, 1.0f, 1.5f,
+            def.stretch, "%.2fx", 1.0f);
+        ImGui::EndDisabled();
+        sk.end_child();
+        ImGui::PopStyleVar();
+        if (o.fade_out < o.full_within + 0.05)
+        {
+            o.full_within = std::max(0.05, o.fade_out * 0.55);
+        }
+        if (changed)
+        {
+            m_targets->set_hand_contact(o);
+        }
+
+        // live readout for the character picked above
+        ImGui::Dummy(ImVec2(0.0f, dpi_px(6.0f)));
+        ImGui::PushFont(nullptr, style.FontSizeBase * 0.86f);
+        ImGui::PushTextWrapPos(0.0f);
+        ImGui::TextColored(muted(), "%s", custom ? "Using the values set here." : "Using the config.lua values (change one here to keep your own).");
+        for (const std::string& line : m_targets->hand_status())
+        {
+            ImGui::TextColored(muted(), "%s", line.c_str());
+        }
+        ImGui::PopTextWrapPos();
+        ImGui::PopFont();
     }
 
     void PanelView::draw_scale()
@@ -2082,7 +2205,11 @@ namespace uuepbs::ui
         Skin& sk = skin();
         const ImGuiStyle& style = ImGui::GetStyle();
         const auto cat = std::find_if(cats.begin(), cats.end(), [this](const Category& c) { return c.name == m_scale_section; });
-        if (cat != cats.end())
+        if (cat != cats.end() && cat->name == "Animation")
+        {
+            draw_animation_fixes();
+        }
+        else if (cat != cats.end())
         {
             const bool reset_all = section_bar(cat->name.c_str(), "Reset", cat->changed > 0);
             ImGui::PushFont(nullptr, style.FontSizeBase * 0.86f);

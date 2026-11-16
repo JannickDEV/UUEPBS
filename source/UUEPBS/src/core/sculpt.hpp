@@ -97,6 +97,9 @@ namespace uuepbs
         double full_within{0.25};    // fully corrected within this distance of a body bone, as a fraction of the arm's length
         double fade_out{0.45};   // not corrected beyond this distance (fraction of the arm's length)
         double strength{1.0}; // 0..1, how much of the correction is used
+        // When the edited body puts the spot out of the arm's reach (a longer torso, a bigger penis...):
+        double shoulder_turn{30.0}; // the collar bone may turn this far (degrees) toward it first,
+        double stretch{1.2};        // then the arm may grow up to this factor (1 = never) to get there
     };
 
     // An arm found by name: upper arm -> forearm -> hand (twist / roll helpers in between are allowed).
@@ -107,6 +110,7 @@ namespace uuepbs
         int32_t lower{-1};
         int32_t hand{-1};
         int32_t palm{-1};
+        int32_t collar{-1}; // clavicle / collar / shoulder bone above the upper arm, -1 if none
     };
 
     // Arms of a skeleton (at most four), found by bone names. IK, twist and control bones are skipped.
@@ -119,6 +123,9 @@ namespace uuepbs
         int32_t anchor{-1};  // the body bone it was nearest to
         double distance{0.0}; // distance (cm) from the palm to that bone in the game's pose
         double moved{0.0};   // how far (cm) the correction moved the hand
+        double shortfall{0.0}; // how far (cm) the hand stayed from where the body wants it (out of reach)
+        double turned{0.0};  // degrees the collar bone turned to help
+        double stretched{1.0}; // factor the arm grew by to help
     };
 
     // Bone edits keyed by case-folded bone name (FName comparison is case-insensitive).

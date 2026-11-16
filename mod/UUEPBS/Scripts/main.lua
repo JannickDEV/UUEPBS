@@ -2716,6 +2716,8 @@ local function build_state()
         "hands_near=" .. tostring(tonumber(Config.HandContactNear) or 0.25),
         "hands_far=" .. tostring(tonumber(Config.HandContactFar) or 0.45),
         "hands_strength=" .. tostring(tonumber(Config.HandContactStrength) or 1),
+        "hands_shoulder=" .. tostring(tonumber(Config.HandContactShoulderTurn) or 30),
+        "hands_stretch=" .. tostring(tonumber(Config.HandContactArmStretch) or 1.2),
         "hands_anims=" .. clean(Config.HandContactAnims or ""),
     }, "\t"))
     add("scan\t" .. scanCount)

@@ -174,10 +174,15 @@ return {
     -- body part it rests on (moved, turned and scaled with it), and the arm is bent with IK to reach it.
     -- Hands away from the body are not touched. Done by the DLL inside the pose, for every edited character.
     -- Console: "ubs hands" (what each character plays and where each hand rests; also in UUEPBS.log).
+    -- Easier: the window's Character Scale > Animation section has the same settings with sliders, and what you
+    -- set there (remembered in <presets folder>\_hand_contact.txt) wins over these until you press "Use config.lua".
     HandContact = true,
     HandContactNear = 0.25,  -- fully corrected within this distance of a body bone (x the arm's length)
     HandContactFar = 0.45,   -- not corrected beyond this distance (x the arm's length); in between it fades
     HandContactStrength = 1, -- 0..1, how much of the correction is used
+    -- When the edited body puts the spot out of the arm's reach (longer torso, bigger body part):
+    HandContactShoulderTurn = 30, -- the shoulder (collar bone) may turn this many degrees toward it
+    HandContactArmStretch = 1.2,  -- then the arm may grow up to this factor to reach (1 = never)
     -- Only while the character plays an animation (montage) whose name contains one of these words,
     -- comma separated, e.g. "Touch, Masturbat". "" = whenever a hand is close to the body.
     -- "ubs hands" shows the names of the animations playing.

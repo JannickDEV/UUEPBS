@@ -10,6 +10,7 @@
 //   * a hand far from the body (reference pose arm) is left exactly as without Hand Contact;
 //   * Hand Contact off changes nothing; applying twice on an unrefreshed buffer gives the same result;
 //   * arms are found by name on UE, Daz, Mixamo and VRoid style skeletons.
+#include "core/hand_settings.hpp"
 #include "core/sculpt.hpp"
 
 #include <algorithm>
@@ -339,9 +340,31 @@ static void find_arms_by_name()
     }
 }
 
+static void settings_file()
+{
+    HandOptions o;
+    o.enabled = false;
+    o.strength = 0.6;
+    o.fade_out = 0.7;
+    o.shoulder_turn = 45.0;
+    o.stretch = 1.35;
+    HandOptions back;
+    CHECK(hand_settings::read(hand_settings::write(o), back), "settings file not read back");
+    CHECK(!back.enabled && std::fabs(back.strength - 0.6) < 1e-6 && std::fabs(back.fade_out - 0.7) < 1e-6 &&
+              std::fabs(back.shoulder_turn - 45.0) < 1e-6 && std::fabs(back.stretch - 1.35) < 1e-6,
+          "settings changed on the way through the file");
+    HandOptions wild;
+    CHECK(hand_settings::read("strength=7\r\nstretch=-3\nshoulder=900\nfar=0.01\nnear=0.5\njunk\n# far=9\n", wild), "settings not read");
+    CHECK(wild.strength == 1.0 && wild.stretch == 1.0 && wild.shoulder_turn == 60.0 && wild.fade_out >= wild.full_within + 0.05 - 1e-9,
+          "settings not clamped");
+    HandOptions none;
+    CHECK(!hand_settings::read("# nothing here\n", none), "an empty file counted as settings");
+}
+
 int main(int argc, char** argv)
 {
     find_arms_by_name();
+    settings_file();
     if (argc < 4)
     {
         std::printf("usage: test_hands <skeleton_cache.txt> <bone count> <touched bone> [...]\n");
@@ -520,7 +543,74 @@ int main(int argc, char** argv)
         CHECK(worst < 1.0e-3, "hands away from the body were changed (%.3g)", worst);
     }
 
-    // 4) no edits at all: nothing is written even with Hand Contact on
+    // 4) a much longer torso with the hand on the thigh: the spot stays low while the shoulder rises, out of the
+    //    arm's reach. The collar bone turns toward it and the arm grows a little, so the palm still gets there.
+    {
+        const int32_t thigh = first_found(ref, {"thigh_r", "rthighbend", "rightupleg"});
+        const int32_t knee = thigh >= 0 ? first_found(ref, {"calf_r", "rshin", "rightleg"}) : -1;
+        const int32_t spine = first_found(ref, {"spine_01", "spine1", "spine"});
+        const int32_t pelvis = first_found(ref, {"pelvis", "hips", "hip"});
+        CHECK(thigh >= 0 && knee >= 0 && spine >= 0 && pelvis >= 0, "no thigh / spine bones");
+        if (thigh >= 0 && knee >= 0 && spine >= 0 && pelvis >= 0)
+        {
+            // as far down the thigh as the reference arm reaches
+            Skel low = ref;
+            double placed = 1.0e30;
+            for (double t : {0.25, 0.15, 0.05, -0.05, -0.15})
+            {
+                low = ref;
+                double g[3];
+                for (int k = 0; k < 3; ++k)
+                {
+                    g[k] = ref_pose[thigh].pos[k] + t * (ref_pose[knee].pos[k] - ref_pose[thigh].pos[k]);
+                }
+                placed = place_palm(low, arm, g);
+                if (placed < 3.0)
+                {
+                    break;
+                }
+            }
+            const std::vector<Xform> lsrc = component_pose(low);
+            double lp[3];
+            palm_point(lsrc, arm, lp);
+            EditBook book;
+            book[fold_case(ref.names[pelvis])] = entry(ref.names[pelvis], 1.2, 1.2, 1.2, Spread::Keep);
+            book[fold_case(ref.names[spine])] = entry(ref.names[spine], 1.6, 1.6, 1.6, Spread::Keep);
+            if (placed >= 3.0)
+            {
+                std::printf("longer torso: this reference pose's arm cannot reach the thigh (%.2f cm), case left out\n", placed);
+            }
+            RigSculptor rs;
+            const std::vector<Xform> off = run(low, book, 1.0, false);
+            const std::vector<Xform> on = run(low, book, 1.0, true, &rs);
+            Xform palm = xf::identity();
+            std::memcpy(palm.pos, lp, sizeof lp);
+            const Xform want = xf::compose(xf::relative(palm, lsrc[thigh]), off[thigh]);
+            double p_on[3], p_off[3], d_on[3], d_off[3];
+            palm_point(on, arm, p_on);
+            palm_point(off, arm, p_off);
+            sub(p_on, want.pos, d_on);
+            sub(p_off, want.pos, d_off);
+            size_t ai = 0;
+            for (size_t k = 0; k < rs.arms().size(); ++k)
+            {
+                if (rs.arms()[k].hand == arm.hand)
+                {
+                    ai = k;
+                }
+            }
+            const HandSample& hs = rs.hand_samples()[ai];
+            std::printf("longer torso, hand on %s (placed %.2f cm): palm %.2f cm off without, %.2f cm with; shoulder %.0f deg, arm x%.2f\n",
+                        ref.names[thigh].c_str(), placed, len3(d_off), len3(d_on), hs.turned, hs.stretched);
+            CHECK(placed >= 3.0 || len3(d_off) > 5.0, "the longer torso should pull the hand off the thigh (%.2f)", len3(d_off));
+            CHECK(placed >= 3.0 || len3(d_on) < 1.5, "palm did not reach the thigh (%.2f cm)", len3(d_on));
+            CHECK(placed >= 3.0 || hs.turned > 0.0 || hs.stretched > 1.0, "out of reach, yet neither shoulder nor arm helped");
+            CHECK(hs.stretched <= 1.2 + 1.0e-9 && hs.turned <= 30.0 + 1.0e-6, "shoulder / arm went past the limits");
+            CHECK(rs.arms()[ai].collar >= 0, "no collar bone found");
+        }
+    }
+
+    // 5) no edits at all: nothing is written even with Hand Contact on
     {
         RigSculptor rs;
         rs.set_skeleton(game.names, game.parents);

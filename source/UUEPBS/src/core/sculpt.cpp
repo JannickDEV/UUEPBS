@@ -371,7 +371,12 @@ namespace uuepbs
                     index = j;
                 }
             }
-            arms.push_back({upper, lower, h, palm >= 0 ? palm : index});
+            int32_t collar = up(upper);
+            if (collar >= 0 && !has_any(folded[collar], {"clav", "collar", "shoulder"}))
+            {
+                collar = -1;
+            }
+            arms.push_back({upper, lower, h, palm >= 0 ? palm : index, collar});
         }
         return arms;
     }
@@ -499,12 +504,17 @@ namespace uuepbs
         for (size_t ai = 0; ai < m_arms.size(); ++ai)
         {
             const ArmChain& arm = m_arms[ai];
-            for (size_t i = static_cast<size_t>(arm.upper); i < n; ++i)
+            const int32_t first = arm.collar >= 0 ? arm.collar : arm.upper;
+            for (size_t i = static_cast<size_t>(first); i < n; ++i)
             {
                 const int32_t bone = static_cast<int32_t>(i);
                 const int32_t p = m_parents[i];
                 uint8_t part = 0;
-                if (bone == arm.upper)
+                if (bone == arm.collar)
+                {
+                    part = 4; // collar and what hangs from it besides the upper arm
+                }
+                else if (bone == arm.upper)
                 {
                     part = 1;
                 }
@@ -1658,6 +1668,51 @@ namespace uuepbs
     // and everything below it take rotation `rot` and move with the wrist.
     void RigSculptor::reach_hand(const ArmChain& arm, size_t arm_index, const double target[3], const double rot[4])
     {
+        const int8_t ai = static_cast<int8_t>(arm_index);
+        HandSample& sample = m_hand_samples[arm_index];
+        // Out of reach: first turn the collar bone toward the spot (the shoulder comes along).
+        {
+            const double* h0 = m_fresh[arm.upper].pos;
+            const double* k0 = m_fresh[arm.lower].pos;
+            const double* f0 = m_fresh[arm.hand].pos;
+            const double hk0[3] = {k0[0] - h0[0], k0[1] - h0[1], k0[2] - h0[2]};
+            const double kf0[3] = {f0[0] - k0[0], f0[1] - k0[1], f0[2] - k0[2]};
+            const double ht0[3] = {target[0] - h0[0], target[1] - h0[1], target[2] - h0[2]};
+            const double reach0 = vlen(hk0) + vlen(kf0);
+            if (arm.collar >= 0 && m_in_plan[arm.collar] && m_hands.shoulder_turn > 0.0 && vlen(ht0) > reach0 * 0.999)
+            {
+                const double* C = m_fresh[arm.collar].pos;
+                const double Cc[3] = {C[0], C[1], C[2]};
+                const double ch[3] = {h0[0] - C[0], h0[1] - C[1], h0[2] - C[2]};
+                const double ct[3] = {target[0] - C[0], target[1] - C[1], target[2] - C[2]};
+                double axis[3];
+                vcross(ch, ct, axis);
+                const double al = vlen(axis);
+                const double full = std::atan2(al, vdot(ch, ct));
+                const double limit = std::min(180.0, m_hands.shoulder_turn) * 3.14159265358979323846 / 180.0;
+                const double angle = std::min(full, limit);
+                if (al > 1.0e-9 && angle > 1.0e-6)
+                {
+                    const double sh = std::sin(angle * 0.5);
+                    double q[4] = {axis[0] / al * sh, axis[1] / al * sh, axis[2] / al * sh, std::cos(angle * 0.5)};
+                    for (size_t i = static_cast<size_t>(arm.collar); i < m_names.size(); ++i)
+                    {
+                        if (m_arm_of[i] != ai || !m_in_plan[i])
+                        {
+                            continue;
+                        }
+                        Xform& x = m_fresh[i];
+                        turn_about(q, Cc, x.pos);
+                        double r[4];
+                        xf::qmul(q, x.rot, r);
+                        qnormalize(r);
+                        std::memcpy(x.rot, r, sizeof r);
+                    }
+                    sample.turned = angle * 180.0 / 3.14159265358979323846;
+                }
+            }
+        }
+
         const double H[3] = {m_fresh[arm.upper].pos[0], m_fresh[arm.upper].pos[1], m_fresh[arm.upper].pos[2]};
         const double K[3] = {m_fresh[arm.lower].pos[0], m_fresh[arm.lower].pos[1], m_fresh[arm.lower].pos[2]};
         const double F[3] = {m_fresh[arm.hand].pos[0], m_fresh[arm.hand].pos[1], m_fresh[arm.hand].pos[2]};
@@ -1665,14 +1720,19 @@ namespace uuepbs
 
         const double hk[3] = {K[0] - H[0], K[1] - H[1], K[2] - H[2]};
         const double kf[3] = {F[0] - K[0], F[1] - K[1], F[2] - K[2]};
-        const double a = vlen(hk), b = vlen(kf);
+        const double a0 = vlen(hk), b0 = vlen(kf);
         const double ht[3] = {target[0] - H[0], target[1] - H[1], target[2] - H[2]};
         double d = vlen(ht);
-        if (a < 1.0e-3 || b < 1.0e-3 || d < 1.0e-3)
+        if (a0 < 1.0e-3 || b0 < 1.0e-3 || d < 1.0e-3)
         {
             return;
         }
+        // still out of reach: the arm grows (up to `stretch`) to get there
+        const double grow = std::min(std::max(1.0, m_hands.stretch), std::max(1.0, d / ((a0 + b0) * 0.999)));
+        sample.stretched = grow;
+        const double a = a0 * grow, b = b0 * grow;
         const double u[3] = {ht[0] / d, ht[1] / d, ht[2] / d};
+        sample.shortfall = std::max(0.0, d - (a + b));
         d = std::min(a + b - 1.0e-4, std::max(std::fabs(a - b) + 1.0e-3, d));
 
         // bend direction: where the elbow points now, across the shoulder -> target line
@@ -1732,7 +1792,10 @@ namespace uuepbs
         xf::qmul(rot, inv, spin);
         qnormalize(spin);
 
-        const int8_t ai = static_cast<int8_t>(arm_index);
+        // the elbow after the upper arm's turn, before any growth: forearm bones move on with the grown upper arm
+        double elbow_turned[3] = {K[0], K[1], K[2]};
+        turn_about(r1, H, elbow_turned);
+        const double grow_shift[3] = {K2[0] - elbow_turned[0], K2[1] - elbow_turned[1], K2[2] - elbow_turned[2]};
         for (size_t i = static_cast<size_t>(arm.upper); i < m_names.size(); ++i)
         {
             if (m_arm_of[i] != ai || !m_in_plan[i])
@@ -1749,6 +1812,10 @@ namespace uuepbs
                 break;
             case 2: // forearm and what hangs from it above the wrist
                 turn_about(r1, H, x.pos);
+                for (int k = 0; k < 3; ++k)
+                {
+                    x.pos[k] += grow_shift[k];
+                }
                 turn_about(r2, K2, x.pos);
                 xf::qmul(r21, x.rot, q);
                 break;
@@ -1786,14 +1853,14 @@ namespace uuepbs
             return "no arms found (upper arm -> forearm -> hand by name)";
         }
         std::string s;
-        char line[256];
+        char line[384];
         for (size_t ai = 0; ai < m_arms.size(); ++ai)
         {
             const ArmChain& arm = m_arms[ai];
             const HandSample h = ai < m_hand_samples.size() ? m_hand_samples[ai] : HandSample{};
-            std::snprintf(line, sizeof line, "%s%s: %s %.1f cm away, corrected %.0f%%, moved %.1f cm", s.empty() ? "" : "; ",
-                          m_names[arm.hand].c_str(), h.anchor >= 0 ? m_names[h.anchor].c_str() : "no body bone", h.distance,
-                          h.weight * 100.0, h.moved);
+            std::snprintf(line, sizeof line, "%s%s: %s %.1f cm away, corrected %.0f%%, moved %.1f cm, shoulder turned %.0f deg, arm x%.2f, %.1f cm out of reach",
+                          s.empty() ? "" : "; ", m_names[arm.hand].c_str(), h.anchor >= 0 ? m_names[h.anchor].c_str() : "no body bone", h.distance,
+                          h.weight * 100.0, h.moved, h.turned, h.stretched, h.shortfall);
             s += line;
         }
         return s;

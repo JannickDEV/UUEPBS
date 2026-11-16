@@ -731,6 +731,62 @@ namespace uuepbs
         return out;
     }
 
+    std::vector<std::string> Registry::hand_status(const std::string& key) const
+    {
+        std::lock_guard guard(m_lock);
+        std::vector<std::string> out;
+        const auto it = m_playing.find(key);
+        out.push_back("Playing: " + (it == m_playing.end() || it->second.empty() ? std::string("no montage") : it->second));
+        for (const auto& rig : m_rigs)
+        {
+            if (rig->stale || !rig->primary || rig->actor_key != key || rig->frames == 0)
+            {
+                continue;
+            }
+            if (!m_hands.enabled)
+            {
+                break;
+            }
+            if (!hands_wanted_locked(*rig))
+            {
+                out.push_back("Waiting: this animation is not in HandContactAnims (config.lua).");
+                break;
+            }
+            if (rig->actor->book.empty())
+            {
+                out.push_back("No sliders on this character, nothing to correct.");
+                break;
+            }
+            const RigSculptor& sc = rig->sculptor;
+            if (sc.arms().empty())
+            {
+                out.push_back("No arms found on this skeleton (upper arm, forearm, hand by name).");
+                break;
+            }
+            const auto& names = sc.names();
+            for (size_t i = 0; i < sc.arms().size(); ++i)
+            {
+                const HandSample h = i < sc.hand_samples().size() ? sc.hand_samples()[i] : HandSample{};
+                char line[320];
+                if (h.weight <= 0.0)
+                {
+                    std::snprintf(line, sizeof line, "%s: free (nearest body part %s)", names[sc.arms()[i].hand].c_str(),
+                                  h.anchor >= 0 ? names[h.anchor].c_str() : "none close");
+                }
+                else
+                {
+                    std::snprintf(line, sizeof line, "%s: on %s, %.0f%% corrected, moved %.0f cm%s%s", names[sc.arms()[i].hand].c_str(),
+                                  h.anchor >= 0 ? names[h.anchor].c_str() : "?", h.weight * 100.0, h.moved,
+                                  h.turned > 0.5 || h.stretched > 1.005 ? ", shoulder/arm helping" : "",
+                                  h.shortfall > 0.5 ? ", still out of reach" : "");
+                }
+                out.push_back(line);
+            }
+            break;
+        }
+        return out;
+    }
+
     void Registry::bump_edits(Actor& actor)
     {
         actor.revision = m_edit_revision.fetch_add(1, std::memory_order_acq_rel) + 1;

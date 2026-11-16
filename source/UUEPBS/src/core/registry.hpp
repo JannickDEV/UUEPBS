@@ -194,6 +194,8 @@ namespace uuepbs
         void set_playing(std::map<std::string, std::string> playing);
         // One line per edited character's main mesh: what it plays and where each hand rests (diagnostics).
         std::string hands_report() const;
+        // The window's live readout for one character: what it plays, then one line per hand.
+        std::vector<std::string> hand_status(const std::string& key) const;
 
         bool enabled() const { return m_enabled.load(std::memory_order_relaxed); }
         void set_enabled(bool on); // also bumps the morph revision (morphs are sent to Lua only while enabled)

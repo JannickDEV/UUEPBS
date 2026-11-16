@@ -20,6 +20,7 @@
 #include "core/morphs.hpp"
 #include "core/preset_cycle.hpp"
 #include "core/presets.hpp"
+#include "core/hand_settings.hpp"
 #include "core/registry.hpp"
 #include "ui/panel_view.hpp"
 #include "win/pose_hook.hpp"
@@ -36,6 +37,7 @@
 #include <ctime>
 #include <filesystem>
 #include <fstream>
+#include <optional>
 #include <map>
 #include <mutex>
 #include <set>
@@ -337,6 +339,75 @@ namespace
             m_out.ground_on = on;
             m_ground_wish = on ? 1 : 0;
             m_out_dirty = true;
+        }
+
+        bool hand_contact(uuepbs::HandOptions& out, bool& custom) override
+        {
+            std::lock_guard guard(m_hand_lock);
+            if (!m_hand_known)
+            {
+                return false; // a script without Hand Contact settings
+            }
+            out = m_hand_ui ? *m_hand_ui : m_hand_config;
+            custom = m_hand_ui.has_value();
+            return true;
+        }
+
+        void set_hand_contact(const uuepbs::HandOptions& o) override
+        {
+            std::lock_guard guard(m_hand_lock);
+            m_hand_ui = uuepbs::hand_settings::clamp(o);
+            if (!m_hand_file.empty())
+            {
+                std::ofstream f(m_hand_file, std::ios::binary | std::ios::trunc);
+                f << uuepbs::hand_settings::write(*m_hand_ui);
+            }
+            apply_hands_locked();
+        }
+
+        void reset_hand_contact() override
+        {
+            std::lock_guard guard(m_hand_lock);
+            m_hand_ui.reset();
+            if (!m_hand_file.empty())
+            {
+                std::error_code ec;
+                fs::remove(m_hand_file, ec);
+            }
+            apply_hands_locked();
+        }
+
+        std::vector<std::string> hand_status() override
+        {
+            uuepbs::Registry& reg = uuepbs::Registry::instance();
+            return reg.hand_status(reg.active_actor());
+        }
+
+        // config.lua's values, or the window's while it has some (m_hand_lock held)
+        void apply_hands_locked()
+        {
+            if (!m_hand_known)
+            {
+                return;
+            }
+            uuepbs::HandOptions h = m_hand_ui ? *m_hand_ui : m_hand_config;
+            uuepbs::Registry& reg = uuepbs::Registry::instance();
+            const uuepbs::HandOptions old = reg.hands();
+            std::vector<std::string> folded;
+            for (const auto& a : m_hand_anims)
+            {
+                folded.push_back(uuepbs::fold_case(a));
+            }
+            if (old.enabled != h.enabled || old.full_within != h.full_within || old.fade_out != h.fade_out || old.strength != h.strength ||
+                old.shoulder_turn != h.shoulder_turn || old.stretch != h.stretch || reg.hand_anims() != folded)
+            {
+                reg.set_hands(h, m_hand_anims);
+                char line[256];
+                std::snprintf(line, sizeof line, "hand contact (%s): %s, strength %.2f, contact %.2f-%.2f x arm, shoulder %.0f deg, stretch %.2fx%s%s",
+                              m_hand_ui ? "window" : "config.lua", h.enabled ? "on" : "off", h.strength, h.full_within, h.fade_out, h.shoulder_turn,
+                              h.stretch, m_hand_list.empty() ? ", every animation" : ", only while playing: ", m_hand_list.c_str());
+                g_log.line(line);
+            }
         }
 
         std::string compare_hotkey_text() override
@@ -932,6 +1003,9 @@ namespace
                 h.full_within = std::strtod(state.setting("hands_near", "0.25").c_str(), nullptr);
                 h.fade_out = std::strtod(state.setting("hands_far", "0.45").c_str(), nullptr);
                 h.strength = std::strtod(state.setting("hands_strength", "1").c_str(), nullptr);
+                h.shoulder_turn = std::strtod(state.setting("hands_shoulder", "30").c_str(), nullptr);
+                h.stretch = std::strtod(state.setting("hands_stretch", "1.2").c_str(), nullptr);
+                h = uuepbs::hand_settings::clamp(h);
                 std::vector<std::string> anims;
                 const std::string list = state.setting("hands_anims");
                 for (size_t at = 0; at <= list.size();)
@@ -956,22 +1030,12 @@ namespace
                     }
                     at = comma + 1;
                 }
-                uuepbs::Registry& reg = uuepbs::Registry::instance();
-                const uuepbs::HandOptions old = reg.hands();
-                const std::vector<std::string> old_anims = reg.hand_anims();
-                std::vector<std::string> folded;
-                for (const auto& a : anims)
-                {
-                    folded.push_back(uuepbs::fold_case(a));
-                }
-                if (old.enabled != h.enabled || old.full_within != h.full_within || old.fade_out != h.fade_out || old.strength != h.strength || old_anims != folded)
-                {
-                    reg.set_hands(h, anims);
-                    g_log.line(std::string("hand contact: ") + (h.enabled ? "on" : "off") +
-                               (h.enabled ? ", near " + std::to_string(h.full_within) + ", far " + std::to_string(h.fade_out) + " (x arm length), strength " +
-                                                std::to_string(h.strength) + (list.empty() ? std::string(", every animation") : ", only while playing: " + list)
-                                          : std::string()));
-                }
+                std::lock_guard hand_guard(m_hand_lock);
+                m_hand_config = h;
+                m_hand_anims = anims;
+                m_hand_list = list;
+                m_hand_known = state.setup.count("hands") > 0;
+                apply_hands_locked();
             }
 
             const std::string folder = state.setting("presets");
@@ -987,6 +1051,24 @@ namespace
                 m_characters.set_log([](const std::string& t) { g_log.line(t); });
                 m_shelf_source = folder;
                 g_log.line("presets folder: " + uuepbs::path_to_utf8(m_shelf.folder()));
+                {
+                    // Hand Contact chosen in the window wins over config.lua while its file exists
+                    std::lock_guard hand_guard(m_hand_lock);
+                    m_hand_file = dir / uuepbs::hand_settings::kFileName;
+                    m_hand_ui.reset();
+                    std::ifstream in(m_hand_file, std::ios::binary);
+                    if (in)
+                    {
+                        const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+                        uuepbs::HandOptions o = m_hand_config;
+                        if (uuepbs::hand_settings::read(text, o))
+                        {
+                            m_hand_ui = o;
+                            g_log.line("hand contact: using the window's settings (" + uuepbs::path_to_utf8(m_hand_file) + ")");
+                        }
+                    }
+                    apply_hands_locked();
+                }
             }
 
             if (!m_shelf_ready)
@@ -1645,6 +1727,13 @@ namespace
         uuepbs::ThumbnailRequests m_thumbnail_requests; // preset thumbnails (same lock)
         uuepbs::bridge::LuaState m_state;
         uuepbs::bridge::DllState m_out;
+        std::mutex m_hand_lock; // Hand Contact settings below
+        bool m_hand_known{false};               // the script sent its HandContact settings
+        uuepbs::HandOptions m_hand_config{};    // config.lua
+        std::optional<uuepbs::HandOptions> m_hand_ui; // set in the window (_hand_contact.txt)
+        std::vector<std::string> m_hand_anims;  // config.lua HandContactAnims, split
+        std::string m_hand_list;
+        fs::path m_hand_file;
         int m_ground_wish{-1}; // Auto Ground switch clicked in the window and not yet confirmed by the script (m_lock)
         bool m_out_dirty{true};
         Clock::time_point m_last_publish{};
