@@ -1,5 +1,6 @@
 #include "panel_view.hpp"
 
+#include "../core/camera.hpp"
 #include "../core/proportions.hpp"
 
 #include "../core/character_names.hpp"
@@ -1946,7 +1947,7 @@ namespace uuepbs::ui
                 it = out.end() - 1;
             }
             it->parts++;
-            it->changed += std::fabs(scale_value(m_book, sl.id) - 1.0) >= kScaleNeutralEps ? 1 : 0;
+            it->changed += std::fabs(scale_value(m_book, sl.id) - sl.neutral()) >= kScaleNeutralEps ? 1 : 0;
         }
         return out;
     }
@@ -1983,7 +1984,13 @@ namespace uuepbs::ui
             ImGui::PushTextWrapPos(0.0f);
             if (cat->name == "Overall")
             {
-                ImGui::TextColored(muted(), "The whole character and every mesh it wears, scaled from the feet. Collision and the camera stay as they are.");
+                ImGui::TextColored(muted(), "The whole character and every mesh it wears, scaled from the feet. Collision stays as it is; "
+                                            "the Camera section moves the third-person camera with it.");
+            }
+            else if (cat->name == "Camera")
+            {
+                ImGui::TextColored(muted(), "The game's third-person camera while you play this character: its camera boom (spring arm) "
+                                            "when it has one, else its camera or eye height. Saved per character like the other sliders.");
             }
             else if (cat->name == "Muscle")
             {
@@ -2019,10 +2026,24 @@ namespace uuepbs::ui
                     continue;
                 }
                 const double value = scale_value(m_book, sl.id);
-                const bool edited = std::fabs(value - 1.0) >= kScaleNeutralEps;
+                const double neutral = sl.neutral();
+                const bool edited = std::fabs(value - neutral) >= kScaleNeutralEps;
                 if (reset_all && edited)
                 {
-                    write_scale(sl, 1.0);
+                    write_scale(sl, neutral);
+                }
+                if (sl.axes == ScaleAxes::CameraFollow)
+                {
+                    bool on = !reset_all && value >= 0.5;
+                    if (sk.checkbox(sl.title, &on))
+                    {
+                        write_scale(sl, on ? 1.0 : 0.0);
+                    }
+                    if (ImGui::IsItemHovered())
+                    {
+                        ImGui::SetTooltip("%s\nHeight is %.0f%% now.", sl.hint, scale_value(m_book, "height") * 100.0);
+                    }
+                    continue;
                 }
                 std::string tip = sl.hint;
                 if (!sl.groups.empty())
@@ -2040,15 +2061,19 @@ namespace uuepbs::ui
                 spec.edited = edited && !reset_all;
                 spec.lo = static_cast<float>(sl.lo);
                 spec.hi = static_cast<float>(sl.hi);
-                spec.log = true;
-                spec.neutral = 1.0f;
+                spec.log = !sl.offset();
+                spec.neutral = static_cast<float>(neutral);
+                if (sl.axes == ScaleAxes::CameraLift)
+                {
+                    spec.format = "%+.0f cm";
+                }
                 spec.can_reset = edited && !reset_all;
                 spec.label_w = label_w;
-                float v = reset_all ? 1.0f : static_cast<float>(value);
+                float v = reset_all ? static_cast<float>(neutral) : static_cast<float>(value);
                 const RowResult r = part_row(spec, v);
                 if (r.reset)
                 {
-                    write_scale(sl, 1.0);
+                    write_scale(sl, neutral);
                 }
                 else if (r.changed)
                 {
@@ -2079,6 +2104,17 @@ namespace uuepbs::ui
         ImGui::TextColored(muted(), "Height %.0f%%. %zu of %zu proportion and %zu of %zu muscle sliders changed.", height * 100.0,
                            props != cats.end() ? props->changed : 0, props != cats.end() ? props->parts : 0,
                            muscle != cats.end() ? muscle->changed : 0, muscle != cats.end() ? muscle->parts : 0);
+        {
+            const CameraWish cam = camera_wish(m_book);
+            if (!cam.active())
+            {
+                ImGui::TextColored(muted(), "Camera: the game's own.");
+            }
+            else
+            {
+                ImGui::TextColored(muted(), "Camera: %s%+.0f cm, distance %.2fx.", cam.follow ? "follows Height, " : "", cam.lift, cam.distance);
+            }
+        }
         if (hidden > 0)
         {
             ImGui::TextColored(muted(), "%zu slider%s hidden: this skeleton has no matching bones (see the Body tab's groups).", hidden,

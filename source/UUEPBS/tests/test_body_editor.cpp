@@ -151,6 +151,12 @@ int main()
         for (const ScaleSlider& sl : scale_sliders())
         {
             CHECK(find_scale_slider(sl.id) == &sl); // ids are unique
+            if (is_camera_axes(sl.axes))
+            {
+                // Character Scale > Camera: no bones; Follow height is a 0/1 toggle (off = neutral)
+                CHECK(!sl.body && sl.groups.empty() && sl.parts.empty() && sl.lo <= sl.neutral() && sl.hi > sl.neutral());
+                continue;
+            }
             CHECK(sl.lo < sl.neutral() && sl.hi > sl.neutral());
             CHECK(sl.offset() == (sl.amount > 0.0));
             if (sl.body)

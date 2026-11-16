@@ -9,6 +9,7 @@
 // while they have some (Lua is told which through edited_actors()).
 #pragma once
 
+#include "camera.hpp"
 #include "body_groups.hpp"
 #include "compare.hpp"
 #include "follow.hpp"
@@ -140,6 +141,8 @@ namespace uuepbs
         std::string active_actor() const;
         // Characters with any bone or morph edits (the active one included), active first.
         std::vector<ActorSummary> edited_actors() const;
+        // Character Scale > Camera of every character that wants the game's camera moved.
+        std::vector<std::pair<std::string, CameraWish>> camera_wishes() const;
         // Drops a character's edits (its meshes are released once Lua hears of it).
         // forget_memory: also forget the remembered identity (Release / reset all). A character that
         // merely despawned keeps its memory, so its sliders come back when it appears again.

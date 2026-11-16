@@ -670,6 +670,21 @@ namespace uuepbs
         return out;
     }
 
+    std::vector<std::pair<std::string, CameraWish>> Registry::camera_wishes() const
+    {
+        std::vector<std::pair<std::string, CameraWish>> out;
+        std::lock_guard guard(m_lock);
+        for (const auto& [key, a] : m_actors)
+        {
+            const CameraWish w = camera_wish(a.book);
+            if (w.active())
+            {
+                out.emplace_back(key, w);
+            }
+        }
+        return out;
+    }
+
     std::vector<ActorSummary> Registry::edited_actors() const
     {
         std::vector<ActorSummary> out;

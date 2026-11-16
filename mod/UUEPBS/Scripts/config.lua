@@ -103,6 +103,14 @@ return {
     -- copies only reuse the body. Careful: NPCs that share the body mesh with the character then match too.
     SceneCopyMatch = "outfit",
 
+    -- Character Scale > Camera: moves the third-person camera of the character you play (its spring arm /
+    -- camera boom, else its camera component, else its eye height) by the Camera sliders, e.g. up with
+    -- Height. "ubs camera" shows what was found. false = the game's camera is never touched.
+    CameraControl = true,
+    -- How often (ms) the camera offset is checked and written again while a character has Camera sliders.
+    -- Nothing runs at this rate when no character has them.
+    CameraPollMs = 50,
+
     -- How often the script talks to the DLL (console commands, picker, rescans).
     PollIntervalMs = 600,
     -- How often it checks that the characters and their meshes are still the same.
