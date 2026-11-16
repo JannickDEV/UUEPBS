@@ -12,8 +12,11 @@
 --   2. A head shot: a SceneCapture2D is placed in front of the head bone, renders only that character
 --      into a small render target, and is removed again. "PortraitBone", "PortraitDistance" (cm) and
 --      "PortraitFov" (degrees) in the game profile tune it.
--- The render target is written with KismetRenderingLibrary::ExportRenderTarget (PNG), or, if that
--- is not available, read back pixel by pixel and encoded here.
+-- The render target comes from KismetRenderingLibrary::CreateRenderTarget2D, or from
+-- CanvasRenderTarget2D::CreateCanvasRenderTarget2D where that one is unusable. It is written with
+-- KismetRenderingLibrary::ExportRenderTarget (PNG), or, if that is not available, read back pixel by
+-- pixel and encoded here. Engine calls go through ucall(), which fits the argument list to the
+-- running engine's version of each function (UE4SS refuses a call with a different count).
 --
 -- Preset thumbnails (native\thumbnail_requests.txt, written when a preset is saved) use the same
 -- machinery with a whole-body shot, saved as "<presets>\_library\<preset>.auto.png". "ThumbnailDistance"
@@ -122,24 +125,104 @@ local function statics()
     return find("/Script/Engine.Default__GameplayStatics")
 end
 
-local function make_target(world)
-    local r = lib()
-    if not r then
+-- UE4SS only calls a UFunction with exactly as many arguments as it has parameters, defaulted ones
+-- included ("UFunction expected 7 parameters, received 6"), and engine versions keep adding defaulted
+-- parameters at the end: CreateRenderTarget2D got bSupportUAVs in UE5, BeginDeferredActorSpawnFromClass and
+-- FinishSpawningActor got TransformScaleMethod in 5.3, ShowOnlyActorComponents and GetActorBounds got
+-- bIncludeFromChildActors in 4.2x. So each call is written for one signature; when UE4SS answers with a
+-- different count, the list is cut short or filled from `pad` (values for the newer parameters, in order)
+-- and the call made again. The count that worked is remembered per function.
+-- args/pad: tables with an explicit n (arguments can be nil). Returns ok, results... or false, error.
+local arity = {}
+
+local function fit(args, pad, want)
+    if want <= args.n then
+        return table.pack(table.unpack(args, 1, want))
+    end
+    local extra = want - args.n
+    if not pad or extra > (pad.n or #pad) then
         return nil
     end
-    -- RTF_RGBA8 = 2; transparent clear colour; no mips
-    local ok, rt = pcall(function()
-        return r:CreateRenderTarget2D(world, SIZE, SIZE, 2, { R = 0, G = 0, B = 0, A = 0 }, false)
-    end)
-    return (ok and valid(rt)) and rt or nil
+    local out = table.pack(table.unpack(args, 1, args.n))
+    for i = 1, extra do
+        out[args.n + i] = pad[i]
+    end
+    out.n = want
+    return out
+end
+
+local function ucall(obj, name, args, pad)
+    if not obj then
+        return false, "no object for " .. name
+    end
+    local list = args
+    if arity[name] and arity[name] ~= args.n then
+        list = fit(args, pad, arity[name]) or args
+    end
+    local function call(l)
+        return pcall(function()
+            return obj[name](obj, table.unpack(l, 1, l.n))
+        end)
+    end
+    local res = table.pack(call(list))
+    if not res[1] then
+        local want = tonumber(tostring(res[2]):match("expected (%d+) param"))
+        local again = want and want ~= list.n and fit(args, pad, want)
+        if again then
+            res = table.pack(call(again))
+            list = again
+        end
+    end
+    if res[1] then
+        arity[name] = list.n
+    end
+    return table.unpack(res, 1, res.n)
+end
+
+local function short(err)
+    local s = tostring(err):gsub("^%[.-%]%s*", ""):gsub("%s+", " ")
+    return #s > 160 and s:sub(1, 160) .. "..." or s
+end
+
+-- A 256x256 RGBA8 render target, or nil and why not. KismetRenderingLibrary::CreateRenderTarget2D first;
+-- games that strip or block it still have CanvasRenderTarget2D::CreateCanvasRenderTarget2D, whose
+-- target is switched to RGBA8 (an RGBA16f one would be exported as HDR, not PNG).
+-- Returns rt, readOnly (true: only the read-back path may save it).
+local function make_target(world)
+    local why = {}
+    local r = lib()
+    if r then
+        -- RTF_RGBA8 = 2; transparent clear colour; no mips; (UE5) no UAVs
+        local ok, rt = ucall(r, "CreateRenderTarget2D", table.pack(world, SIZE, SIZE, 2, { R = 0, G = 0, B = 0, A = 0 }, false), table.pack(false))
+        if ok and valid(rt) then
+            return rt, false
+        end
+        why[#why + 1] = "CreateRenderTarget2D: " .. (ok and "returned nothing" or short(rt))
+    else
+        why[#why + 1] = "no KismetRenderingLibrary"
+    end
+    local canvas, cls = find("/Script/Engine.Default__CanvasRenderTarget2D"), find("/Script/Engine.CanvasRenderTarget2D")
+    if canvas and cls then
+        local ok, rt = ucall(canvas, "CreateCanvasRenderTarget2D", table.pack(world, cls, SIZE, SIZE))
+        if ok and valid(rt) then
+            local rgba8 = pcall(function()
+                rt.RenderTargetFormat = 2
+                rt.ClearColor = { R = 0, G = 0, B = 0, A = 0 }
+            end)
+            rgba8 = rgba8 and ucall(rt, "UpdateResourceImmediate", table.pack(true))
+            return rt, not rgba8
+        end
+        why[#why + 1] = "CreateCanvasRenderTarget2D: " .. (ok and "returned nothing" or short(rt))
+    else
+        why[#why + 1] = "no CanvasRenderTarget2D"
+    end
+    return nil, table.concat(why, "; ")
 end
 
 local function release_target(world, rt)
     local r = lib()
     if r and rt then
-        pcall(function()
-            r:ReleaseRenderTarget2D(rt)
-        end)
+        ucall(r, "ReleaseRenderTarget2D", table.pack(rt))
     end
 end
 
@@ -153,22 +236,18 @@ local function file_size(path)
     return n
 end
 
-local function save_target(world, rt, folder, file)
+local function save_target(world, rt, folder, file, readOnly)
     local path = folder .. "\\" .. file
     os.remove(path)
     local r = lib()
-    if r then
-        pcall(function()
-            r:ExportRenderTarget(world, rt, folder, file)
-        end)
+    if r and not readOnly then
+        ucall(r, "ExportRenderTarget", table.pack(world, rt, folder, file))
         if file_size(path) > 64 then
             return "exported"
         end
     end
-    -- Fallback: read the pixels back and encode here.
-    local ok, arr = pcall(function()
-        return r:ReadRenderTargetRaw(world, rt, false)
-    end)
+    -- Fallback: read the pixels back (normalised to 0..1) and encode here.
+    local ok, arr = ucall(r, "ReadRenderTargetRaw", table.pack(world, rt, true))
     if not ok or not arr then
         return nil
     end
@@ -297,9 +376,7 @@ local function draw_texture(world, rt, tex)
         return false
     end
     local canvasOut, sizeOut, ctxOut = {}, {}, {}
-    local ok, a, b, c = pcall(function()
-        return r:BeginDrawCanvasToRenderTarget(world, rt, canvasOut, sizeOut, ctxOut)
-    end)
+    local ok, a, b, c = ucall(r, "BeginDrawCanvasToRenderTarget", table.pack(world, rt, canvasOut, sizeOut, ctxOut))
     if not ok then
         log("BeginDrawCanvasToRenderTarget failed: %s", tostring(a))
         return false
@@ -308,18 +385,12 @@ local function draw_texture(world, rt, tex)
     local context = (c ~= nil and c) or ctxOut.Context or ctxOut
     if not valid(canvas) then
         log("no Canvas came back from BeginDrawCanvasToRenderTarget")
-        pcall(function()
-            r:EndDrawCanvasToRenderTarget(world, context)
-        end)
+        ucall(r, "EndDrawCanvasToRenderTarget", table.pack(world, context))
         return false
     end
-    local drawn = pcall(function()
-        canvas:K2_DrawTexture(tex, { X = 0, Y = 0 }, { X = SIZE, Y = SIZE }, { X = 0, Y = 0 }, { X = 1, Y = 1 }, { R = 1, G = 1, B = 1, A = 1 }, 0, 0,
-            { X = 0.5, Y = 0.5 })
-    end)
-    pcall(function()
-        r:EndDrawCanvasToRenderTarget(world, context)
-    end)
+    local drawn = ucall(canvas, "K2_DrawTexture", table.pack(tex, { X = 0, Y = 0 }, { X = SIZE, Y = SIZE }, { X = 0, Y = 0 }, { X = 1, Y = 1 },
+        { R = 1, G = 1, B = 1, A = 1 }, 0, 0, { X = 0.5, Y = 0.5 }))
+    ucall(r, "EndDrawCanvasToRenderTarget", table.pack(world, context))
     return drawn
 end
 
@@ -338,15 +409,17 @@ local function scene_shot(actor, rt, centre, dist, fov, lift, pitch)
     local yaw = math.deg(math.atan(fwd.Y, fwd.X)) + 180
     local xf = { Rotation = quat(pitch, yaw, 0), Translation = cam, Scale3D = { X = 1, Y = 1, Z = 1 } }
 
-    local cap = nil
-    local ok, err = pcall(function()
-        cap = gs:BeginDeferredActorSpawnFromClass(actor, cls, xf, 1, nil) -- 1 = always spawn
-        if valid(cap) then
-            gs:FinishSpawningActor(cap, xf)
-        end
-    end)
+    -- 1 = always spawn; no owner; (UE5.3+) scale method 1 = multiply with root
+    local ok, cap = ucall(gs, "BeginDeferredActorSpawnFromClass", table.pack(actor, cls, xf, 1, nil), table.pack(1))
     if not ok or not valid(cap) then
-        return false, "could not spawn a SceneCapture2D (" .. tostring(err) .. ")"
+        return false, "could not spawn a SceneCapture2D (" .. (ok and "nothing came back" or short(cap)) .. ")"
+    end
+    local finished, ferr = ucall(gs, "FinishSpawningActor", table.pack(cap, xf), table.pack(1))
+    if not finished then
+        pcall(function()
+            cap:K2_DestroyActor()
+        end)
+        return false, "could not finish spawning the SceneCapture2D (" .. short(ferr) .. ")"
     end
     local shot, why = pcall(function()
         local comp = cap.CaptureComponent2D
@@ -356,14 +429,17 @@ local function scene_shot(actor, rt, centre, dist, fov, lift, pitch)
         comp.bCaptureOnMovement = false
         comp.FOVAngle = fov
         comp.PrimitiveRenderMode = 2 -- only what is in the show-only list
-        comp:ShowOnlyActorComponents(actor, true)
+        local shown, err = ucall(comp, "ShowOnlyActorComponents", table.pack(actor, true))
+        if not shown then
+            error(err, 0)
+        end
         comp:CaptureScene()
     end)
     pcall(function()
         cap:K2_DestroyActor()
     end)
     if not shot then
-        return false, "capture failed: " .. tostring(why)
+        return false, "capture failed: " .. short(why)
     end
     return true
 end
@@ -389,9 +465,7 @@ local function body_shot(actor, rt)
     local centre, dist, how = nil, tonumber(profile.ThumbnailDistance), nil
     if not dist then
         local originOut, extentOut = {}, {}
-        local ok, a, b = pcall(function()
-            return actor:GetActorBounds(true, originOut, extentOut, false)
-        end)
+        local ok, a, b = ucall(actor, "GetActorBounds", table.pack(true, originOut, extentOut, false))
         if ok then
             local origin = vec(type(a) == "userdata" and a or nil) or vec(originOut.Origin) or vec(originOut)
             local extent = vec(type(b) == "userdata" and b or nil) or vec(extentOut.BoxExtent) or vec(extentOut)
@@ -452,9 +526,9 @@ end
 local function take(actor, stem)
     local folder = ctx.folder
     local file = stem .. ".auto.png"
-    local rt = make_target(actor)
+    local rt, readOnly = make_target(actor)
     if not rt then
-        return false, "could not create a render target"
+        return false, "could not create a render target (" .. tostring(readOnly) .. ")"
     end
     local how
     local tex, path = game_texture(actor)
@@ -468,7 +542,7 @@ local function take(actor, stem)
         end
         how = why
     end
-    local saved = save_target(actor, rt, folder, file)
+    local saved = save_target(actor, rt, folder, file, readOnly)
     release_target(actor, rt)
     if not saved then
         return false, "could not save the picture (" .. how .. ")"
@@ -479,16 +553,16 @@ end
 -- Preset thumbnail: always the whole character (the game's portrait shows a face, not a shape).
 local function take_thumbnail(actor, name)
     local file = name .. ".auto.png"
-    local rt = make_target(actor)
+    local rt, readOnly = make_target(actor)
     if not rt then
-        return false, "could not create a render target"
+        return false, "could not create a render target (" .. tostring(readOnly) .. ")"
     end
     local ok, how = body_shot(actor, rt)
     if not ok then
         release_target(actor, rt)
         return false, how
     end
-    local saved = save_target(actor, rt, ctx.thumb_folder, file)
+    local saved = save_target(actor, rt, ctx.thumb_folder, file, readOnly)
     release_target(actor, rt)
     if not saved then
         return false, "could not save the picture (" .. how .. ")"
