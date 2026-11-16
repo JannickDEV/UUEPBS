@@ -85,6 +85,42 @@ namespace uuepbs
     // control bones are skipped.
     std::vector<LegChain> find_legs(const std::vector<std::string>& names, const std::vector<int32_t>& parents);
 
+    // Hand contact ("Hand Contact"). The game animates the hands for its own body: after body edits a hand that
+    // rests on the body in the animation (a self-touch, a hand on the hip or chest) floats in the air or sinks into
+    // the body. With this on, each hand that is close to a body bone in the game's own pose (before our edits) is
+    // carried along with that part of the body: its place relative to the nearby bones is kept through their edits
+    // (moved, turned and scaled with them), and the arm is bent with a two-bone IK to reach it. The closer the hand
+    // is to the body, the more it is corrected (fully within `near`, not at all beyond `far`), so nothing jumps.
+    struct HandOptions
+    {
+        bool enabled{false};
+        double full_within{0.25};    // fully corrected within this distance of a body bone, as a fraction of the arm's length
+        double fade_out{0.45};   // not corrected beyond this distance (fraction of the arm's length)
+        double strength{1.0}; // 0..1, how much of the correction is used
+    };
+
+    // An arm found by name: upper arm -> forearm -> hand (twist / roll helpers in between are allowed).
+    // `palm` is the middle (else index) finger's first bone below the hand, -1 if none.
+    struct ArmChain
+    {
+        int32_t upper{-1};
+        int32_t lower{-1};
+        int32_t hand{-1};
+        int32_t palm{-1};
+    };
+
+    // Arms of a skeleton (at most four), found by bone names. IK, twist and control bones are skipped.
+    std::vector<ArmChain> find_arms(const std::vector<std::string>& names, const std::vector<int32_t>& parents);
+
+    // What Hand Contact did to one arm on the last apply() (diagnostics).
+    struct HandSample
+    {
+        double weight{0.0};  // 0..1 how much the hand was corrected
+        int32_t anchor{-1};  // the body bone it was nearest to
+        double distance{0.0}; // distance (cm) from the palm to that bone in the game's pose
+        double moved{0.0};   // how far (cm) the correction moved the hand
+    };
+
     // Bone edits keyed by case-folded bone name (FName comparison is case-insensitive).
     struct EditEntry
     {
@@ -165,6 +201,15 @@ namespace uuepbs
         // Secondary rigs: the last apply() found its pose copied from the main mesh's grounded pose.
         bool follows_body() const { return m_follows; }
 
+        // ---- Hand Contact -----------------------------------------------------------
+        // Changing whether it is on forces a re-plan on the next bind (the arms are rebuilt while it is on).
+        void set_hands(const HandOptions& options);
+        const HandOptions& hands() const { return m_hands; }
+        const std::vector<ArmChain>& arms() const { return m_arms; }
+        // Per arm (same order as arms()): what the last apply() did.
+        const std::vector<HandSample>& hand_samples() const { return m_hand_samples; }
+        std::string hands_report() const;
+
         // ---- meshes that copy the main mesh's pose ----------------------------------
         // A head or outfit mesh driven by Copy Pose / Leader Pose from the main mesh already carries every edit
         // the main mesh got; editing it again doubles them (a shorter torso pulls its neck away from the body's).
@@ -227,6 +272,8 @@ namespace uuepbs
         void decide_copy();
         void bend_leg(const LegChain& leg, size_t leg_index, double drop);
         double contact_sink(const LegChain& leg) const;
+        void apply_hands(const Xform* pose);
+        void reach_hand(const ArmChain& arm, size_t arm_index, const double target[3], const double rot[4]);
 
         std::vector<std::string> m_names;
         std::vector<std::string> m_folded;
@@ -291,5 +338,24 @@ namespace uuepbs
         // per leg, last apply(): ankle sink, sole sink, most lift its reach allows; and the lift before the reach limit
         std::array<std::array<double, 3>, 4> m_leg_diag{};
         double m_raw_lift{0.0};
+
+        // Hand Contact
+        HandOptions m_hands{};
+        std::vector<ArmChain> m_arms;
+        // per bone: which arm it hangs from (-1 none) and below which link: 1 = upper arm, 2 = forearm, 3 = hand
+        std::vector<int8_t> m_arm_of;
+        std::vector<uint8_t> m_arm_part;
+        // body bones a hand can rest on (not an arm, not a helper or root), and the body bone each one's segment starts at
+        std::vector<int32_t> m_body_bones;
+        std::vector<int32_t> m_body_from;
+        std::vector<HandSample> m_hand_samples;
+        struct HandNear // a body segment near a palm (apply_hands scratch)
+        {
+            size_t k;    // index into m_body_bones
+            double t;    // nearest point along the segment, 0..1
+            double d;    // distance from the palm (cm)
+            double o[3]; // palm minus that point
+        };
+        std::vector<HandNear> m_hand_scratch;
     };
 } // namespace uuepbs

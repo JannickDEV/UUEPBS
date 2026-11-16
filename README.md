@@ -34,6 +34,7 @@ https://github.com/user-attachments/assets/4e4372bc-8a64-4255-b8ae-a33645ce187e
 * **Auto Ground switch** in Character Scale > Overall, remembered between sessions (`_auto_ground.txt` in the presets folder; it wins over `config.lua`)
 * **Nipple length** and **Glans size** also work on rigs without bones named for them (Daz Genesis as in Afterparty): the ends of the breast chains and the last bone of the penis chain are used
 * Afterparty: game profile with the pose hook pinned
+* **Hand Contact**: animations where a hand rests on the body (a self-touch, a hand on the hip or chest) now follow your body edits. A hand that is close to the body in the game's own pose is carried along with the body part it rests on (moved, turned and scaled with it), and the arm is bent with IK to reach it; hands away from the body are left alone and the correction fades out with distance, so nothing jumps. On by default; `HandContact*` settings in `config.lua` (`HandContactAnims` limits it to animations by name), console `ubs hands` shows what each character plays and where each hand rests
 
 ### V2.7.0 - Changelogs
 * New window look: flat slate-navy theme with sharp corners, flush text tabs (**Body**, **Presets**, **Advanced**, **Status**) and 1px bordered groups

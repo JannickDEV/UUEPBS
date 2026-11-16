@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdio>
+#include <cmath>
 #include <cstring>
 
 namespace uuepbs
@@ -289,6 +291,113 @@ namespace uuepbs
         return legs;
     }
 
+    std::vector<ArmChain> find_arms(const std::vector<std::string>& names, const std::vector<int32_t>& parents)
+    {
+        std::vector<ArmChain> arms;
+        const int32_t n = static_cast<int32_t>(names.size());
+        if (parents.size() != names.size())
+        {
+            return arms;
+        }
+        std::vector<std::string> folded(names.size());
+        for (int32_t i = 0; i < n; ++i)
+        {
+            folded[i] = fold_case(names[i]);
+        }
+        auto is_lower = [](const std::string& f) {
+            if (has_any(f, {"forearm", "lowerarm", "lowarm", "lower_arm", "loarm", "elbow"}))
+            {
+                return true;
+            }
+            return has_any(f, {"arm"}) && !has_any(f, {"upper", "uparm", "shldr", "shoulder", "clav", "collar", "armature"});
+        };
+        auto is_upper = [](const std::string& f) {
+            return has_any(f, {"upperarm", "uparm", "upper_arm", "shldr", "shoulder", "arm"}) &&
+                   !has_any(f, {"forearm", "lower", "lowarm", "loarm", "elbow", "clav", "collar", "armature"});
+        };
+        // first non-helper ancestor within a few steps (twist / roll bones in between are skipped)
+        auto up = [&](int32_t from) {
+            int32_t a = from >= 0 ? parents[from] : -1;
+            for (int steps = 0; a >= 0 && steps < 4; ++steps, a = parents[a])
+            {
+                if (!helper_bone(folded[a]))
+                {
+                    return a;
+                }
+            }
+            return int32_t{-1};
+        };
+        for (int32_t h = 0; h < n && arms.size() < 4; ++h)
+        {
+            const std::string& f = folded[h];
+            if (!has_any(f, {"hand", "wrist"}) || helper_bone(f) ||
+                has_any(f, {"handle", "finger", "thumb", "index", "middle", "ring", "pinky", "carpal", "weapon", "gun", "prop"}) ||
+                f.rfind("vb ", 0) == 0)
+            {
+                continue;
+            }
+            const int32_t lower = up(h);
+            if (lower < 0 || !is_lower(folded[lower]))
+            {
+                continue;
+            }
+            const int32_t upper = up(lower);
+            if (upper < 0 || !is_upper(folded[upper]))
+            {
+                continue;
+            }
+            bool taken = false;
+            for (const ArmChain& a : arms)
+            {
+                taken = taken || a.hand == h || a.lower == lower || a.upper == upper;
+            }
+            if (taken)
+            {
+                continue;
+            }
+            int32_t palm = -1, index = -1;
+            for (int32_t j = h + 1; j < n; ++j)
+            {
+                if (parents[j] != h || helper_bone(folded[j]))
+                {
+                    continue;
+                }
+                if (palm < 0 && has_any(folded[j], {"middle", "mid"}))
+                {
+                    palm = j;
+                }
+                if (index < 0 && has_any(folded[j], {"index"}))
+                {
+                    index = j;
+                }
+            }
+            arms.push_back({upper, lower, h, palm >= 0 ? palm : index});
+        }
+        return arms;
+    }
+
+    void RigSculptor::set_hands(const HandOptions& options)
+    {
+        HandOptions o = options;
+        if (!std::isfinite(o.full_within) || o.full_within < 0.0)
+        {
+            o.full_within = 0.25;
+        }
+        if (!std::isfinite(o.fade_out) || o.fade_out <= o.full_within)
+        {
+            o.fade_out = o.full_within + 0.2;
+        }
+        o.full_within = std::min(2.0, o.full_within);
+        o.fade_out = std::min(3.0, o.fade_out);
+        o.strength = std::isfinite(o.strength) ? std::min(1.0, std::max(0.0, o.strength)) : 1.0;
+        const bool replan = o.enabled != m_hands.enabled;
+        m_hands = o;
+        if (replan)
+        {
+            m_revision = ~0ull; // re-plan: with Hand Contact on, the arms are rebuilt
+        }
+    }
+
     void RigSculptor::set_ground(const GroundOptions& options)
     {
         GroundOptions o = options;
@@ -382,6 +491,60 @@ namespace uuepbs
             }
         }
         m_last_lift = 0.0;
+
+        // Arms for Hand Contact, which arm link every bone hangs from, and the body bones a hand can rest on.
+        m_arms = find_arms(m_names, m_parents);
+        m_arm_of.assign(n, int8_t{-1});
+        m_arm_part.assign(n, uint8_t{0});
+        for (size_t ai = 0; ai < m_arms.size(); ++ai)
+        {
+            const ArmChain& arm = m_arms[ai];
+            for (size_t i = static_cast<size_t>(arm.upper); i < n; ++i)
+            {
+                const int32_t bone = static_cast<int32_t>(i);
+                const int32_t p = m_parents[i];
+                uint8_t part = 0;
+                if (bone == arm.upper)
+                {
+                    part = 1;
+                }
+                else if (p >= 0 && m_arm_of[p] == static_cast<int8_t>(ai))
+                {
+                    part = bone == arm.lower ? 2 : bone == arm.hand ? 3 : m_arm_part[p];
+                }
+                if (part)
+                {
+                    m_arm_of[i] = static_cast<int8_t>(ai);
+                    m_arm_part[i] = part;
+                }
+            }
+        }
+        m_body_bones.clear();
+        m_body_from.clear();
+        m_hand_samples.assign(m_arms.size(), HandSample{});
+        {
+            // helpers (IK targets, virtual bones, weapon sockets...) and everything below them are not body
+            std::vector<uint8_t> junk(n, 0), body(n, 0);
+            for (size_t i = 0; i < n; ++i)
+            {
+                const std::string& f = m_folded[i];
+                const int32_t p = m_parents[i];
+                junk[i] = helper_bone(f) || f.rfind("vb ", 0) == 0 || has_any(f, {"curves", "weapon", "gun", "prop"}) || (p >= 0 && junk[p]);
+                body[i] = p >= 0 && !junk[i] && m_arm_of[i] < 0;
+                if (!body[i])
+                {
+                    continue;
+                }
+                // the segment from the nearest body ancestor to this bone (a single point when there is none)
+                int32_t from = p;
+                while (from >= 0 && !body[from])
+                {
+                    from = m_parents[from];
+                }
+                m_body_bones.push_back(static_cast<int32_t>(i));
+                m_body_from.push_back(from >= 0 ? from : static_cast<int32_t>(i));
+            }
+        }
 
         // Landmarks for the ground diagnostics: the legs' hip (else "pelvis"), the first neck bone, the head.
         m_marks = {-1, -1, -1};
@@ -507,7 +670,8 @@ namespace uuepbs
             const int32_t slot = m_edit_slot[i];
             const bool edited = slot >= 0;
             const bool world_root = world_on && p < 0; // a root carries the whole-pose scale to everything below it
-            if (!edited && !moved_by_ancestor && !world_root)
+            const bool arm = m_hands.enabled && m_arm_of[i] >= 0; // Hand Contact may bend it
+            if (!edited && !moved_by_ancestor && !world_root && !arm)
             {
                 continue;
             }
@@ -529,7 +693,8 @@ namespace uuepbs
             }
         }
 
-        std::vector<uint8_t> needed(n, 0);
+        // Hand Contact reads every body bone (where the hand rests), so all of them are inputs.
+        std::vector<uint8_t> needed(n, static_cast<uint8_t>(m_hands.enabled && !m_arms.empty() ? 1 : 0));
         for (const int32_t i : m_plan)
         {
             needed[i] = 1;
@@ -814,6 +979,9 @@ namespace uuepbs
         // 3b) Auto Ground: lift the pose and bend the other legs back onto the ground.
         apply_ground(pose);
 
+        // 3c) Hand Contact: hands resting on the body follow the edited body.
+        apply_hands(pose);
+
         if (m_quantize)
         {
             for (const int32_t i : m_plan)
@@ -1023,7 +1191,7 @@ namespace uuepbs
             own_legs = !m_legs.empty(); // animated on its own: measure its own legs (or take the shared lift)
         }
 
-        // How far each foot's sole sank because of the edit (component space, +Z is up).
+        // How fade_cm each foot's sole sank because of the edit (component space, +Z is up).
         double raw = 0.0;
         double total = 0.0;
         std::array<double, 4> sink{};
@@ -1120,7 +1288,7 @@ namespace uuepbs
         }
     }
 
-    // How far the sole sank: the lower of the ball (toes) bone and a heel point the ball's height below the ankle,
+    // How fade_cm the sole sank: the lower of the ball (toes) bone and a heel point the ball's height below the ankle,
     // both carried by the foot - so a bigger, smaller or turned foot is measured where it touches the ground.
     // Without a ball bone, the ankle joint itself.
     double RigSculptor::contact_sink(const LegChain& leg) const
@@ -1172,7 +1340,7 @@ namespace uuepbs
             return;
         }
         const double u[3] = {ht[0] / d, ht[1] / d, ht[2] / d};
-        // Out of reach: the leg straightens (or folds) as far as it can.
+        // Out of reach: the leg straightens (or folds) as fade_cm as it can.
         d = std::min(a + b - 1.0e-4, std::max(std::fabs(a - b) + 1.0e-3, d));
 
         // Bend direction: where the knee points now, across the hip -> target line.
@@ -1279,5 +1447,355 @@ namespace uuepbs
                 x.rot[k] = rot[k];
             }
         }
+    }
+    // ---- Hand Contact ---------------------------------------------------------------------------------------------
+
+    namespace
+    {
+        // v (component space) as it moves with bone x's edit: into x's own axes before the edit, and back out after it
+        // (turned and scaled with the bone).
+        void carry(const Xform& before, const Xform& after, const double v[3], double out[3])
+        {
+            double inv[4], local[3];
+            xf::qconj(before.rot, inv);
+            xf::qrotate(inv, v, local);
+            for (int a = 0; a < 3; ++a)
+            {
+                local[a] = local[a] * xf::safe_inverse(before.scl[a]) * after.scl[a];
+            }
+            xf::qrotate(after.rot, local, out);
+        }
+
+        // how bone x turned through the edit (component space)
+        void turn_of(const Xform& before, const Xform& after, double out[4])
+        {
+            double inv[4];
+            xf::qconj(before.rot, inv);
+            xf::qmul(after.rot, inv, out);
+            qnormalize(out);
+        }
+
+        // a + t (b - a) for quaternions, on the same side as a, normalised
+        void nlerp(const double a[4], const double b[4], double t, double out[4])
+        {
+            const double sign = (a[0] * b[0] + a[1] * b[1] + a[2] * b[2] + a[3] * b[3]) < 0.0 ? -1.0 : 1.0;
+            for (int k = 0; k < 4; ++k)
+            {
+                out[k] = a[k] + t * (sign * b[k] - a[k]);
+            }
+            qnormalize(out);
+        }
+
+        double smooth(double x)
+        {
+            x = std::min(1.0, std::max(0.0, x));
+            return x * x * (3.0 - 2.0 * x);
+        }
+    } // namespace
+
+    // For every arm: where its palm is in the game's pose relative to the body bones full_cm it, and where that place is
+    // on the edited body. The hand is moved (and turned) there by as much as it is close to the body, and the arm
+    // bent with a two-bone IK to reach it.
+    void RigSculptor::apply_hands(const Xform* pose)
+    {
+        for (HandSample& h : m_hand_samples)
+        {
+            h = HandSample{};
+        }
+        if (!m_hands.enabled || !m_ground_primary || m_arms.empty() || m_body_bones.empty() || !pose || m_hands.strength <= 0.0)
+        {
+            return;
+        }
+        auto src = [&](int32_t b) -> const Xform& { return m_in_plan[b] ? m_source[b] : pose[b]; };
+        auto out = [&](int32_t b) -> const Xform& { return m_in_plan[b] ? m_fresh[b] : pose[b]; };
+        auto palm_of = [&](const ArmChain& arm, const Xform& hand, const Xform* palm, double p[3]) {
+            for (int a = 0; a < 3; ++a)
+            {
+                p[a] = palm ? hand.pos[a] + 0.5 * (palm->pos[a] - hand.pos[a]) : hand.pos[a];
+            }
+            (void)arm;
+        };
+
+        for (size_t ai = 0; ai < m_arms.size(); ++ai)
+        {
+            const ArmChain& arm = m_arms[ai];
+            if (!m_in_plan[arm.upper] || !m_in_plan[arm.lower] || !m_in_plan[arm.hand])
+            {
+                continue;
+            }
+            const Xform& su = src(arm.upper);
+            const Xform& sl = src(arm.lower);
+            const Xform& sh = src(arm.hand);
+            const double ul[3] = {sl.pos[0] - su.pos[0], sl.pos[1] - su.pos[1], sl.pos[2] - su.pos[2]};
+            const double lh[3] = {sh.pos[0] - sl.pos[0], sh.pos[1] - sl.pos[1], sh.pos[2] - sl.pos[2]};
+            const double length = vlen(ul) + vlen(lh);
+            if (!(length > 1.0e-3))
+            {
+                continue;
+            }
+            const double full_cm = m_hands.full_within * length;
+            const double fade_cm = std::max(full_cm + 1.0e-3, m_hands.fade_out * length);
+
+            double P[3];
+            palm_of(arm, sh, arm.palm >= 0 ? &src(arm.palm) : nullptr, P);
+
+            // every body segment full_cm the palm votes for where the palm belongs now; the nearest ones decide
+            // (a vote fades within a few cm of the nearest distance, so moving between segments never jumps)
+            using Near = HandNear;
+            std::vector<Near>& close_list = m_hand_scratch;
+            close_list.clear();
+            double best_d = 1.0e30;
+            int32_t best_bone = -1;
+            for (size_t k = 0; k < m_body_bones.size(); ++k)
+            {
+                const int32_t b = m_body_bones[k];
+                const int32_t a = m_body_from[k];
+                const Xform& sa = src(a);
+                const Xform& sb = src(b);
+                const double ab[3] = {sb.pos[0] - sa.pos[0], sb.pos[1] - sa.pos[1], sb.pos[2] - sa.pos[2]};
+                const double ap[3] = {P[0] - sa.pos[0], P[1] - sa.pos[1], P[2] - sa.pos[2]};
+                const double len2 = vdot(ab, ab);
+                const double t = len2 > 1.0e-9 ? std::min(1.0, std::max(0.0, vdot(ap, ab) / len2)) : 1.0;
+                Near e{k, t, 0.0, {P[0] - (sa.pos[0] + t * ab[0]), P[1] - (sa.pos[1] + t * ab[1]), P[2] - (sa.pos[2] + t * ab[2])}};
+                e.d = vlen(e.o);
+                if (!(e.d < fade_cm))
+                {
+                    continue;
+                }
+                if (e.d < best_d)
+                {
+                    best_d = e.d;
+                    best_bone = t > 0.5 ? b : a;
+                }
+                close_list.push_back(e);
+            }
+            const double best = best_d <= full_cm ? 1.0 : smooth((fade_cm - best_d) / (fade_cm - full_cm));
+            constexpr double kFade = 1.5; // cm
+            double sum_w = 0.0;
+            double goal[3] = {0.0, 0.0, 0.0};
+            double turn[4] = {0.0, 0.0, 0.0, 0.0};
+            for (const Near& e : close_list)
+            {
+                const double w = std::exp(-(e.d - best_d) / kFade);
+                if (w < 1.0e-4)
+                {
+                    continue;
+                }
+                const int32_t b = m_body_bones[e.k];
+                const int32_t a = m_body_from[e.k];
+                const double t = e.t;
+                // the same spot on the edited segment, with the offset carried by both ends' edits
+                const Xform& sa = src(a);
+                const Xform& sb = src(b);
+                const Xform& oa = out(a);
+                const Xform& ob = out(b);
+                double ca[3], cb[3];
+                carry(sa, oa, e.o, ca);
+                carry(sb, ob, e.o, cb);
+                double qa[4], qb[4], q[4];
+                turn_of(sa, oa, qa);
+                turn_of(sb, ob, qb);
+                nlerp(qa, qb, t, q);
+                for (int c = 0; c < 3; ++c)
+                {
+                    const double spot = oa.pos[c] + t * (ob.pos[c] - oa.pos[c]);
+                    goal[c] += w * (spot + ca[c] + t * (cb[c] - ca[c]));
+                }
+                const double sign = (turn[0] * q[0] + turn[1] * q[1] + turn[2] * q[2] + turn[3] * q[3]) < 0.0 ? -1.0 : 1.0;
+                for (int c = 0; c < 4; ++c)
+                {
+                    turn[c] += w * sign * q[c];
+                }
+                sum_w += w;
+            }
+            HandSample& sample = m_hand_samples[ai];
+            sample.anchor = best_bone;
+            sample.distance = best_bone >= 0 ? best_d : 0.0;
+            const double weight = best * m_hands.strength;
+            if (!(sum_w > 0.0) || weight < 1.0e-4)
+            {
+                continue;
+            }
+            for (int c = 0; c < 3; ++c)
+            {
+                goal[c] /= sum_w;
+            }
+            qnormalize(turn);
+            if (!std::isfinite(goal[0] + goal[1] + goal[2] + turn[0] + turn[1] + turn[2] + turn[3]))
+            {
+                continue;
+            }
+
+            // where the edit (and Auto Ground) put the hand, and where the body wants it
+            const Xform hand_now = m_fresh[arm.hand];
+            double palm_now[3];
+            palm_of(arm, hand_now, arm.palm >= 0 ? &m_fresh[arm.palm] : nullptr, palm_now);
+            double wanted_rot[4], rot[4];
+            xf::qmul(turn, sh.rot, wanted_rot);
+            nlerp(hand_now.rot, wanted_rot, weight, rot);
+            double spin[4], inv[4];
+            xf::qconj(hand_now.rot, inv);
+            xf::qmul(rot, inv, spin);
+            const double v[3] = {palm_now[0] - hand_now.pos[0], palm_now[1] - hand_now.pos[1], palm_now[2] - hand_now.pos[2]};
+            double v2[3];
+            xf::qrotate(spin, v, v2);
+            double target[3];
+            for (int c = 0; c < 3; ++c)
+            {
+                const double palm_goal = palm_now[c] + weight * (goal[c] - palm_now[c]);
+                target[c] = palm_goal - v2[c];
+            }
+            reach_hand(arm, ai, target, rot);
+            const double* moved_to = m_fresh[arm.hand].pos;
+            const double moved[3] = {moved_to[0] - hand_now.pos[0], moved_to[1] - hand_now.pos[1], moved_to[2] - hand_now.pos[2]};
+            sample.weight = weight;
+            sample.moved = vlen(moved);
+        }
+    }
+
+    // Two-bone IK in component space: turns the upper arm about the shoulder and the forearm about the elbow so the
+    // wrist lands on `target` (as fade_cm as the arm reaches), bending in the plane the elbow already bends in. The hand
+    // and everything below it take rotation `rot` and move with the wrist.
+    void RigSculptor::reach_hand(const ArmChain& arm, size_t arm_index, const double target[3], const double rot[4])
+    {
+        const double H[3] = {m_fresh[arm.upper].pos[0], m_fresh[arm.upper].pos[1], m_fresh[arm.upper].pos[2]};
+        const double K[3] = {m_fresh[arm.lower].pos[0], m_fresh[arm.lower].pos[1], m_fresh[arm.lower].pos[2]};
+        const double F[3] = {m_fresh[arm.hand].pos[0], m_fresh[arm.hand].pos[1], m_fresh[arm.hand].pos[2]};
+        const double hand_rot[4] = {m_fresh[arm.hand].rot[0], m_fresh[arm.hand].rot[1], m_fresh[arm.hand].rot[2], m_fresh[arm.hand].rot[3]};
+
+        const double hk[3] = {K[0] - H[0], K[1] - H[1], K[2] - H[2]};
+        const double kf[3] = {F[0] - K[0], F[1] - K[1], F[2] - K[2]};
+        const double a = vlen(hk), b = vlen(kf);
+        const double ht[3] = {target[0] - H[0], target[1] - H[1], target[2] - H[2]};
+        double d = vlen(ht);
+        if (a < 1.0e-3 || b < 1.0e-3 || d < 1.0e-3)
+        {
+            return;
+        }
+        const double u[3] = {ht[0] / d, ht[1] / d, ht[2] / d};
+        d = std::min(a + b - 1.0e-4, std::max(std::fabs(a - b) + 1.0e-3, d));
+
+        // bend direction: where the elbow points now, across the shoulder -> target line
+        double v[3];
+        const double along = vdot(hk, u);
+        for (int k = 0; k < 3; ++k)
+        {
+            v[k] = hk[k] - along * u[k];
+        }
+        double vl = vlen(v);
+        if (vl < 0.01 * a)
+        {
+            // (nearly) straight arm pointing at the target: the elbow keeps to the side it bends to in the
+            // forearm's current direction, else about the upper arm's own Z axis
+            const double z[3] = {0.0, 0.0, 1.0};
+            double w[3];
+            xf::qrotate(m_fresh[arm.upper].rot, z, w);
+            vcross(w, u, v);
+            vl = vlen(v);
+            if (vl < 1.0e-4)
+            {
+                return;
+            }
+        }
+        for (int k = 0; k < 3; ++k)
+        {
+            v[k] /= vl;
+        }
+        const double cos_s = std::min(1.0, std::max(-1.0, (a * a + d * d - b * b) / (2.0 * a * d)));
+        const double sin_s = std::sqrt(std::max(0.0, 1.0 - cos_s * cos_s));
+        double K2[3], F2[3];
+        for (int k = 0; k < 3; ++k)
+        {
+            K2[k] = H[k] + a * (cos_s * u[k] + sin_s * v[k]);
+            F2[k] = H[k] + d * u[k];
+        }
+        const double hk2[3] = {K2[0] - H[0], K2[1] - H[1], K2[2] - H[2]};
+        double r1[4];
+        if (!arc(hk, hk2, r1))
+        {
+            r1[0] = r1[1] = r1[2] = 0.0;
+            r1[3] = 1.0;
+        }
+        double kf_turned[3];
+        xf::qrotate(r1, kf, kf_turned);
+        const double kf2[3] = {F2[0] - K2[0], F2[1] - K2[1], F2[2] - K2[2]};
+        double r2[4];
+        if (!arc(kf_turned, kf2, r2))
+        {
+            r2[0] = r2[1] = r2[2] = 0.0;
+            r2[3] = 1.0;
+        }
+        double r21[4];
+        xf::qmul(r2, r1, r21);
+        double spin[4], inv[4];
+        xf::qconj(hand_rot, inv);
+        xf::qmul(rot, inv, spin);
+        qnormalize(spin);
+
+        const int8_t ai = static_cast<int8_t>(arm_index);
+        for (size_t i = static_cast<size_t>(arm.upper); i < m_names.size(); ++i)
+        {
+            if (m_arm_of[i] != ai || !m_in_plan[i])
+            {
+                continue;
+            }
+            Xform& x = m_fresh[i];
+            double q[4];
+            switch (m_arm_part[i])
+            {
+            case 1: // upper arm and what hangs from it above the elbow (twist bones, muscles)
+                turn_about(r1, H, x.pos);
+                xf::qmul(r1, x.rot, q);
+                break;
+            case 2: // forearm and what hangs from it above the wrist
+                turn_about(r1, H, x.pos);
+                turn_about(r2, K2, x.pos);
+                xf::qmul(r21, x.rot, q);
+                break;
+            case 3: // hand and fingers: turned to `rot` about the wrist, moved with it
+            {
+                const double rel[3] = {x.pos[0] - F[0], x.pos[1] - F[1], x.pos[2] - F[2]};
+                double turned[3];
+                xf::qrotate(spin, rel, turned);
+                for (int k = 0; k < 3; ++k)
+                {
+                    x.pos[k] = F2[k] + turned[k];
+                }
+                xf::qmul(spin, x.rot, q);
+                break;
+            }
+            default:
+                continue;
+            }
+            qnormalize(q);
+            for (int k = 0; k < 4; ++k)
+            {
+                x.rot[k] = q[k];
+            }
+        }
+    }
+
+    std::string RigSculptor::hands_report() const
+    {
+        if (!m_hands.enabled)
+        {
+            return "off";
+        }
+        if (m_arms.empty())
+        {
+            return "no arms found (upper arm -> forearm -> hand by name)";
+        }
+        std::string s;
+        char line[256];
+        for (size_t ai = 0; ai < m_arms.size(); ++ai)
+        {
+            const ArmChain& arm = m_arms[ai];
+            const HandSample h = ai < m_hand_samples.size() ? m_hand_samples[ai] : HandSample{};
+            std::snprintf(line, sizeof line, "%s%s: %s %.1f cm away, corrected %.0f%%, moved %.1f cm", s.empty() ? "" : "; ",
+                          m_names[arm.hand].c_str(), h.anchor >= 0 ? m_names[h.anchor].c_str() : "no body bone", h.distance,
+                          h.weight * 100.0, h.moved);
+            s += line;
+        }
+        return s;
     }
 } // namespace uuepbs

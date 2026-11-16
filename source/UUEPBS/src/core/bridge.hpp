@@ -22,6 +22,7 @@
 //     morphs <tab> <name> <tab> <name> ...             (optional: the rig's morph targets)
 //     manim <tab> <name> <tab> <name> ...              (optional: morphs something else keeps setting)
 //     looks <tab> <actor key> <tab> <text>             (optional: what the Looks tab changed on that character)
+//     play <tab> <actor key> <tab> <animation name>    (optional: the montage, else the single animation, it plays)
 //     cmd <tab> <id> <tab> <verb> <tab> <argument>
 //     #end <seq>
 //
@@ -117,6 +118,7 @@ namespace uuepbs::bridge
         std::string switch_who;                   // Character Switch Watcher: who the player character is (its face mesh)
         std::vector<NpcSighting> party;           // ... and NPCs that are a party member (key, who = face mesh, label)
         std::map<std::string, std::string> looks; // actor key -> what Looks changed there (looks.hpp)
+        std::map<std::string, std::string> playing; // actor key -> animation it plays (Hand Contact)
 
         std::string setting(const std::string& key, const std::string& fallback = {}) const
         {

@@ -2711,6 +2711,12 @@ local function build_state()
         "ground_max=" .. tostring(tonumber(Config.AutoGroundMaxCm) or 40),
         -- the window's Auto Ground switch shows this (either AutoGroundMode)
         "ground_ui=" .. (late.groundWanted and "1" or "0"),
+        -- Hand Contact (DLL): hands resting on the body follow the edited body
+        "hands=" .. (Config.HandContact == false and "0" or "1"),
+        "hands_near=" .. tostring(tonumber(Config.HandContactNear) or 0.25),
+        "hands_far=" .. tostring(tonumber(Config.HandContactFar) or 0.45),
+        "hands_strength=" .. tostring(tonumber(Config.HandContactStrength) or 1),
+        "hands_anims=" .. clean(Config.HandContactAnims or ""),
     }, "\t"))
     add("scan\t" .. scanCount)
     -- engine names go last on each line (older DLLs ignore the extra field)
@@ -2739,6 +2745,9 @@ local function build_state()
     end
     if late.looks then
         add(late.looks.report())
+    end
+    if late.hands then
+        add(late.hands.report())
     end
     for _, c in ipairs(pendingCommands) do
         add("cmd\t" .. c.id .. "\t" .. clean(c.verb) .. "\t" .. clean(c.arg))
@@ -3151,6 +3160,17 @@ do
     end
 end
 
+-- Hand Contact (uuepbs_hands.lua): which animation each character plays, for the DLL's Hand Contact
+-- (config.lua HandContactAnims) and "ubs hands".
+if Config.HandContact ~= false then
+    local okH, mod = pcall(require, "uuepbs_hands")
+    if okH and type(mod) == "table" then
+        late.hands = mod
+    else
+        say("hand contact animation names off: %s", tostring(mod))
+    end
+end
+
 -- Scene copies (uuepbs_copies.lua): the edited character as cutscenes and menu previews show it
 -- (their own actors with the same mesh assets) gets the same sliders. Kept in `late` (local limit).
 if Config.SceneCopies ~= false then
@@ -3310,6 +3330,12 @@ local function tick()
         end
         late.apply_deformers()
         late.ground.tick(rigs)
+        if late.hands then
+            local okH, changed = pcall(late.hands.poll, rigs)
+            if okH and changed then
+                stateDirty = true
+            end
+        end
         write_state()
         if late.portraits and windowOpen then
             late.portraits.tick(now_ms())
@@ -3460,7 +3486,7 @@ local function rest_of(params, first)
     return table.concat(parts, " ")
 end
 
-local usage = "uuepbs (or ubs) ui | status | rescan | copies | camera | list | load <name> | next | prev | save <name> | on | off | compare [on|off] | reset [all] | diag | skin [name] | morph <name> [weight] | ground [on|off|<extra cm>]"
+local usage = "uuepbs (or ubs) ui | status | rescan | copies | camera | hands | list | load <name> | next | prev | save <name> | on | off | compare [on|off] | reset [all] | diag | skin [name] | morph <name> [weight] | ground [on|off|<extra cm>]"
 
 local function console(_, params, out)
     local verb = string.lower(params[1] or "")
@@ -3498,6 +3524,9 @@ local function console(_, params, out)
         else
             reply("scene copies are off (SceneCopies in config.lua)")
         end
+    elseif verb == "hands" then
+        reply(late.hands and late.hands.status() or "hand contact is off (HandContact in config.lua)")
+        send_command("hands", "", true)
     elseif verb == "camera" then
         reply(late.camera and late.camera.status() or "camera control is off (CameraControl in config.lua)")
     elseif verb == "load" or verb == "save" or verb == "skin" or verb == "morph" or verb == "reset" or verb == "compare" then

@@ -168,6 +168,21 @@ return {
     AutoGroundIntervalMs = 16,  -- how often the live lift is updated (16 = about every frame at 60 fps)
     AutoGroundSmoothing = 0,    -- 0 = none; 0.5 = the lift moves half way to the new value each update (less jitter, a little lag)
 
+    -- Hand Contact: the game's animations put the hands where the game's body is. After body edits a
+    -- hand that rests on the body (a self-touch, a hand on the hip or chest) floats or sinks in. With
+    -- this on, a hand that is close to the body in the game's own pose is carried along with the edited
+    -- body part it rests on (moved, turned and scaled with it), and the arm is bent with IK to reach it.
+    -- Hands away from the body are not touched. Done by the DLL inside the pose, for every edited character.
+    -- Console: "ubs hands" (what each character plays and where each hand rests; also in UUEPBS.log).
+    HandContact = true,
+    HandContactNear = 0.25,  -- fully corrected within this distance of a body bone (x the arm's length)
+    HandContactFar = 0.45,   -- not corrected beyond this distance (x the arm's length); in between it fades
+    HandContactStrength = 1, -- 0..1, how much of the correction is used
+    -- Only while the character plays an animation (montage) whose name contains one of these words,
+    -- comma separated, e.g. "Touch, Masturbat". "" = whenever a hand is close to the body.
+    -- "ubs hands" shows the names of the animations playing.
+    HandContactAnims = "",
+
     Verbose = false,
 
     -- Starting values for a new game profile. The first time the mod runs in a game it writes

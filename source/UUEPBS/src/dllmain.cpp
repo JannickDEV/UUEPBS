@@ -925,6 +925,55 @@ namespace
                 }
             }
 
+            // Hand Contact (config.lua HandContact*); older scripts send nothing = off.
+            {
+                uuepbs::HandOptions h;
+                h.enabled = state.setting("hands", "0") == "1";
+                h.full_within = std::strtod(state.setting("hands_near", "0.25").c_str(), nullptr);
+                h.fade_out = std::strtod(state.setting("hands_far", "0.45").c_str(), nullptr);
+                h.strength = std::strtod(state.setting("hands_strength", "1").c_str(), nullptr);
+                std::vector<std::string> anims;
+                const std::string list = state.setting("hands_anims");
+                for (size_t at = 0; at <= list.size();)
+                {
+                    size_t comma = list.find(',', at);
+                    if (comma == std::string::npos)
+                    {
+                        comma = list.size();
+                    }
+                    std::string part = list.substr(at, comma - at);
+                    while (!part.empty() && part.front() == ' ')
+                    {
+                        part.erase(part.begin());
+                    }
+                    while (!part.empty() && part.back() == ' ')
+                    {
+                        part.pop_back();
+                    }
+                    if (!part.empty())
+                    {
+                        anims.push_back(part);
+                    }
+                    at = comma + 1;
+                }
+                uuepbs::Registry& reg = uuepbs::Registry::instance();
+                const uuepbs::HandOptions old = reg.hands();
+                const std::vector<std::string> old_anims = reg.hand_anims();
+                std::vector<std::string> folded;
+                for (const auto& a : anims)
+                {
+                    folded.push_back(uuepbs::fold_case(a));
+                }
+                if (old.enabled != h.enabled || old.full_within != h.full_within || old.fade_out != h.fade_out || old.strength != h.strength || old_anims != folded)
+                {
+                    reg.set_hands(h, anims);
+                    g_log.line(std::string("hand contact: ") + (h.enabled ? "on" : "off") +
+                               (h.enabled ? ", near " + std::to_string(h.full_within) + ", far " + std::to_string(h.fade_out) + " (x arm length), strength " +
+                                                std::to_string(h.strength) + (list.empty() ? std::string(", every animation") : ", only while playing: " + list)
+                                          : std::string()));
+                }
+            }
+
             const std::string folder = state.setting("presets");
             if (!m_shelf_ready || folder != m_shelf_source)
             {
@@ -1154,6 +1203,7 @@ namespace
             }
             reg.set_animated_morphs(std::move(animated));
             uuepbs::looks::Report::instance().set(state.looks);
+            reg.set_playing(state.playing);
         }
 
         Clock::time_point last_publish()
@@ -1373,6 +1423,14 @@ namespace
                     s += reg.ground_report();
                 }
             }
+            {
+                const uuepbs::HandOptions h = reg.hands();
+                s += std::string("hand contact: ") + (h.enabled ? "on" : "off") + "\n";
+                if (h.enabled)
+                {
+                    s += reg.hands_report();
+                }
+            }
             for (const auto& a : reg.edited_actors())
             {
                 s += std::string("  ") + (a.active ? "* " : "  ") + a.label + ": " + std::to_string(a.bones) + " bone(s), " + std::to_string(a.morphs) +
@@ -1416,6 +1474,14 @@ namespace
             if (v == "status")
             {
                 return status_text();
+            }
+            if (v == "hands")
+            {
+                const uuepbs::HandOptions h = uuepbs::Registry::instance().hands();
+                std::string s = std::string("hand contact: ") + (h.enabled ? "on" : "off (HandContact in config.lua)") + "\n";
+                s += uuepbs::Registry::instance().hands_report();
+                g_log.line(s);
+                return s;
             }
             if (v == "list")
             {
