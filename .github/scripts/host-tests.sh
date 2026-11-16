@@ -42,12 +42,18 @@ $CXX -std=c++23 -I"$S" test_ground.cpp "${CORE[@]}" -o "$OUT/test_ground"
 "$OUT/test_ground" "$OUT/roku_cache.txt" 184
 end
 
+step "test_hands (Hand Contact: arm IK onto the edited body)"
+$CXX -std=c++23 -O1 -I"$S" test_hands.cpp "${CORE[@]}" -o "$OUT/test_hands"
+"$OUT/test_hands" fixtures/carnal_instinct_cache.txt 139 Jiggle_R
+"$OUT/test_hands" "$OUT/roku_cache.txt" 184 boob_r
+end
+
 step "test_audit (every slider x every edit, copy-pose meshes, Auto Ground)"
 $CXX -std=c++23 -O1 -I"$S" test_audit.cpp "${CORE[@]}" -o "$OUT/test_audit"
 "$OUT/test_audit" "$OUT/roku_cache.txt" "$SCRIPTS/BoneDictionary.json" 184
 end
 
-step "Lua tests (portraits, looks, deformers, physics, camera, collision, copies)"
+step "Lua tests (portraits, looks, deformers, physics, camera, collision, copies, hands)"
 $LUA portraits_test.lua "$SCRIPTS" "$OUT/portraits"
 $LUA looks_test.lua "$SCRIPTS"
 $LUA deformers_test.lua "$SCRIPTS"
@@ -55,6 +61,7 @@ $LUA physics_test.lua "$SCRIPTS"
 $LUA camera_test.lua "$SCRIPTS"
 $LUA collision_test.lua "$SCRIPTS"
 $LUA copies_test.lua "$SCRIPTS"
+$LUA hands_test.lua "$SCRIPTS"
 end
 
 step "Lua <-> DLL bridge harness"

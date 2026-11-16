@@ -85,6 +85,53 @@ namespace uuepbs
     // control bones are skipped.
     std::vector<LegChain> find_legs(const std::vector<std::string>& names, const std::vector<int32_t>& parents);
 
+    // Hand contact ("Hand Contact"). The game animates the hands for its own body: after body edits a hand that
+    // rests on the body in the animation (a self-touch, a hand on the hip or chest) floats in the air or sinks into
+    // the body. With this on, each hand that is close to a body bone in the game's own pose (before our edits) is
+    // carried along with that part of the body: its place relative to the nearby bones is kept through their edits
+    // (moved, turned and scaled with them), and the arm is bent with a two-bone IK to reach it. The closer the hand
+    // is to the body, the more it is corrected (fully within `near`, not at all beyond `far`), so nothing jumps.
+    struct HandOptions
+    {
+        bool enabled{false};
+        double full_within{0.25};    // fully corrected within this distance of a body bone, as a fraction of the arm's length
+        double fade_out{0.45};   // not corrected beyond this distance (fraction of the arm's length)
+        double strength{1.0}; // 0..1, how much of the correction is used
+        // When the edited body puts the spot out of the arm's reach (a longer torso, a bigger penis...):
+        double shoulder_turn{30.0}; // the collar bone may turn this far (degrees) toward it first,
+        double stretch{1.2};        // then the arm may grow up to this factor (1 = never) to get there
+        bool fingers{true};         // finger joints follow the body part's new shape (open around a thicker one)
+        bool feet{true};            // feet and knees that touch the body (crossed legs, a foot on a knee) follow it too
+    };
+
+    // An arm found by name: upper arm -> forearm -> hand (twist / roll helpers in between are allowed).
+    // `palm` is the middle (else index) finger's first bone below the hand, -1 if none.
+    struct ArmChain
+    {
+        int32_t upper{-1};
+        int32_t lower{-1};
+        int32_t hand{-1};
+        int32_t palm{-1};
+        int32_t collar{-1}; // clavicle / collar / shoulder bone above the upper arm, -1 if none
+    };
+
+    // Arms of a skeleton (at most four), found by bone names. IK, twist and control bones are skipped.
+    std::vector<ArmChain> find_arms(const std::vector<std::string>& names, const std::vector<int32_t>& parents);
+
+    // What Hand Contact did to one arm on the last apply() (diagnostics).
+    struct HandSample
+    {
+        double weight{0.0};  // 0..1 how much the hand was corrected
+        int32_t anchor{-1};  // the body bone it was nearest to
+        double distance{0.0}; // distance (cm) from the palm to that bone in the game's pose
+        double moved{0.0};   // how far (cm) the correction moved the hand
+        double shortfall{0.0}; // how far (cm) the hand stayed from where the body wants it (out of reach)
+        double turned{0.0};  // degrees the collar bone turned to help
+        double stretched{1.0}; // factor the arm grew by to help
+        int fingers{0};      // finger joints turned to follow the body's shape
+        bool elbow{false};   // only the elbow touched the body (the arm turned to keep it there)
+    };
+
     // Bone edits keyed by case-folded bone name (FName comparison is case-insensitive).
     struct EditEntry
     {
@@ -165,6 +212,17 @@ namespace uuepbs
         // Secondary rigs: the last apply() found its pose copied from the main mesh's grounded pose.
         bool follows_body() const { return m_follows; }
 
+        // ---- Hand Contact -----------------------------------------------------------
+        // Changing whether it is on forces a re-plan on the next bind (the arms are rebuilt while it is on).
+        void set_hands(const HandOptions& options);
+        const HandOptions& hands() const { return m_hands; }
+        const std::vector<ArmChain>& arms() const { return m_arms; }
+        // Per arm (same order as arms()): what the last apply() did.
+        const std::vector<HandSample>& hand_samples() const { return m_hand_samples; }
+        // Per leg (same order as legs()).
+        const std::vector<HandSample>& foot_samples() const { return m_foot_samples; }
+        std::string hands_report() const;
+
         // ---- meshes that copy the main mesh's pose ----------------------------------
         // A head or outfit mesh driven by Copy Pose / Leader Pose from the main mesh already carries every edit
         // the main mesh got; editing it again doubles them (a shorter torso pulls its neck away from the body's).
@@ -227,6 +285,38 @@ namespace uuepbs
         void decide_copy();
         void bend_leg(const LegChain& leg, size_t leg_index, double drop);
         double contact_sink(const LegChain& leg) const;
+        void apply_hands(const Xform* pose);
+        // Where point P (game's pose) belongs on the edited body; returns its contact weight (0 = not near the body).
+        // `skip_leg`: segments of that leg do not count (a foot is always near its own leg).
+        double body_spot(const Xform* pose, const double P[3], double full_cm, double fade_cm, double goal[3], double turn[4], double& best_d,
+                         int32_t& best_bone, int skip_leg = -1);
+        int shape_fingers(const Xform* pose, const ArmChain& arm, size_t arm_index, double full_cm, double fade_cm, const double miss[3]);
+        // One limb for the contact IK: arm (collar, upper arm, forearm, hand) or leg (-, thigh, calf, foot), with the
+        // per-bone lists saying which limb a bone hangs from and below which link (1 upper, 2 lower, 3 end, 4 collar).
+        struct Limb
+        {
+            int32_t collar{-1};
+            int32_t upper{-1};
+            int32_t lower{-1};
+            int32_t end{-1};
+            const std::vector<int8_t>* of{};
+            const std::vector<uint8_t>* part{};
+            int8_t index{-1};
+        };
+        Limb arm_limb(size_t ai) const
+        {
+            const ArmChain& a = m_arms[ai];
+            return {a.collar, a.upper, a.lower, a.hand, &m_arm_of, &m_arm_part, static_cast<int8_t>(ai)};
+        }
+        Limb leg_limb(size_t li) const
+        {
+            const LegChain& l = m_legs[li];
+            return {-1, l.thigh, l.calf, l.foot, &m_leg_of, &m_leg_part, static_cast<int8_t>(li)};
+        }
+        // Two-bone IK onto `target` with the end bone turned to `rot`; `pole` (may be null) is where the middle
+        // joint should point. Out of reach: the collar turns, then the limb stretches (HandOptions).
+        void reach_limb(const Limb& limb, HandSample& sample, const double target[3], const double rot[4], const double* pole);
+        void apply_feet(const Xform* pose);
 
         std::vector<std::string> m_names;
         std::vector<std::string> m_folded;
@@ -291,5 +381,25 @@ namespace uuepbs
         // per leg, last apply(): ankle sink, sole sink, most lift its reach allows; and the lift before the reach limit
         std::array<std::array<double, 3>, 4> m_leg_diag{};
         double m_raw_lift{0.0};
+
+        // Hand Contact
+        HandOptions m_hands{};
+        std::vector<ArmChain> m_arms;
+        // per bone: which arm it hangs from (-1 none) and below which link: 1 = upper arm, 2 = forearm, 3 = hand
+        std::vector<int8_t> m_arm_of;
+        std::vector<uint8_t> m_arm_part;
+        // body bones a hand can rest on (not an arm, not a helper or root), and the body bone each one's segment starts at
+        std::vector<int32_t> m_body_bones;
+        std::vector<int32_t> m_body_from;
+        std::vector<HandSample> m_hand_samples;
+        std::vector<HandSample> m_foot_samples;
+        struct HandNear // a body segment near a palm (apply_hands scratch)
+        {
+            size_t k;    // index into m_body_bones
+            double t;    // nearest point along the segment, 0..1
+            double d;    // distance from the palm (cm)
+            double o[3]; // palm minus that point
+        };
+        std::vector<HandNear> m_hand_scratch;
     };
 } // namespace uuepbs

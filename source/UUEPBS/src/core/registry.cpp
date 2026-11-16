@@ -420,6 +420,13 @@ namespace uuepbs
         const uint64_t wanted = rig->actor->revision | (on ? 0 : kDisabledBit);
         const EditBook& book = on ? rig->actor->book : m_empty_book;
         rig->sculptor.set_ground(m_ground); // cheap when unchanged; a change forces the re-bind below
+        {
+            // Hand Contact: the main mesh only (meshes copying its pose get the corrected arms with it), and only
+            // while the character plays one of the listed animations when there is a list.
+            HandOptions h = m_hands;
+            h.enabled = h.enabled && hands_wanted_locked(*rig);
+            rig->sculptor.set_hands(h);
+        }
         // Auto Ground: the character's main mesh measures the lift. Its other meshes (head, outfit - even ones on
         // the full skeleton with legs) compare their pose with the main mesh's: a pose copied from the main mesh's
         // grounded pose needs nothing more; one animated on its own is lifted the same way.
@@ -636,6 +643,159 @@ namespace uuepbs
             }
             out += "  " + rig->owner + " / " + rig->label + " (" + std::to_string(rig->sculptor.legs().size()) + " legs): " +
                    rig->sculptor.ground_report() + "\n";
+        }
+        return out;
+    }
+
+    void Registry::set_hands(const HandOptions& options, std::vector<std::string> anims)
+    {
+        std::lock_guard guard(m_lock);
+        m_hands = options;
+        m_hand_anims.clear();
+        for (const auto& a : anims)
+        {
+            if (!a.empty())
+            {
+                m_hand_anims.push_back(fold_case(a));
+            }
+        }
+    }
+
+    HandOptions Registry::hands() const
+    {
+        std::lock_guard guard(m_lock);
+        return m_hands;
+    }
+
+    std::vector<std::string> Registry::hand_anims() const
+    {
+        std::lock_guard guard(m_lock);
+        return m_hand_anims;
+    }
+
+    void Registry::set_playing(std::map<std::string, std::string> playing)
+    {
+        std::lock_guard guard(m_lock);
+        m_playing = std::move(playing);
+    }
+
+    bool Registry::hands_wanted_locked(const Rig& rig) const
+    {
+        if (!m_hands.enabled || !rig.primary)
+        {
+            return false;
+        }
+        if (m_hand_anims.empty())
+        {
+            return true;
+        }
+        const auto it = m_playing.find(rig.actor_key);
+        if (it == m_playing.end() || it->second.empty())
+        {
+            return false;
+        }
+        const std::string playing = fold_case(it->second);
+        for (const auto& part : m_hand_anims)
+        {
+            if (playing.find(part) != std::string::npos)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    std::string Registry::hands_report() const
+    {
+        std::lock_guard guard(m_lock);
+        std::string out;
+        for (const auto& rig : m_rigs)
+        {
+            if (rig->stale || !rig->primary || !rig->actor || rig->frames == 0)
+            {
+                continue;
+            }
+            const auto it = m_playing.find(rig->actor_key);
+            const std::string playing = it == m_playing.end() || it->second.empty() ? "(nothing reported)" : it->second;
+            std::string state = rig->sculptor.hands_report();
+            if (m_hands.enabled && !hands_wanted_locked(*rig))
+            {
+                state = "waiting (animation not in HandContactAnims)";
+            }
+            else if (m_hands.enabled && rig->actor->book.empty())
+            {
+                state = "no sliders on this character";
+            }
+            out += "  " + rig->owner + " / " + rig->label + ", playing " + playing + ": " + state + "\n";
+        }
+        return out;
+    }
+
+    std::vector<std::string> Registry::hand_status(const std::string& key) const
+    {
+        std::lock_guard guard(m_lock);
+        std::vector<std::string> out;
+        const auto it = m_playing.find(key);
+        out.push_back("Playing: " + (it == m_playing.end() || it->second.empty() ? std::string("no montage") : it->second));
+        for (const auto& rig : m_rigs)
+        {
+            if (rig->stale || !rig->primary || rig->actor_key != key || rig->frames == 0)
+            {
+                continue;
+            }
+            if (!m_hands.enabled)
+            {
+                break;
+            }
+            if (!hands_wanted_locked(*rig))
+            {
+                out.push_back("Waiting: this animation is not in HandContactAnims (config.lua).");
+                break;
+            }
+            if (rig->actor->book.empty())
+            {
+                out.push_back("No sliders on this character, nothing to correct.");
+                break;
+            }
+            const RigSculptor& sc = rig->sculptor;
+            if (sc.arms().empty())
+            {
+                out.push_back("No arms found on this skeleton (upper arm, forearm, hand by name).");
+                break;
+            }
+            const auto& names = sc.names();
+            for (size_t i = 0; i < sc.arms().size(); ++i)
+            {
+                const HandSample h = i < sc.hand_samples().size() ? sc.hand_samples()[i] : HandSample{};
+                char line[320];
+                if (h.weight <= 0.0)
+                {
+                    std::snprintf(line, sizeof line, "%s: free (nearest body part %s)", names[sc.arms()[i].hand].c_str(),
+                                  h.anchor >= 0 ? names[h.anchor].c_str() : "none close");
+                }
+                else
+                {
+                    std::snprintf(line, sizeof line, "%s: %s %s, %.0f%% corrected, moved %.0f cm%s%s%s", names[sc.arms()[i].hand].c_str(),
+                                  h.elbow ? "elbow on" : "on", h.anchor >= 0 ? names[h.anchor].c_str() : "?", h.weight * 100.0, h.moved,
+                                  h.fingers > 0 ? ", fingers shaped" : "", h.turned > 0.5 || h.stretched > 1.005 ? ", shoulder/arm helping" : "",
+                                  h.shortfall > 0.5 ? ", still out of reach" : "");
+                }
+                out.push_back(line);
+            }
+            for (size_t i = 0; i < sc.legs().size() && i < sc.foot_samples().size(); ++i)
+            {
+                const HandSample h = sc.foot_samples()[i];
+                if (h.weight <= 0.0)
+                {
+                    continue; // feet on the ground are the usual case; only feet resting on the body are listed
+                }
+                char line[320];
+                std::snprintf(line, sizeof line, "%s: on %s, %.0f%% corrected, moved %.0f cm%s", names[sc.legs()[i].foot].c_str(),
+                              h.anchor >= 0 ? names[h.anchor].c_str() : "?", h.weight * 100.0, h.moved,
+                              h.shortfall > 0.5 ? ", still out of reach" : "");
+                out.push_back(line);
+            }
+            break;
         }
         return out;
     }

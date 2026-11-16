@@ -52,6 +52,19 @@ struct FakeTargets : ui::TargetSource
     void request_rescan() override {}
     std::string link_text() override { return "connected, script v2.0.0, 2 rigs"; }
     std::string hotkey_text() override { return "F6"; }
+    bool hand_contact(HandOptions& out, bool& custom) override
+    {
+        out = hands;
+        custom = true;
+        return true;
+    }
+    void set_hand_contact(const HandOptions& o) override { hands = o; }
+    std::vector<std::string> hand_status() override
+    {
+        return {"Playing: A_Sex-Solo_JerkMed-Futa-LoopA_Montage", "hand_r: on cock_02, 100% corrected, moved 31 cm, shoulder/arm helping",
+                "hand_l: on thigh_l, 100% corrected, moved 22 cm"};
+    }
+    HandOptions hands{true};
     int auto_ground() override { return 1; }
     std::string physics = "follow";
     std::string physics_mode() override { return physics; }
@@ -529,6 +542,7 @@ int main(int argc, char** argv)
                           {ui::PanelView::Tab::Scale, -1, "preview_scale_overall.ppm", false, 0, "Overall"},
                           {ui::PanelView::Tab::Scale, -1, "preview_scale_muscle.ppm", false, 0, "Muscle"},
                           {ui::PanelView::Tab::Scale, -1, "preview_scale_camera.ppm", false, 0, "Camera"},
+                          {ui::PanelView::Tab::Scale, -1, "preview_scale_animation.ppm", false, 0, "Animation"},
                           {ui::PanelView::Tab::Simplified, -1, "preview_body_groin.ppm", false, 0, "Proportions", "Groin"},
                           {ui::PanelView::Tab::Simplified, -1, "preview_body_chest.ppm", false, 0, "Proportions", "Chest"},
                           {ui::PanelView::Tab::Simplified, -1, "preview_body_torso.ppm", false, 0, "Proportions", "Torso"},

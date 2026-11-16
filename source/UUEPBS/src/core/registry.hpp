@@ -187,6 +187,18 @@ namespace uuepbs
         // One line per tracked mesh of edited characters with what Auto Ground saw and did (diagnostics).
         std::string ground_report() const;
 
+        // Hand Contact (see HandOptions in sculpt.hpp), for every character's main mesh. `anims`: when not empty,
+        // only while the character plays an animation whose name contains one of these (case-insensitive).
+        void set_hands(const HandOptions& options, std::vector<std::string> anims);
+        HandOptions hands() const;
+        std::vector<std::string> hand_anims() const;
+        // What each character plays right now (reported by Lua: montage, else the single-node animation), by actor key.
+        void set_playing(std::map<std::string, std::string> playing);
+        // One line per edited character's main mesh: what it plays and where each hand rests (diagnostics).
+        std::string hands_report() const;
+        // The window's live readout for one character: what it plays, then one line per hand.
+        std::vector<std::string> hand_status(const std::string& key) const;
+
         bool enabled() const { return m_enabled.load(std::memory_order_relaxed); }
         void set_enabled(bool on); // also bumps the morph revision (morphs are sent to Lua only while enabled)
 
@@ -302,6 +314,10 @@ namespace uuepbs
         std::atomic<bool> m_enabled{true};
         CompareSwitch m_compare;
         GroundOptions m_ground{}; // guarded by m_lock
+        HandOptions m_hands{};    // guarded by m_lock
+        std::vector<std::string> m_hand_anims;          // folded name parts, guarded by m_lock
+        std::map<std::string, std::string> m_playing;   // actor key -> animation playing, guarded by m_lock
+        bool hands_wanted_locked(const Rig& rig) const;
 
         SkeletonView m_view;
         std::atomic<uint64_t> m_skeleton_revision{0};

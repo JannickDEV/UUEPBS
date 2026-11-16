@@ -74,6 +74,18 @@ namespace uuepbs::ui
         // the script, which applies it in either AutoGroundMode and remembers it in the presets folder.
         virtual int auto_ground() { return -1; }
         virtual void set_auto_ground(bool on) { (void)on; }
+        // Hand Contact (Character Scale > Animation). False when the DLL has no settings yet. `custom` = set in the
+        // window (remembered in the presets folder), else config.lua's values.
+        virtual bool hand_contact(HandOptions& out, bool& custom)
+        {
+            (void)out;
+            (void)custom;
+            return false;
+        }
+        virtual void set_hand_contact(const HandOptions& o) { (void)o; }
+        virtual void reset_hand_contact() {}
+        // Live readout for the character picked in the window.
+        virtual std::vector<std::string> hand_status() { return {}; }
         // "Collision follows Height" (config.lua CollisionFollow): 1 on, 0 off, -1 unknown (older script).
         // The script sizes each character's collision capsule with its Height and remembers the switch.
         virtual int collision_follow() { return -1; }
@@ -173,6 +185,7 @@ namespace uuepbs::ui
                        const char* note);
         // Character Scale tab (height and proportions, see core/proportions.hpp).
         void draw_scale();
+        void draw_animation_fixes(); // Character Scale > Animation (Hand Contact)
         std::vector<Category> scale_categories() const;
         bool scale_available(const ScaleSlider& sl) const;
         void write_scale(const ScaleSlider& sl, double value);
