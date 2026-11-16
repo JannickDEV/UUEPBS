@@ -12,7 +12,6 @@
 #include "camera.hpp"
 #include "body_groups.hpp"
 #include "compare.hpp"
-#include "follow.hpp"
 #include "mirror.hpp"
 #include "morphs.hpp"
 #include "sculpt.hpp"
@@ -80,7 +79,7 @@ namespace uuepbs
         bool primary{};
         std::string actor; // actor key
         bool active{};     // belongs to the character picked in the window
-        bool follows{};    // an extra mesh that copies the main mesh's edited pose: left alone (follow.hpp)
+        bool follows{};    // an extra mesh that copies the main mesh's edited pose: shared bones left alone (sculpt.hpp)
         int32_t legs{};    // legs found for Auto Ground
         bool lifted{};     // Auto Ground, mesh without legs: took the body's lift (false = follows the body already)
     };
@@ -268,12 +267,6 @@ namespace uuepbs
             uint64_t bound_body{0};     // BodyMapSource revision the sculptor was last bound with
             std::vector<Xform> scratch; // float poses are converted here
             std::vector<int32_t> inputs; // bones converted for the current frame
-            // Extra meshes only: does this mesh copy the main mesh's finished pose? (follow.hpp)
-            FollowLatch follow;
-            uintptr_t follow_main{};          // main mesh `to_main` was built for
-            int32_t follow_main_bones{};      // and its bone count then
-            std::vector<int32_t> to_main;     // this rig's bone -> the main mesh's bone (-1 = none)
-            std::vector<FollowSample> samples; // scratch
             std::string probe_name;      // Auto Ground: actor hip bone name looked up last, and its index here
             int32_t probe_index{-1};
             std::vector<int32_t> follow_map; // this mesh's bones -> the main mesh's (-1 = not there)
@@ -282,7 +275,6 @@ namespace uuepbs
 
         bool peek_raw(uintptr_t address, void* out, size_t size) const;
         void measure_mirror_locked(const Rig& rig, const std::vector<Xform>& pose, bool local, const char* source);
-        void judge_follow_locked(Rig& rig, const RawArray& pose);
 
         Rig* find_rig(uintptr_t component);
         const Rig* find_rig(uintptr_t component) const;

@@ -243,12 +243,15 @@ static void run_case(const Character& ch, size_t pose_index, const EditBook& boo
             if (leg.ball >= 0)
             {
                 const double h = game[leg.foot].pos[2] - game[leg.ball].pos[2];
-                Xform heel_local = xf::identity();
-                Xform heel_game = game[leg.foot];
-                heel_game.pos[2] -= h;
-                heel_local = xf::relative(heel_game, game[leg.foot]);
-                const Xform heel_now = xf::compose(heel_local, body[leg.foot]);
-                off = std::min(body[leg.ball].pos[2] - game[leg.ball].pos[2], heel_now.pos[2] - heel_game.pos[2]);
+                off = body[leg.ball].pos[2] - game[leg.ball].pos[2];
+                if (h > 0.0) // a heel only where the ball is below the ankle (like RigSculptor::contact_sink)
+                {
+                    Xform heel_game = game[leg.foot];
+                    heel_game.pos[2] -= h;
+                    const Xform heel_local = xf::relative(heel_game, game[leg.foot]);
+                    const Xform heel_now = xf::compose(heel_local, body[leg.foot]);
+                    off = std::min(off, heel_now.pos[2] - heel_game.pos[2]);
+                }
             }
             t.foot.take(std::fabs(off), label + " " + ch.main.names[leg.foot]);
             if (std::getenv("AUDIT_FEET") && std::fabs(off) > 0.05)

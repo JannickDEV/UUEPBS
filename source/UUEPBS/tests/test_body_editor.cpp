@@ -122,6 +122,41 @@ int main()
         m2.parts = resolve_bone_parts(names, nullptr, &taken);
         CHECK(!has(part_bones(m2, "penis"), "Penis_01"));
 
+        // Daz Genesis 8 as Afterparty rigs it: no nipple or glans bone by name. The ends of the breast chains are the
+        // nipples, the last bone of the penis chain is the glans.
+        {
+            const std::vector<std::string> dn = {"hip", "pelvis", "abdomenLower", "chestLower", "chestUpper", "Breast-Root", "lBreastOuter",
+                                                 "lBreastInner", "lBreastCenter", "rBreastOuter", "rBreastInner", "rBreastCenter", "shaftRoot",
+                                                 "shaft1", "shaft2", "shaft3", "shaft4", "lThighBend", "lShin", "lFoot", "rThighBend", "rShin",
+                                                 "rFoot"};
+            const std::vector<int32_t> dp = {-1, 0, 0, 2, 3, 4, 5, 6, 7, 5, 9, 10, 1, 12, 13, 14, 15, 1, 17, 18, 1, 20, 21};
+            const BodyMap dm = resolve_body_groups(dn, dp, BoneDictionary::builtin());
+            const std::vector<std::string>* nipples = nullptr;
+            for (const GroupBones& gb : dm.groups)
+            {
+                if (gb.group.title == "Nipples")
+                {
+                    nipples = &gb.bones;
+                }
+            }
+            CHECK(nipples && nipples->size() == 2 && has(nipples, "lBreastCenter") && has(nipples, "rBreastCenter"));
+            const auto* dg = part_bones(dm, "glans");
+            const auto* dpn = part_bones(dm, "penis");
+            CHECK(dg && dg->size() == 1 && has(dg, "shaft4"));
+            CHECK(dpn && !has(dpn, "shaft4") && has(dpn, "shaft1"));
+            CHECK(!scale_slider_bones(*find_scale_slider("nipple_length"), dm).empty());
+            CHECK(!scale_slider_bones(*find_scale_slider("glans_size"), dm).empty());
+        }
+        // A one-bone breast (boob_l with nothing below) has no tip of its own: no Nipples group made up.
+        {
+            const std::vector<std::string> bn = {"root", "pelvis", "spine_03", "boob_l", "boob_r"};
+            const std::vector<int32_t> bp = {-1, 0, 1, 2, 2};
+            for (const GroupBones& gb : resolve_body_groups(bn, bp, BoneDictionary::builtin()).groups)
+            {
+                CHECK(gb.group.title != "Nipples");
+            }
+        }
+
         // Nothing anatomical on the reference skeleton: no parts at all.
         const Skel roku = load();
         CHECK(roku.names.size() == 184);
