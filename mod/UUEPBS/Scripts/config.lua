@@ -148,6 +148,8 @@ return {
     -- the sliders moved the lowest foot bones, worked out from the reference pose and the sliders in
     -- _last_session.json. Visual only: the collision capsule stays the same.
     -- Console: "ubs ground" (status), "ubs ground on|off", "ubs ground <cm>" (extra, this session).
+    -- The switch in the window (Character Scale > Overall) and "ubs ground on|off" are remembered in
+    -- <presets folder>\_auto_ground.txt and win over this; delete that file to go back to this setting.
     AutoGround = true,
     -- "dll": done inside the pose by the DLL every frame - the body is lifted by what the foot that sank
     --        most sank, and every other leg is bent with IK so its foot stays where the game's foot IK put

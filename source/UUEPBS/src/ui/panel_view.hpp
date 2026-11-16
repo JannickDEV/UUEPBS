@@ -70,6 +70,10 @@ namespace uuepbs::ui
         virtual std::string refresh_hotkey_text() { return {}; } // e.g. "F7", empty = no hotkey
         virtual std::string preset_hotkeys_text() { return {}; } // "previous preset PageUp, next preset PageDown", empty = none
         virtual std::string compare_hotkey_text() { return {}; } // CompareKey, e.g. "F8", empty = no hotkey
+        // Auto Ground (config.lua AutoGround): 1 on, 0 off, -1 unknown (older script). The window's switch asks
+        // the script, which applies it in either AutoGroundMode and remembers it in the presets folder.
+        virtual int auto_ground() { return -1; }
+        virtual void set_auto_ground(bool on) { (void)on; }
         // Who an actor key is across reloads (character_memory.hpp), "" when unknown. Renames are
         // stored under it, so they survive reloads.
         virtual std::string identity_of(const std::string& key) { (void)key; return {}; }
@@ -154,9 +158,9 @@ namespace uuepbs::ui
             size_t changed{0};
         };
         std::vector<Category> categories() const;
-        void draw_category_rail(const std::vector<Category>& cats, float width);
+        bool draw_category_rail(const std::vector<Category>& cats, float width); // true when a category was clicked
         // The left column of the Body and Character Scale tabs: a heading, one row per entry, a note.
-        void draw_rail(const char* id, const char* heading, const std::vector<Category>& cats, float width, std::string& picked_name,
+        bool draw_rail(const char* id, const char* heading, const std::vector<Category>& cats, float width, std::string& picked_name,
                        const char* note);
         // Character Scale tab (height and proportions, see core/proportions.hpp).
         void draw_scale();
@@ -167,6 +171,12 @@ namespace uuepbs::ui
         void refresh_body_sliders();
         bool group_hidden(const GroupBones& gb) const;
         bool slider_hidden(const ScaleSlider& sl) const; // replaced by a named morph and not set
+        // Body tab search (m_body_filter): a row matches by its shown name, a group also by its bones, a morph
+        // group also by its morph target names. Everything matches an empty search.
+        bool body_hit(const GroupBones& gb) const;
+        bool body_hit(const ScaleSlider& sl) const;
+        bool body_hit(const MorphGroupMorphs& mg) const;
+        size_t body_hits(const Category& cat) const; // rows of the category the search leaves
         // One slider row:  label | hairline track | number box (click to type) | [XYZ] | Reset.
         struct RowResult
         {
@@ -341,6 +351,8 @@ namespace uuepbs::ui
 
         // Simplified Panel: show only the body parts / morph groups that are changed
         bool m_simplified_changed_only{false};
+        char m_body_filter[64]{}; // Body tab search: every category's sliders whose name matches
+        char m_char_filter[64]{}; // Choose character search
 
         // Presets tab: details of the picked preset
         std::string m_details_for{};

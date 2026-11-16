@@ -2709,6 +2709,8 @@ local function build_state()
         "ground_ik=" .. (Config.AutoGroundLegIK == false and "0" or "1"),
         "ground_extra=" .. string.format("%.3f", late.groundDll.extra),
         "ground_max=" .. tostring(tonumber(Config.AutoGroundMaxCm) or 40),
+        -- the window's Auto Ground switch shows this (either AutoGroundMode)
+        "ground_ui=" .. (late.groundWanted and "1" or "0"),
     }, "\t"))
     add("scan\t" .. scanCount)
     -- engine names go last on each line (older DLLs ignore the extra field)
@@ -2765,7 +2767,7 @@ local function write_state()
     stateDirty = false
 end
 
-local seen = { rescan = 0, pick = 0, refresh = 0, relist = 0, session = nil }
+local seen = { rescan = 0, pick = 0, refresh = 0, relist = 0, groundui = 0, session = nil }
 local hookState, hookText = "waiting", ""
 local windowOpen = false
 local lastDllText = nil
@@ -2797,7 +2799,7 @@ local function read_dll_state()
     if dllSession ~= seen.session then
         -- New DLL session: take its counters as the baseline.
         seen.session = dllSession
-        seen.rescan, seen.pick, seen.refresh, seen.relist = -1, -1, -1, -1
+        seen.rescan, seen.pick, seen.refresh, seen.relist, seen.groundui = -1, -1, -1, -1, -1
     end
     local mine = false -- ack/replies are only ours once the DLL has seen this script's session
     local open = false
@@ -2837,6 +2839,13 @@ local function read_dll_state()
                 wantCandidates = true
             end
             seen.refresh = n
+        elseif kind == "groundui" then
+            -- the window's Auto Ground switch (Character Scale tab)
+            local n = tonumber(a) or 0
+            if seen.groundui >= 0 and n ~= seen.groundui and late.set_ground then
+                late.set_ground(b == "1")
+            end
+            seen.groundui = n
         elseif kind == "relist" then
             local n = tonumber(a) or 0
             if seen.relist >= 0 and n ~= seen.relist then
@@ -2971,7 +2980,17 @@ end
 -- AutoGroundMode "dll" (default): the DLL lifts the pose and bends the legs onto the ground itself
 -- (needs a DLL built with Auto Ground). "lua": the older way, moving the player's mesh from here.
 late.groundMode = string.lower(tostring(Config.AutoGroundMode or "dll"))
-late.groundDll = { on = Config.AutoGround ~= false and late.groundMode == "dll", extra = tonumber(Config.AutoGroundExtraCm) or 0 }
+-- The window's switch and "ubs ground on|off" are remembered in the presets folder and win over config.lua.
+late.groundFile = presetFolder .. "\\_auto_ground.txt"
+late.groundWanted = Config.AutoGround ~= false
+do
+    local saved = read_text(late.groundFile)
+    saved = saved and saved:match("^%s*(%a+)")
+    if saved == "on" or saved == "off" then
+        late.groundWanted = saved == "on"
+    end
+end
+late.groundDll = { on = late.groundWanted and late.groundMode == "dll", extra = tonumber(Config.AutoGroundExtraCm) or 0 }
 late.ground = require("uuepbs_ground").new({
     json = json,
     read_text = read_text,
@@ -2987,12 +3006,31 @@ late.ground = require("uuepbs_ground").new({
     end,
     sessionFile = presetFolder .. "\\_last_session.json",
     playerKey = PLAYER_KEY,
-    enabled = Config.AutoGround ~= false and late.groundMode == "lua",
+    enabled = late.groundWanted and late.groundMode == "lua",
     extraCm = Config.AutoGroundExtraCm,
     maxCm = Config.AutoGroundMaxCm,
     followPose = Config.AutoGroundFollowPose ~= false,
     smoothing = Config.AutoGroundSmoothing,
 })
+
+-- Auto Ground on / off for every character (window switch, "ubs ground on|off"), remembered across sessions.
+function late.set_ground(on)
+    late.groundWanted = on
+    if late.groundMode == "dll" then
+        late.groundDll.on = on -- sent with the next bridge write
+    else
+        ExecuteInGameThread(function()
+            late.ground.set_enabled(on)
+        end)
+    end
+    stateDirty = true
+    local f = io.open(late.groundFile, "wb")
+    if f then
+        f:write(on and "on\n" or "off\n")
+        f:close()
+    end
+    say("auto ground %s", on and "on" or "off")
+end
 
 local scanDue = 0 -- when the plan is next worked out (see make_plan)
 local scanFull = false -- ... and everyone collected again
@@ -3470,7 +3508,7 @@ local function console(_, params, out)
         if late.groundMode == "dll" then
             -- done by the DLL: change its settings (sent with the next bridge write)
             if arg == "on" or arg == "off" then
-                late.groundDll.on = arg == "on"
+                late.set_ground(arg == "on")
             elseif tonumber(arg) then
                 late.groundDll.extra = tonumber(arg)
             end
@@ -3480,9 +3518,7 @@ local function console(_, params, out)
             return true
         end
         if arg == "on" or arg == "off" then
-            ExecuteInGameThread(function()
-                late.ground.set_enabled(arg == "on")
-            end)
+            late.set_ground(arg == "on")
         elseif tonumber(arg) then
             late.ground.set_extra(tonumber(arg))
         end

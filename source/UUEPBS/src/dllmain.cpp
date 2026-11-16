@@ -319,6 +319,26 @@ namespace
             return text;
         }
 
+        int auto_ground() override
+        {
+            std::lock_guard guard(m_lock);
+            if (m_ground_wish >= 0)
+            {
+                return m_ground_wish; // clicked, the script has not answered yet
+            }
+            const std::string on = m_state.setting("ground_ui");
+            return on.empty() ? -1 : on == "1" ? 1 : 0; // "" = a script without the switch
+        }
+
+        void set_auto_ground(bool on) override
+        {
+            std::lock_guard guard(m_lock);
+            ++m_out.ground;
+            m_out.ground_on = on;
+            m_ground_wish = on ? 1 : 0;
+            m_out_dirty = true;
+        }
+
         std::string compare_hotkey_text() override
         {
             const int vk = m_compare_key.load();
@@ -832,6 +852,10 @@ namespace
                     }
                 }
                 m_state = std::move(state);
+                if (m_ground_wish >= 0 && m_state.setting("ground_ui") == (m_ground_wish == 1 ? "1" : "0"))
+                {
+                    m_ground_wish = -1; // the script took the window's Auto Ground switch
+                }
             }
             for (const auto& c : todo)
             {
@@ -1555,6 +1579,7 @@ namespace
         uuepbs::ThumbnailRequests m_thumbnail_requests; // preset thumbnails (same lock)
         uuepbs::bridge::LuaState m_state;
         uuepbs::bridge::DllState m_out;
+        int m_ground_wish{-1}; // Auto Ground switch clicked in the window and not yet confirmed by the script (m_lock)
         bool m_out_dirty{true};
         Clock::time_point m_last_publish{};
         Clock::time_point m_last_read{};

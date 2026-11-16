@@ -36,6 +36,12 @@ $CXX -std=c++23 -I"$S" test_groups.cpp "${CORE[@]}" -o "$OUT/test_groups"
 "$OUT/test_groups" "$SCRIPTS/BoneDictionary.json"
 end
 
+step "test_ground (Auto Ground on the reference skeleton)"
+python3 ref_to_cache.py roku_ref.txt "$OUT/roku_cache.txt"
+$CXX -std=c++23 -I"$S" test_ground.cpp "${CORE[@]}" -o "$OUT/test_ground"
+"$OUT/test_ground" "$OUT/roku_cache.txt" 184
+end
+
 step "Lua tests (portraits, looks, deformers, camera, copies)"
 $LUA portraits_test.lua "$SCRIPTS" "$OUT/portraits"
 $LUA looks_test.lua "$SCRIPTS"
