@@ -43,6 +43,8 @@
 //     mw <tab> <name> <tab> <weight> <tab> <actor key>
 //     cam <tab> <actor key> <tab> <lift cm> <tab> <distance> <tab> <follow 0/1> <tab> <height>
 //                                                       (Character Scale > Camera; none = the game's own camera)
+//     collui <tab> <counter> <tab> <on 0/1>             (the window's "Collision follows Height" switch was clicked)
+//     height <tab> <actor key> <tab> <height>           (Character Scale > Height, != 1; Lua sizes its collision capsule)
 //
 // Actor keys: "player" for the default character (the controlled pawn or the profile's Target),
 // otherwise the actor's address in hex. "primary" is the main mesh of that character.
@@ -148,6 +150,8 @@ namespace uuepbs::bridge
         uint64_t relist{}; // re-sort the character list from what Lua already knows (no object search)
         uint64_t ground{};     // Auto Ground switch in the window: bumped on each click ...
         bool ground_on{};      // ... with the wished state
+        uint64_t collision{};  // "Collision follows Height" switch in the window: bumped on each click ...
+        bool collision_on{};   // ... with the wished state
         std::string hook_state{"waiting"};
         std::string hook_text;
         bool window_open{};
@@ -164,6 +168,7 @@ namespace uuepbs::bridge
         std::vector<std::string> remembered;                    // identities with saved sliders
         std::vector<std::string> scaled;                        // characters whose sliders scale bones right now
         std::vector<std::pair<std::string, CameraWish>> cameras; // Character Scale > Camera, per actor key
+        std::vector<std::pair<std::string, double>> heights;    // Character Scale > Height (!= 1), per actor key
     };
 
     std::string format_dll_state(const DllState& state);

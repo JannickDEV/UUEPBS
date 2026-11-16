@@ -2233,8 +2233,8 @@ namespace uuepbs::ui
             ImGui::PushTextWrapPos(0.0f);
             if (cat->name == "Overall")
             {
-                ImGui::TextColored(muted(), "The whole character and every mesh it wears, scaled from the feet. Collision stays as it is; "
-                                            "the Camera section moves the third-person camera with it.");
+                ImGui::TextColored(muted(), "The whole character and every mesh it wears, scaled from the feet. Its collision grows and "
+                                            "shrinks along (switch below); the Camera section moves the third-person camera with it.");
             }
             else if (cat->name == "Camera")
             {
@@ -2266,6 +2266,22 @@ namespace uuepbs::ui
                         "lowered by what the sliders moved the feet, and the legs bend so both feet stay on stairs and slopes.\n"
                         "Visual only: the collision capsule stays the same. For every character; remembered in the presets folder "
                         "(_auto_ground.txt). Console: ubs ground.");
+            }
+            // Collision follows Height (config.lua CollisionFollow, "ubs collision"): one switch for every character.
+            const int collision = cat->name == "Overall" && m_targets ? m_targets->collision_follow() : -1;
+            if (collision >= 0)
+            {
+                bool on = collision == 1;
+                if (sk.checkbox("Collision follows Height", &on))
+                {
+                    m_targets->set_collision_follow(on);
+                    set_message(on ? "Collision follows Height" : "Collision: the game's own size");
+                }
+                tooltip("Sizes the character's collision capsule with Height, so a taller character no longer walks through low "
+                        "ceilings and walls and a smaller one no longer floats or stops at wide gaps. The feet stay on the floor, "
+                        "crouching keeps working, and the step height grows along.\n"
+                        "Off: the game's own capsule. For every character; remembered in the presets folder (_collision.txt). "
+                        "Console: ubs collision.");
             }
             ImGui::Dummy(ImVec2(0.0f, dpi_px(4.0f)));
 
@@ -3226,8 +3242,8 @@ namespace uuepbs::ui
         ImGui::Spacing();
         ImGui::PushTextWrapPos(0.0f);
         const std::string key = m_targets ? m_targets->hotkey_text() : std::string("F6");
-        ImGui::TextColored(muted(), "%s opens/closes this window (in game or here). Changes are visual only: collision, "
-                                    "physics bodies and sockets keep their original size. While the game is paused the "
+        ImGui::TextColored(muted(), "%s opens/closes this window (in game or here). Changes are visual only: physics bodies "
+                                    "and sockets keep their original size, and collision follows Height only (Character Scale). While the game is paused the "
                                     "pose updates on the next animated frame.",
                            key.c_str());
         ImGui::PopTextWrapPos();

@@ -399,7 +399,8 @@ namespace
                 folded.push_back(uuepbs::fold_case(a));
             }
             if (old.enabled != h.enabled || old.full_within != h.full_within || old.fade_out != h.fade_out || old.strength != h.strength ||
-                old.shoulder_turn != h.shoulder_turn || old.stretch != h.stretch || reg.hand_anims() != folded)
+                old.shoulder_turn != h.shoulder_turn || old.stretch != h.stretch || old.fingers != h.fingers || old.feet != h.feet ||
+                reg.hand_anims() != folded)
             {
                 reg.set_hands(h, m_hand_anims);
                 char line[256];
@@ -408,6 +409,26 @@ namespace
                               h.stretch, m_hand_list.empty() ? ", every animation" : ", only while playing: ", m_hand_list.c_str());
                 g_log.line(line);
             }
+        }
+
+        int collision_follow() override
+        {
+            std::lock_guard guard(m_lock);
+            if (m_collision_wish >= 0)
+            {
+                return m_collision_wish; // clicked, the script has not answered yet
+            }
+            const std::string on = m_state.setting("collision_ui");
+            return on.empty() ? -1 : on == "1" ? 1 : 0; // "" = a script without the switch
+        }
+
+        void set_collision_follow(bool on) override
+        {
+            std::lock_guard guard(m_lock);
+            ++m_out.collision;
+            m_out.collision_on = on;
+            m_collision_wish = on ? 1 : 0;
+            m_out_dirty = true;
         }
 
         std::string compare_hotkey_text() override
@@ -927,6 +948,10 @@ namespace
                 {
                     m_ground_wish = -1; // the script took the window's Auto Ground switch
                 }
+                if (m_collision_wish >= 0 && m_state.setting("collision_ui") == (m_collision_wish == 1 ? "1" : "0"))
+                {
+                    m_collision_wish = -1; // the script took the window's collision switch
+                }
             }
             for (const auto& c : todo)
             {
@@ -1439,6 +1464,8 @@ namespace
             std::vector<std::string> scaled = reg.scaling_actors();
             // Character Scale > Camera: none while off or comparing (Lua puts the game's camera back).
             auto cameras = send_morphs ? reg.camera_wishes() : decltype(reg.camera_wishes()){};
+            // Height for the collision capsule: none while off or comparing (Lua puts the game's capsule back).
+            auto heights = send_morphs ? reg.height_wishes() : decltype(reg.height_wishes()){};
             {
                 std::lock_guard guard(m_lock);
                 if (morph_rev != m_out.morph_revision)
@@ -1470,6 +1497,11 @@ namespace
                 if (cameras != m_out.cameras)
                 {
                     m_out.cameras = std::move(cameras);
+                    m_out_dirty = true;
+                }
+                if (heights != m_out.heights)
+                {
+                    m_out.heights = std::move(heights);
                     m_out_dirty = true;
                 }
                 if (!m_out_dirty && Clock::now() - m_last_publish < std::chrono::seconds(5))
@@ -1736,6 +1768,7 @@ namespace
         std::vector<std::string> m_hand_anims;  // config.lua HandContactAnims, split
         std::string m_hand_list;
         fs::path m_hand_file;
+        int m_collision_wish{-1}; // collision switch clicked in the window and not yet confirmed by the script (m_lock)
         int m_ground_wish{-1}; // Auto Ground switch clicked in the window and not yet confirmed by the script (m_lock)
         bool m_out_dirty{true};
         Clock::time_point m_last_publish{};

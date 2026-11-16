@@ -901,6 +901,21 @@ namespace uuepbs
         return out;
     }
 
+    std::vector<std::pair<std::string, double>> Registry::height_wishes() const
+    {
+        std::vector<std::pair<std::string, double>> out;
+        std::lock_guard guard(m_lock);
+        for (const auto& [key, a] : m_actors)
+        {
+            const double h = scale_value(a.book, "height");
+            if (std::fabs(h - 1.0) >= kScaleNeutralEps)
+            {
+                out.emplace_back(key, h);
+            }
+        }
+        return out;
+    }
+
     std::vector<ActorSummary> Registry::edited_actors() const
     {
         std::vector<ActorSummary> out;

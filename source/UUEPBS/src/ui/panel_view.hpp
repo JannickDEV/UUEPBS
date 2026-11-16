@@ -86,6 +86,10 @@ namespace uuepbs::ui
         virtual void reset_hand_contact() {}
         // Live readout for the character picked in the window.
         virtual std::vector<std::string> hand_status() { return {}; }
+        // "Collision follows Height" (config.lua CollisionFollow): 1 on, 0 off, -1 unknown (older script).
+        // The script sizes each character's collision capsule with its Height and remembers the switch.
+        virtual int collision_follow() { return -1; }
+        virtual void set_collision_follow(bool on) { (void)on; }
         // Who an actor key is across reloads (character_memory.hpp), "" when unknown. Renames are
         // stored under it, so they survive reloads.
         virtual std::string identity_of(const std::string& key) { (void)key; return {}; }

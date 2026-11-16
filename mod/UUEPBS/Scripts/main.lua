@@ -2721,6 +2721,8 @@ local function build_state()
         "hands_fingers=" .. (Config.HandContactFingers == false and "0" or "1"),
         "hands_feet=" .. (Config.HandContactFeet == false and "0" or "1"),
         "hands_anims=" .. clean(Config.HandContactAnims or ""),
+        -- the window's "Collision follows Height" switch shows this ("" = collision handling off in config.lua)
+        "collision_ui=" .. (late.collision and (late.collisionWanted and "1" or "0") or ""),
     }, "\t"))
     add("scan\t" .. scanCount)
     -- engine names go last on each line (older DLLs ignore the extra field)
@@ -2780,7 +2782,7 @@ local function write_state()
     stateDirty = false
 end
 
-local seen = { rescan = 0, pick = 0, refresh = 0, relist = 0, groundui = 0, session = nil }
+local seen = { rescan = 0, pick = 0, refresh = 0, relist = 0, groundui = 0, collui = 0, session = nil }
 local hookState, hookText = "waiting", ""
 local windowOpen = false
 local lastDllText = nil
@@ -2808,11 +2810,12 @@ local function read_dll_state()
     local rememberList = {}
     local scaledNow = {} -- characters whose sliders scale bones ("scaled" lines)
     local cams = {} -- Character Scale > Camera, actor key -> fields (uuepbs_camera.lua)
+    local heights = {} -- Character Scale > Height (!= 1), actor key -> text (uuepbs_collision.lua)
     local dllSession = text:match("^UBS1 (%S+)")
     if dllSession ~= seen.session then
         -- New DLL session: take its counters as the baseline.
         seen.session = dllSession
-        seen.rescan, seen.pick, seen.refresh, seen.relist, seen.groundui = -1, -1, -1, -1, -1
+        seen.rescan, seen.pick, seen.refresh, seen.relist, seen.groundui, seen.collui = -1, -1, -1, -1, -1, -1
     end
     local mine = false -- ack/replies are only ours once the DLL has seen this script's session
     local open = false
@@ -2859,6 +2862,13 @@ local function read_dll_state()
                 late.set_ground(b == "1")
             end
             seen.groundui = n
+        elseif kind == "collui" then
+            -- the window's "Collision follows Height" switch (Character Scale tab)
+            local n = tonumber(a) or 0
+            if seen.collui >= 0 and n ~= seen.collui and late.set_collision then
+                late.set_collision(b == "1")
+            end
+            seen.collui = n
         elseif kind == "relist" then
             local n = tonumber(a) or 0
             if seen.relist >= 0 and n ~= seen.relist then
@@ -2905,6 +2915,10 @@ local function read_dll_state()
             if a ~= "" then
                 cams[a] = b
             end
+        elseif kind == "height" then
+            if a ~= "" then
+                heights[a] = b
+            end
         elseif kind == "keep" then
             if a ~= "" and not keep[a] then
                 keep[a] = b
@@ -2936,6 +2950,9 @@ local function read_dll_state()
     end
     if late.camera then
         late.camera.want(cams)
+    end
+    if late.collision then
+        late.collision.want(heights)
     end
     if sawMorphs then
         morphWanted = wanted
@@ -3246,6 +3263,10 @@ if Config.CameraControl ~= false then
             key_of = function(pawn)
                 return key_of(pawn, cheap_default())
             end,
+            -- how far "Collision follows Height" moved the pawn's capsule up (a camera boom hangs on it)
+            raised = function(pawn)
+                return late.collision and late.collision.raised(pawn) or 0
+            end,
             -- the character's main mesh origin (its feet on most characters)
             feet_z = function(pawn, key)
                 for _, r in ipairs(rigs) do
@@ -3263,6 +3284,68 @@ if Config.CameraControl ~= false then
         })
     else
         say("camera control off: %s", tostring(mod))
+    end
+end
+
+-- Collision (uuepbs_collision.lua): the collision capsule of every character follows its Height
+-- (window switch "Collision follows Height", "ubs collision on|off", remembered in the presets folder).
+if Config.CollisionFollow ~= "never" then
+    local okL, mod = pcall(require, "uuepbs_collision")
+    if okL and type(mod) == "table" then
+        late.collision = mod
+        late.collisionFile = presetFolder .. "\\_collision.txt"
+        late.collisionWanted = Config.CollisionFollow ~= false
+        local saved = read_text(late.collisionFile)
+        saved = saved and saved:match("^%s*(%a+)")
+        if saved == "on" or saved == "off" then
+            late.collisionWanted = saved == "on"
+        end
+        mod.set_enabled(late.collisionWanted)
+        mod.setup({
+            chatter = chatter,
+            alive = alive,
+            address_num = address_num,
+            name_of = name_of,
+            scale_radius = Config.CollisionRadius ~= false,
+            scale_step = Config.CollisionStepHeight ~= false,
+            -- the character of an actor key: the owner of its main mesh
+            actor_of = function(key)
+                for _, r in ipairs(rigs) do
+                    if r.primary and not r.copy and r.actorKey == key and alive(r.comp) then
+                        local okO, owner = pcall(function()
+                            return r.comp:GetOwner()
+                        end)
+                        if okO and alive(owner) then
+                            return owner, r.comp
+                        end
+                    end
+                end
+                if key == PLAYER_KEY then
+                    local d = cheap_default()
+                    return d and alive(d) and d or nil, nil
+                end
+                return nil
+            end,
+            -- Lua-mode Auto Ground's base height of a mesh it lifts
+            mesh_base_z = function(comp)
+                return late.ground and late.ground.base_z and late.ground.base_z(comp) or nil
+            end,
+        })
+        function late.set_collision(on)
+            late.collisionWanted = on
+            ExecuteInGameThread(function()
+                mod.set_enabled(on)
+            end)
+            stateDirty = true
+            local f = io.open(late.collisionFile, "wb")
+            if f then
+                f:write(on and "on\n" or "off\n")
+                f:close()
+            end
+            say("collision follows height %s", on and "on" or "off")
+        end
+    else
+        say("collision handling off: %s", tostring(mod))
     end
 end
 
@@ -3405,6 +3488,17 @@ if late.camera then
     end)
 end
 
+if late.collision then
+    every(math.max(16, tonumber(Config.CollisionPollMs) or 50), function()
+        if late.collision.busy() then
+            local okT, errT = pcall(late.collision.tick)
+            if not okT then
+                say("collision: %s", tostring(errT))
+            end
+        end
+    end)
+end
+
 local function world_changed()
     cachedController = nil
     liveStale = true
@@ -3490,7 +3584,7 @@ local function rest_of(params, first)
     return table.concat(parts, " ")
 end
 
-local usage = "uuepbs (or ubs) ui | status | rescan | copies | camera | hands | list | load <name> | next | prev | save <name> | on | off | compare [on|off] | reset [all] | diag | skin [name] | morph <name> [weight] | ground [on|off|<extra cm>]"
+local usage = "uuepbs (or ubs) ui | status | rescan | copies | camera | collision [on|off] | hands | list | load <name> | next | prev | save <name> | on | off | compare [on|off] | reset [all] | diag | skin [name] | morph <name> [weight] | ground [on|off|<extra cm>]"
 
 local function console(_, params, out)
     local verb = string.lower(params[1] or "")
@@ -3533,6 +3627,17 @@ local function console(_, params, out)
         send_command("hands", "", true)
     elseif verb == "camera" then
         reply(late.camera and late.camera.status() or "camera control is off (CameraControl in config.lua)")
+    elseif verb == "collision" then
+        -- ubs collision [on | off]
+        local arg = string.lower(params[2] or "")
+        if not late.collision then
+            reply("collision handling is off (CollisionFollow = \"never\" in config.lua)")
+            return true
+        end
+        if arg == "on" or arg == "off" then
+            late.set_collision(arg == "on")
+        end
+        reply(string.format("collision follows height: %s\n%s", late.collisionWanted and "on" or "off", late.collision.status()))
     elseif verb == "load" or verb == "save" or verb == "skin" or verb == "morph" or verb == "reset" or verb == "compare" then
         send_command(verb, rest_of(params, 2), true)
     elseif verb == "ground" then
