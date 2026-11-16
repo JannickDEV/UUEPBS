@@ -348,10 +348,12 @@ static void settings_file()
     o.fade_out = 0.7;
     o.shoulder_turn = 45.0;
     o.stretch = 1.35;
+    o.fingers = false;
+    o.feet = false;
     HandOptions back;
     CHECK(hand_settings::read(hand_settings::write(o), back), "settings file not read back");
     CHECK(!back.enabled && std::fabs(back.strength - 0.6) < 1e-6 && std::fabs(back.fade_out - 0.7) < 1e-6 &&
-              std::fabs(back.shoulder_turn - 45.0) < 1e-6 && std::fabs(back.stretch - 1.35) < 1e-6,
+              std::fabs(back.shoulder_turn - 45.0) < 1e-6 && std::fabs(back.stretch - 1.35) < 1e-6 && !back.fingers && !back.feet,
           "settings changed on the way through the file");
     HandOptions wild;
     CHECK(hand_settings::read("strength=7\r\nstretch=-3\nshoulder=900\nfar=0.01\nnear=0.5\njunk\n# far=9\n", wild), "settings not read");
@@ -361,9 +363,229 @@ static void settings_file()
     CHECK(!hand_settings::read("# nothing here\n", none), "an empty file counted as settings");
 }
 
+// A small made-up rig with a finger lying on a breast bone's surface: when the breast grows 1.6x, the finger
+// joints on it move out with its surface (finger bones keep their length), instead of sinking in.
+static void fingers_follow_surface()
+{
+    struct B
+    {
+        const char* name;
+        int parent;
+        double x, y, z;
+    };
+    const B bones[] = {
+        {"root", -1, 0, 0, 0},          {"pelvis", 0, 0, 0, 100},        {"spine_01", 1, 0, 0, 120},      {"breast_r", 2, 10, -6, 130},
+        {"clavicle_r", 2, 0, -10, 140}, {"upperarm_r", 4, 0, -20, 140},  {"lowerarm_r", 5, 0, -22, 115},  {"hand_r", 6, 12, -14, 124},
+        {"middle_01_r", 7, 14, -11, 127}, {"middle_02_r", 8, 15.5, -8.5, 130}, {"middle_03_r", 9, 16, -6, 132.5}, {"middle_04_r", 10, 15.5, -3.5, 134.5},
+    };
+    Skel sk;
+    std::vector<Xform> comp;
+    for (const B& b : bones)
+    {
+        sk.names.push_back(b.name);
+        sk.parents.push_back(b.parent);
+        Xform x = xf::identity();
+        x.pos[0] = b.x;
+        x.pos[1] = b.y;
+        x.pos[2] = b.z;
+        comp.push_back(x);
+    }
+    for (size_t i = 0; i < comp.size(); ++i)
+    {
+        sk.local.push_back(sk.parents[i] < 0 ? comp[i] : xf::relative(comp[i], comp[sk.parents[i]]));
+    }
+    EditBook book;
+    book["breast_r"] = entry("breast_r", 1.6, 1.6, 1.6, Spread::Chain);
+    std::vector<Xform> stiff, shaped;
+    for (bool fingers : {false, true})
+    {
+        RigSculptor r;
+        r.set_skeleton(sk.names, sk.parents);
+        HandOptions h;
+        h.enabled = true;
+        h.fingers = fingers;
+        r.set_hands(h);
+        r.bind(book, 1, 1.0);
+        std::vector<Xform> pose = component_pose(sk);
+        r.apply(pose.data(), static_cast<int32_t>(pose.size()));
+        (fingers ? shaped : stiff) = pose;
+    }
+    double err_stiff = 0.0, err_shaped = 0.0, worst_len = 0.0;
+    for (int b = 9; b <= 11; ++b)
+    {
+        double d0[3], ds[3], dh[3], l0[3], l1[3];
+        sub(comp[b].pos, comp[3].pos, d0);
+        sub(stiff[b].pos, stiff[3].pos, ds);
+        sub(shaped[b].pos, shaped[3].pos, dh);
+        const double want = 1.6 * len3(d0);
+        err_stiff += std::fabs(len3(ds) - want);
+        err_shaped += std::fabs(len3(dh) - want);
+        sub(comp[b].pos, comp[b - 1].pos, l0);
+        sub(shaped[b].pos, shaped[b - 1].pos, l1);
+        worst_len = std::max(worst_len, std::fabs(len3(l0) - len3(l1)));
+        if (getenv("HANDS_DEBUG"))
+        {
+            std::printf("  %-12s src %.2f want %.2f stiff %.2f shaped %.2f\n", sk.names[b].c_str(), len3(d0), want, len3(ds), len3(dh));
+        }
+    }
+    std::printf("fingers on a 1.6x breast: %.2f cm off its surface on average with stiff fingers, %.2f cm shaped\n", err_stiff / 3.0, err_shaped / 3.0);
+    // (finger bones keep their length, so the joints cannot all land exactly on the 1.6x surface: closer, and the tip out of it)
+    CHECK(err_shaped < err_stiff * 0.85, "fingers did not follow the bigger breast (%.2f vs %.2f)", err_shaped, err_stiff);
+    double tip_s[3], tip_h[3];
+    sub(stiff[11].pos, stiff[3].pos, tip_s);
+    sub(shaped[11].pos, shaped[3].pos, tip_h);
+    CHECK(len3(tip_h) > len3(tip_s) + 0.5, "fingertip still sinks into the bigger breast (%.2f vs %.2f cm)", len3(tip_h), len3(tip_s));
+    CHECK(worst_len < 1.0e-3, "finger bone lengths changed (%.4f cm)", worst_len);
+}
+
+
+struct MadeBone
+{
+    const char* name;
+    int parent;
+    double x, y, z;
+};
+
+// a made-up rig from component-space joint positions (no rotations)
+static Skel made_rig(const std::vector<MadeBone>& bones, std::vector<Xform>& comp)
+{
+    Skel sk;
+    comp.clear();
+    for (const MadeBone& b : bones)
+    {
+        sk.names.push_back(b.name);
+        sk.parents.push_back(b.parent);
+        Xform x = xf::identity();
+        x.pos[0] = b.x;
+        x.pos[1] = b.y;
+        x.pos[2] = b.z;
+        comp.push_back(x);
+    }
+    for (size_t i = 0; i < comp.size(); ++i)
+    {
+        sk.local.push_back(sk.parents[i] < 0 ? comp[i] : xf::relative(comp[i], comp[sk.parents[i]]));
+    }
+    return sk;
+}
+
+static std::vector<Xform> run_with(const Skel& sk, const EditBook& book, const HandOptions& h, RigSculptor* keep = nullptr)
+{
+    RigSculptor r;
+    r.set_skeleton(sk.names, sk.parents);
+    r.set_hands(h);
+    r.bind(book, 1, 1.0);
+    std::vector<Xform> pose = component_pose(sk);
+    r.apply(pose.data(), static_cast<int32_t>(pose.size()));
+    if (keep)
+    {
+        *keep = r;
+    }
+    return pose;
+}
+
+// Not a touch animation at all: an arm hangs with its elbow against the waist and the hand held forward. A wider
+// waist pushes the elbow out (the arm turns about the shoulder); with Hand Contact off it would sink in.
+static void elbow_follows_waist()
+{
+    std::vector<Xform> comp;
+    const Skel sk = made_rig({{"root", -1, 0, 0, 0},
+                              {"pelvis", 0, 0, 0, 100},
+                              {"spine_01", 1, 0, 0, 120},
+                              {"spine_02", 2, 0, 0, 140},
+                              {"clavicle_r", 3, 0, -8, 145},
+                              {"upperarm_r", 4, 0, -14, 145},
+                              {"lowerarm_r", 5, 0, -5, 120},
+                              {"hand_r", 6, 25, -5, 120}},
+                             comp);
+    EditBook book;
+    for (const char* b : {"pelvis", "spine_01", "spine_02"})
+    {
+        book[b] = entry(b, 1.0, 1.5, 1.0, Spread::Solo);
+    }
+    HandOptions h;
+    h.enabled = false;
+    const std::vector<Xform> off = run_with(sk, book, h);
+    h.enabled = true;
+    RigSculptor keep;
+    const std::vector<Xform> on = run_with(sk, book, h, &keep);
+    const double out_off = -off[6].pos[1], out_on = -on[6].pos[1];
+    double ul0[3], ul1[3], lh0[3], lh1[3];
+    sub(comp[6].pos, comp[5].pos, ul0);
+    sub(on[6].pos, on[5].pos, ul1);
+    sub(comp[7].pos, comp[6].pos, lh0);
+    sub(on[7].pos, on[6].pos, lh1);
+    std::printf("elbow at a 1.5x wider waist: %.2f cm out without, %.2f cm with (wanted about 7.5); %s\n", out_off, out_on, keep.hands_report().c_str());
+    CHECK(out_on > out_off + 1.5, "the elbow did not move out with the wider waist (%.2f vs %.2f cm)", out_on, out_off);
+    CHECK(keep.hand_samples().size() == 1 && keep.hand_samples()[0].elbow, "the elbow contact was not reported");
+    CHECK(std::fabs(len3(ul0) - len3(ul1)) < 1.0e-3 && std::fabs(len3(lh0) - len3(lh1)) < 1.0e-3, "arm bone lengths changed");
+}
+
+// Crossed legs: the right foot rests on the left knee. A thicker left leg lifts the foot with it (the right leg
+// bends to reach); "Feet and knees too" off leaves it where it was.
+static void foot_follows_knee()
+{
+    std::vector<Xform> comp;
+    const Skel sk = made_rig({{"root", -1, 0, 0, 0},
+                              {"pelvis", 0, 0, 0, 100},
+                              {"spine_01", 1, 0, 0, 120},
+                              {"thigh_l", 1, 0, 10, 95},
+                              {"calf_l", 3, 5, 10, 50},
+                              {"foot_l", 4, 0, 10, 8},
+                              {"ball_l", 5, 12, 10, 2},
+                              {"thigh_r", 1, 0, -10, 95},
+                              {"calf_r", 7, 35, -10, 75},
+                              {"foot_r", 8, 12, 8, 56},
+                              {"ball_r", 9, 14, 18, 54}},
+                             comp);
+    EditBook book;
+    for (const char* b : {"thigh_l", "calf_l"})
+    {
+        book[b] = entry(b, 1.5, 1.5, 1.0, Spread::Solo);
+    }
+    HandOptions h;
+    h.enabled = true;
+    h.feet = false;
+    const std::vector<Xform> no_feet = run_with(sk, book, h);
+    h.feet = true;
+    RigSculptor keep;
+    const std::vector<Xform> on = run_with(sk, book, h, &keep);
+    auto point = [](const std::vector<Xform>& p, double out[3]) {
+        for (int c = 0; c < 3; ++c)
+        {
+            out[c] = 0.5 * (p[9].pos[c] + p[10].pos[c]);
+        }
+    };
+    // distance of the foot from the left thigh's line (it should grow about 1.5x)
+    auto off_thigh = [&](const std::vector<Xform>& p) {
+        double P[3], a[3], ab[3];
+        point(p, P);
+        sub(P, p[3].pos, a);
+        sub(p[4].pos, p[3].pos, ab);
+        const double t = (a[0] * ab[0] + a[1] * ab[1] + a[2] * ab[2]) / (ab[0] * ab[0] + ab[1] * ab[1] + ab[2] * ab[2]);
+        const double d[3] = {a[0] - t * ab[0], a[1] - t * ab[1], a[2] - t * ab[2]};
+        return len3(d);
+    };
+    const double d0 = off_thigh(comp), d_off = off_thigh(no_feet), d_on = off_thigh(on);
+    std::printf("foot on a 1.5x thicker knee: %.2f cm from the thigh in the game's pose, %.2f with feet off, %.2f with feet on; %s\n", d0, d_off,
+                d_on, keep.hands_report().c_str());
+    CHECK(std::fabs(d_off - d0) < 1.0e-3, "the foot moved with feet switched off");
+    CHECK(d_on > d0 * 1.3, "the foot did not follow the thicker leg (%.2f -> %.2f cm)", d0, d_on);
+    CHECK(keep.foot_samples().size() == 2 && keep.foot_samples()[1].weight > 0.5 && keep.foot_samples()[0].weight == 0.0,
+          "foot contact not found (or the standing foot was moved)");
+    double l0[3], l1[3];
+    sub(comp[9].pos, comp[8].pos, l0);
+    sub(on[9].pos, on[8].pos, l1);
+    CHECK(std::fabs(len3(l0) - len3(l1)) < 1.0e-3, "shin length changed");
+    // the standing left foot stays where it was
+    CHECK(dist(on[5], comp[5]) < 1.0e-6, "the standing foot moved");
+}
+
 int main(int argc, char** argv)
 {
     find_arms_by_name();
+    fingers_follow_surface();
+    elbow_follows_waist();
+    foot_follows_knee();
     settings_file();
     if (argc < 4)
     {
@@ -607,6 +829,7 @@ int main(int argc, char** argv)
             CHECK(placed >= 3.0 || hs.turned > 0.0 || hs.stretched > 1.0, "out of reach, yet neither shoulder nor arm helped");
             CHECK(hs.stretched <= 1.2 + 1.0e-9 && hs.turned <= 30.0 + 1.0e-6, "shoulder / arm went past the limits");
             CHECK(rs.arms()[ai].collar >= 0, "no collar bone found");
+
         }
     }
 

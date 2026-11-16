@@ -2084,10 +2084,11 @@ namespace uuepbs::ui
         }
         ImGui::PushFont(nullptr, style.FontSizeBase * 0.86f);
         ImGui::PushTextWrapPos(0.0f);
-        ImGui::TextColored(muted(), "The game's animations are made for its own body. Hand Contact keeps hands that touch the body "
-                                    "(a hand on the hip, chest or anywhere else) on the edited body: the hand follows the body part it "
-                                    "rests on, and the arm bends to reach it. Works in every game and for every character; hands away "
-                                    "from the body are left alone.");
+        ImGui::TextColored(muted(), "The game's animations are made for its own body. Hand Contact keeps hands, elbows and feet that touch "
+                                    "the body (a hand on the hip or chest, arms at the sides, crossed legs) on the edited body in every "
+                                    "animation: they follow the body part they rest on, the arm or leg bends to reach it, and the fingers "
+                                    "open around a bigger part. Works in every game and for every character; what is away from the body is "
+                                    "left alone.");
         ImGui::PopTextWrapPos();
         ImGui::PopFont();
         ImGui::Dummy(ImVec2(0.0f, dpi_px(4.0f)));
@@ -2155,6 +2156,22 @@ namespace uuepbs::ui
         row("hand_stretch", "Arm stretch",
             "If the shoulder alone is not enough, the arm may grow by up to this much to reach. 1.00x never stretches.", o.stretch, 1.0f, 1.5f,
             def.stretch, "%.2fx", 1.0f);
+        bool fingers = o.fingers;
+        if (sk.checkbox("Fingers follow the body's shape", &fingers))
+        {
+            o.fingers = fingers;
+            changed = true;
+        }
+        tooltip("The fingers of a hand on the body open around a thicker or bigger body part and close around a thinner one, "
+                "instead of keeping the game's grip and sinking in.");
+        bool feet = o.feet;
+        if (sk.checkbox("Feet and knees too", &feet))
+        {
+            o.feet = feet;
+            changed = true;
+        }
+        tooltip("A foot or knee resting on the body (crossed legs, a foot on the other knee, knees together) follows the edited body "
+                "the same way; the leg bends to reach. Feet on the ground are left to Auto Ground.");
         ImGui::EndDisabled();
         sk.end_child();
         ImGui::PopStyleVar();

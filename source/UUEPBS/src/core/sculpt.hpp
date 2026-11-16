@@ -100,6 +100,8 @@ namespace uuepbs
         // When the edited body puts the spot out of the arm's reach (a longer torso, a bigger penis...):
         double shoulder_turn{30.0}; // the collar bone may turn this far (degrees) toward it first,
         double stretch{1.2};        // then the arm may grow up to this factor (1 = never) to get there
+        bool fingers{true};         // finger joints follow the body part's new shape (open around a thicker one)
+        bool feet{true};            // feet and knees that touch the body (crossed legs, a foot on a knee) follow it too
     };
 
     // An arm found by name: upper arm -> forearm -> hand (twist / roll helpers in between are allowed).
@@ -126,6 +128,8 @@ namespace uuepbs
         double shortfall{0.0}; // how far (cm) the hand stayed from where the body wants it (out of reach)
         double turned{0.0};  // degrees the collar bone turned to help
         double stretched{1.0}; // factor the arm grew by to help
+        int fingers{0};      // finger joints turned to follow the body's shape
+        bool elbow{false};   // only the elbow touched the body (the arm turned to keep it there)
     };
 
     // Bone edits keyed by case-folded bone name (FName comparison is case-insensitive).
@@ -215,6 +219,8 @@ namespace uuepbs
         const std::vector<ArmChain>& arms() const { return m_arms; }
         // Per arm (same order as arms()): what the last apply() did.
         const std::vector<HandSample>& hand_samples() const { return m_hand_samples; }
+        // Per leg (same order as legs()).
+        const std::vector<HandSample>& foot_samples() const { return m_foot_samples; }
         std::string hands_report() const;
 
         // ---- meshes that copy the main mesh's pose ----------------------------------
@@ -280,7 +286,37 @@ namespace uuepbs
         void bend_leg(const LegChain& leg, size_t leg_index, double drop);
         double contact_sink(const LegChain& leg) const;
         void apply_hands(const Xform* pose);
-        void reach_hand(const ArmChain& arm, size_t arm_index, const double target[3], const double rot[4]);
+        // Where point P (game's pose) belongs on the edited body; returns its contact weight (0 = not near the body).
+        // `skip_leg`: segments of that leg do not count (a foot is always near its own leg).
+        double body_spot(const Xform* pose, const double P[3], double full_cm, double fade_cm, double goal[3], double turn[4], double& best_d,
+                         int32_t& best_bone, int skip_leg = -1);
+        int shape_fingers(const Xform* pose, const ArmChain& arm, size_t arm_index, double full_cm, double fade_cm, const double miss[3]);
+        // One limb for the contact IK: arm (collar, upper arm, forearm, hand) or leg (-, thigh, calf, foot), with the
+        // per-bone lists saying which limb a bone hangs from and below which link (1 upper, 2 lower, 3 end, 4 collar).
+        struct Limb
+        {
+            int32_t collar{-1};
+            int32_t upper{-1};
+            int32_t lower{-1};
+            int32_t end{-1};
+            const std::vector<int8_t>* of{};
+            const std::vector<uint8_t>* part{};
+            int8_t index{-1};
+        };
+        Limb arm_limb(size_t ai) const
+        {
+            const ArmChain& a = m_arms[ai];
+            return {a.collar, a.upper, a.lower, a.hand, &m_arm_of, &m_arm_part, static_cast<int8_t>(ai)};
+        }
+        Limb leg_limb(size_t li) const
+        {
+            const LegChain& l = m_legs[li];
+            return {-1, l.thigh, l.calf, l.foot, &m_leg_of, &m_leg_part, static_cast<int8_t>(li)};
+        }
+        // Two-bone IK onto `target` with the end bone turned to `rot`; `pole` (may be null) is where the middle
+        // joint should point. Out of reach: the collar turns, then the limb stretches (HandOptions).
+        void reach_limb(const Limb& limb, HandSample& sample, const double target[3], const double rot[4], const double* pole);
+        void apply_feet(const Xform* pose);
 
         std::vector<std::string> m_names;
         std::vector<std::string> m_folded;
@@ -356,6 +392,7 @@ namespace uuepbs
         std::vector<int32_t> m_body_bones;
         std::vector<int32_t> m_body_from;
         std::vector<HandSample> m_hand_samples;
+        std::vector<HandSample> m_foot_samples;
         struct HandNear // a body segment near a palm (apply_hands scratch)
         {
             size_t k;    // index into m_body_bones

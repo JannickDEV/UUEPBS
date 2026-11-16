@@ -1005,6 +1005,8 @@ namespace
                 h.strength = std::strtod(state.setting("hands_strength", "1").c_str(), nullptr);
                 h.shoulder_turn = std::strtod(state.setting("hands_shoulder", "30").c_str(), nullptr);
                 h.stretch = std::strtod(state.setting("hands_stretch", "1.2").c_str(), nullptr);
+                h.fingers = state.setting("hands_fingers", "1") != "0";
+                h.feet = state.setting("hands_feet", "1") != "0";
                 h = uuepbs::hand_settings::clamp(h);
                 std::vector<std::string> anims;
                 const std::string list = state.setting("hands_anims");

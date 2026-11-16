@@ -775,11 +775,24 @@ namespace uuepbs
                 }
                 else
                 {
-                    std::snprintf(line, sizeof line, "%s: on %s, %.0f%% corrected, moved %.0f cm%s%s", names[sc.arms()[i].hand].c_str(),
-                                  h.anchor >= 0 ? names[h.anchor].c_str() : "?", h.weight * 100.0, h.moved,
-                                  h.turned > 0.5 || h.stretched > 1.005 ? ", shoulder/arm helping" : "",
+                    std::snprintf(line, sizeof line, "%s: %s %s, %.0f%% corrected, moved %.0f cm%s%s%s", names[sc.arms()[i].hand].c_str(),
+                                  h.elbow ? "elbow on" : "on", h.anchor >= 0 ? names[h.anchor].c_str() : "?", h.weight * 100.0, h.moved,
+                                  h.fingers > 0 ? ", fingers shaped" : "", h.turned > 0.5 || h.stretched > 1.005 ? ", shoulder/arm helping" : "",
                                   h.shortfall > 0.5 ? ", still out of reach" : "");
                 }
+                out.push_back(line);
+            }
+            for (size_t i = 0; i < sc.legs().size() && i < sc.foot_samples().size(); ++i)
+            {
+                const HandSample h = sc.foot_samples()[i];
+                if (h.weight <= 0.0)
+                {
+                    continue; // feet on the ground are the usual case; only feet resting on the body are listed
+                }
+                char line[320];
+                std::snprintf(line, sizeof line, "%s: on %s, %.0f%% corrected, moved %.0f cm%s", names[sc.legs()[i].foot].c_str(),
+                              h.anchor >= 0 ? names[h.anchor].c_str() : "?", h.weight * 100.0, h.moved,
+                              h.shortfall > 0.5 ? ", still out of reach" : "");
                 out.push_back(line);
             }
             break;

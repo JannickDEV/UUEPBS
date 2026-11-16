@@ -32,11 +32,11 @@ namespace uuepbs::hand_settings
 
     std::string write(const HandOptions& o)
     {
-        char buf[320];
+        char buf[400];
         std::snprintf(buf, sizeof buf,
                       "# UUEPBS Hand Contact, set in the window (Character Scale > Animation). Delete this file to use config.lua again.\n"
-                      "enabled=%d\nstrength=%.3f\nnear=%.3f\nfar=%.3f\nshoulder=%.1f\nstretch=%.3f\n",
-                      o.enabled ? 1 : 0, o.strength, o.full_within, o.fade_out, o.shoulder_turn, o.stretch);
+                      "enabled=%d\nstrength=%.3f\nnear=%.3f\nfar=%.3f\nshoulder=%.1f\nstretch=%.3f\nfingers=%d\nfeet=%d\n",
+                      o.enabled ? 1 : 0, o.strength, o.full_within, o.fade_out, o.shoulder_turn, o.stretch, o.fingers ? 1 : 0, o.feet ? 1 : 0);
         return buf;
     }
 
@@ -93,6 +93,14 @@ namespace uuepbs::hand_settings
             else if (key == "stretch")
             {
                 o.stretch = v;
+            }
+            else if (key == "fingers")
+            {
+                o.fingers = v != 0.0;
+            }
+            else if (key == "feet")
+            {
+                o.feet = v != 0.0;
             }
             else
             {

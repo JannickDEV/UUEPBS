@@ -2718,6 +2718,8 @@ local function build_state()
         "hands_strength=" .. tostring(tonumber(Config.HandContactStrength) or 1),
         "hands_shoulder=" .. tostring(tonumber(Config.HandContactShoulderTurn) or 30),
         "hands_stretch=" .. tostring(tonumber(Config.HandContactArmStretch) or 1.2),
+        "hands_fingers=" .. (Config.HandContactFingers == false and "0" or "1"),
+        "hands_feet=" .. (Config.HandContactFeet == false and "0" or "1"),
         "hands_anims=" .. clean(Config.HandContactAnims or ""),
     }, "\t"))
     add("scan\t" .. scanCount)

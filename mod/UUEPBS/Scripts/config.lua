@@ -169,10 +169,11 @@ return {
     AutoGroundSmoothing = 0,    -- 0 = none; 0.5 = the lift moves half way to the new value each update (less jitter, a little lag)
 
     -- Hand Contact: the game's animations put the hands where the game's body is. After body edits a
-    -- hand that rests on the body (a self-touch, a hand on the hip or chest) floats or sinks in. With
-    -- this on, a hand that is close to the body in the game's own pose is carried along with the edited
-    -- body part it rests on (moved, turned and scaled with it), and the arm is bent with IK to reach it.
-    -- Hands away from the body are not touched. Done by the DLL inside the pose, for every edited character.
+    -- hand that rests on the body (a self-touch, a hand on the hip or chest, arms at the sides) floats or
+    -- sinks in. With this on, in every animation, a hand, elbow or foot that is close to the body in the
+    -- game's own pose is carried along with the edited body part it rests on (moved, turned and scaled
+    -- with it), the arm or leg is bent with IK to reach it, and the fingers open or close around the new
+    -- shape. Hands and feet away from the body are not touched. Done by the DLL inside the pose, for every edited character.
     -- Console: "ubs hands" (what each character plays and where each hand rests; also in UUEPBS.log).
     -- Easier: the window's Character Scale > Animation section has the same settings with sliders, and what you
     -- set there (remembered in <presets folder>\_hand_contact.txt) wins over these until you press "Use config.lua".
@@ -183,6 +184,8 @@ return {
     -- When the edited body puts the spot out of the arm's reach (longer torso, bigger body part):
     HandContactShoulderTurn = 30, -- the shoulder (collar bone) may turn this many degrees toward it
     HandContactArmStretch = 1.2,  -- then the arm may grow up to this factor to reach (1 = never)
+    HandContactFingers = true,    -- fingers follow the touched part's new shape (open around a thicker part)
+    HandContactFeet = true,       -- feet and knees resting on the body (crossed legs, a foot on a knee) follow it too
     -- Only while the character plays an animation (montage) whose name contains one of these words,
     -- comma separated, e.g. "Touch, Masturbat". "" = whenever a hand is close to the body.
     -- "ubs hands" shows the names of the animations playing.

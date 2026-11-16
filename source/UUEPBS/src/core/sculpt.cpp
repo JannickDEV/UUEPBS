@@ -395,7 +395,7 @@ namespace uuepbs
         o.full_within = std::min(2.0, o.full_within);
         o.fade_out = std::min(3.0, o.fade_out);
         o.strength = std::isfinite(o.strength) ? std::min(1.0, std::max(0.0, o.strength)) : 1.0;
-        const bool replan = o.enabled != m_hands.enabled;
+        const bool replan = o.enabled != m_hands.enabled || o.feet != m_hands.feet;
         m_hands = o;
         if (replan)
         {
@@ -532,6 +532,7 @@ namespace uuepbs
         m_body_bones.clear();
         m_body_from.clear();
         m_hand_samples.assign(m_arms.size(), HandSample{});
+        m_foot_samples.assign(m_legs.size(), HandSample{});
         {
             // helpers (IK targets, virtual bones, weapon sockets...) and everything below them are not body
             std::vector<uint8_t> junk(n, 0), body(n, 0);
@@ -539,7 +540,7 @@ namespace uuepbs
             {
                 const std::string& f = m_folded[i];
                 const int32_t p = m_parents[i];
-                junk[i] = helper_bone(f) || f.rfind("vb ", 0) == 0 || has_any(f, {"curves", "weapon", "gun", "prop"}) || (p >= 0 && junk[p]);
+                junk[i] = helper_bone(f) || f.rfind("vb ", 0) == 0 || has_any(f, {"curves", "weapon", "gun", "prop", "hair", "pony", "braid", "skirt", "cloth", "cape", "coat", "ribbon", "earring", "chain"}) || (p >= 0 && junk[p]);
                 body[i] = p >= 0 && !junk[i] && m_arm_of[i] < 0;
                 if (!body[i])
                 {
@@ -680,7 +681,7 @@ namespace uuepbs
             const int32_t slot = m_edit_slot[i];
             const bool edited = slot >= 0;
             const bool world_root = world_on && p < 0; // a root carries the whole-pose scale to everything below it
-            const bool arm = m_hands.enabled && m_arm_of[i] >= 0; // Hand Contact may bend it
+            const bool arm = m_hands.enabled && (m_arm_of[i] >= 0 || (m_hands.feet && m_leg_of[i] >= 0)); // Hand Contact may bend it
             if (!edited && !moved_by_ancestor && !world_root && !arm)
             {
                 continue;
@@ -989,8 +990,9 @@ namespace uuepbs
         // 3b) Auto Ground: lift the pose and bend the other legs back onto the ground.
         apply_ground(pose);
 
-        // 3c) Hand Contact: hands resting on the body follow the edited body.
+        // 3c) Hand Contact: hands (and elbows, fingers, feet, knees) resting on the body follow the edited body.
         apply_hands(pose);
+        apply_feet(pose);
 
         if (m_quantize)
         {
@@ -1350,7 +1352,7 @@ namespace uuepbs
             return;
         }
         const double u[3] = {ht[0] / d, ht[1] / d, ht[2] / d};
-        // Out of reach: the leg straightens (or folds) as fade_cm as it can.
+        // Out of reach: the leg straightens (or folds) as far as it can.
         d = std::min(a + b - 1.0e-4, std::max(std::fabs(a - b) + 1.0e-3, d));
 
         // Bend direction: where the knee points now, across the hip -> target line.
@@ -1517,7 +1519,6 @@ namespace uuepbs
             return;
         }
         auto src = [&](int32_t b) -> const Xform& { return m_in_plan[b] ? m_source[b] : pose[b]; };
-        auto out = [&](int32_t b) -> const Xform& { return m_in_plan[b] ? m_fresh[b] : pose[b]; };
         auto palm_of = [&](const ArmChain& arm, const Xform& hand, const Xform* palm, double p[3]) {
             for (int a = 0; a < 3; ++a)
             {
@@ -1549,90 +1550,63 @@ namespace uuepbs
             double P[3];
             palm_of(arm, sh, arm.palm >= 0 ? &src(arm.palm) : nullptr, P);
 
-            // every body segment full_cm the palm votes for where the palm belongs now; the nearest ones decide
-            // (a vote fades within a few cm of the nearest distance, so moving between segments never jumps)
-            using Near = HandNear;
-            std::vector<Near>& close_list = m_hand_scratch;
-            close_list.clear();
             double best_d = 1.0e30;
             int32_t best_bone = -1;
-            for (size_t k = 0; k < m_body_bones.size(); ++k)
-            {
-                const int32_t b = m_body_bones[k];
-                const int32_t a = m_body_from[k];
-                const Xform& sa = src(a);
-                const Xform& sb = src(b);
-                const double ab[3] = {sb.pos[0] - sa.pos[0], sb.pos[1] - sa.pos[1], sb.pos[2] - sa.pos[2]};
-                const double ap[3] = {P[0] - sa.pos[0], P[1] - sa.pos[1], P[2] - sa.pos[2]};
-                const double len2 = vdot(ab, ab);
-                const double t = len2 > 1.0e-9 ? std::min(1.0, std::max(0.0, vdot(ap, ab) / len2)) : 1.0;
-                Near e{k, t, 0.0, {P[0] - (sa.pos[0] + t * ab[0]), P[1] - (sa.pos[1] + t * ab[1]), P[2] - (sa.pos[2] + t * ab[2])}};
-                e.d = vlen(e.o);
-                if (!(e.d < fade_cm))
-                {
-                    continue;
-                }
-                if (e.d < best_d)
-                {
-                    best_d = e.d;
-                    best_bone = t > 0.5 ? b : a;
-                }
-                close_list.push_back(e);
-            }
-            const double best = best_d <= full_cm ? 1.0 : smooth((fade_cm - best_d) / (fade_cm - full_cm));
-            constexpr double kFade = 1.5; // cm
-            double sum_w = 0.0;
-            double goal[3] = {0.0, 0.0, 0.0};
-            double turn[4] = {0.0, 0.0, 0.0, 0.0};
-            for (const Near& e : close_list)
-            {
-                const double w = std::exp(-(e.d - best_d) / kFade);
-                if (w < 1.0e-4)
-                {
-                    continue;
-                }
-                const int32_t b = m_body_bones[e.k];
-                const int32_t a = m_body_from[e.k];
-                const double t = e.t;
-                // the same spot on the edited segment, with the offset carried by both ends' edits
-                const Xform& sa = src(a);
-                const Xform& sb = src(b);
-                const Xform& oa = out(a);
-                const Xform& ob = out(b);
-                double ca[3], cb[3];
-                carry(sa, oa, e.o, ca);
-                carry(sb, ob, e.o, cb);
-                double qa[4], qb[4], q[4];
-                turn_of(sa, oa, qa);
-                turn_of(sb, ob, qb);
-                nlerp(qa, qb, t, q);
-                for (int c = 0; c < 3; ++c)
-                {
-                    const double spot = oa.pos[c] + t * (ob.pos[c] - oa.pos[c]);
-                    goal[c] += w * (spot + ca[c] + t * (cb[c] - ca[c]));
-                }
-                const double sign = (turn[0] * q[0] + turn[1] * q[1] + turn[2] * q[2] + turn[3] * q[3]) < 0.0 ? -1.0 : 1.0;
-                for (int c = 0; c < 4; ++c)
-                {
-                    turn[c] += w * sign * q[c];
-                }
-                sum_w += w;
-            }
+            double goal[3], turn[4];
+            const double best = body_spot(pose, P, full_cm, fade_cm, goal, turn, best_d, best_bone);
             HandSample& sample = m_hand_samples[ai];
             sample.anchor = best_bone;
             sample.distance = best_bone >= 0 ? best_d : 0.0;
             const double weight = best * m_hands.strength;
-            if (!(sum_w > 0.0) || weight < 1.0e-4)
+
+            // the elbow near the body (arms at the sides of a wider waist, an elbow on a knee): it follows the body too
+            double elbow_goal[3], elbow_turn[4], elbow_d = 0.0;
+            int32_t elbow_bone = -1;
+            // an elbow counts only when it is close: half the hand's distances (arms hang near the body all the time)
+            const double elbow_w =
+                body_spot(pose, sl.pos, 0.5 * full_cm, 0.5 * fade_cm, elbow_goal, elbow_turn, elbow_d, elbow_bone) * m_hands.strength;
+            double pole_at[3];
+            const double* elbow_pole = nullptr;
+            if (elbow_w > 1.0e-4)
             {
-                continue;
+                const double* K = m_fresh[arm.lower].pos;
+                for (int c = 0; c < 3; ++c)
+                {
+                    pole_at[c] = K[c] + elbow_w * (elbow_goal[c] - K[c]);
+                }
+                elbow_pole = pole_at;
             }
-            for (int c = 0; c < 3; ++c)
+            if (weight < 1.0e-4)
             {
-                goal[c] /= sum_w;
-            }
-            qnormalize(turn);
-            if (!std::isfinite(goal[0] + goal[1] + goal[2] + turn[0] + turn[1] + turn[2] + turn[3]))
-            {
+                if (!elbow_pole)
+                {
+                    continue;
+                }
+                // only the elbow touches: the whole arm turns about the shoulder so the elbow goes where the body wants it
+                const double* H = m_fresh[arm.upper].pos;
+                const double* K = m_fresh[arm.lower].pos;
+                const double hk[3] = {K[0] - H[0], K[1] - H[1], K[2] - H[2]};
+                const double hp[3] = {pole_at[0] - H[0], pole_at[1] - H[1], pole_at[2] - H[2]};
+                double q[4];
+                if (!arc(hk, hp, q))
+                {
+                    continue;
+                }
+                const Xform hand_now = m_fresh[arm.hand];
+                double target[3] = {hand_now.pos[0], hand_now.pos[1], hand_now.pos[2]};
+                const double Hc[3] = {H[0], H[1], H[2]};
+                turn_about(q, Hc, target);
+                double rot[4];
+                xf::qmul(q, hand_now.rot, rot);
+                qnormalize(rot);
+                sample.anchor = elbow_bone;
+                sample.distance = elbow_d;
+                reach_limb(arm_limb(ai), sample, target, rot, elbow_pole);
+                const double moved[3] = {m_fresh[arm.hand].pos[0] - hand_now.pos[0], m_fresh[arm.hand].pos[1] - hand_now.pos[1],
+                                         m_fresh[arm.hand].pos[2] - hand_now.pos[2]};
+                sample.weight = elbow_w;
+                sample.moved = vlen(moved);
+                sample.elbow = true;
                 continue;
             }
 
@@ -1655,26 +1629,324 @@ namespace uuepbs
                 const double palm_goal = palm_now[c] + weight * (goal[c] - palm_now[c]);
                 target[c] = palm_goal - v2[c];
             }
-            reach_hand(arm, ai, target, rot);
+            reach_limb(arm_limb(ai), sample, target, rot, elbow_pole);
             const double* moved_to = m_fresh[arm.hand].pos;
             const double moved[3] = {moved_to[0] - hand_now.pos[0], moved_to[1] - hand_now.pos[1], moved_to[2] - hand_now.pos[2]};
+            sample.weight = weight;
+            sample.moved = vlen(moved);
+
+            // Fingers: each finger joint turns so the joint below it lands where the edited body has its spot (a
+            // thicker or bigger body part opens the grip, a thinner one closes it). Any finger bones, any body part.
+            if (m_hands.fingers)
+            {
+                // what the arm could not reach, the fingers do not chase either
+                double palm_after[3];
+                palm_of(arm, m_fresh[arm.hand], arm.palm >= 0 ? &m_fresh[arm.palm] : nullptr, palm_after);
+                double miss[3];
+                for (int c = 0; c < 3; ++c)
+                {
+                    miss[c] = palm_after[c] - (palm_now[c] + weight * (goal[c] - palm_now[c]));
+                }
+                sample.fingers = shape_fingers(pose, arm, ai, full_cm, fade_cm, miss);
+            }
+        }
+    }
+
+    // Feet (and knees) that rest on the body in the game's pose - crossed legs, a foot on the other knee, knees
+    // together - follow the edited body like hands do: the leg bends with a two-bone IK. A foot that is only near its
+    // own leg does not count, and a foot on the ground is left to Auto Ground.
+    void RigSculptor::apply_feet(const Xform* pose)
+    {
+        for (HandSample& h : m_foot_samples)
+        {
+            h = HandSample{};
+        }
+        if (!m_hands.enabled || !m_hands.feet || !m_ground_primary || m_legs.empty() || m_body_bones.empty() || !pose || m_hands.strength <= 0.0)
+        {
+            return;
+        }
+        auto src = [&](int32_t b) -> const Xform& { return m_in_plan[b] ? m_source[b] : pose[b]; };
+        for (size_t li = 0; li < m_legs.size(); ++li)
+        {
+            const LegChain& leg = m_legs[li];
+            if (!m_in_plan[leg.thigh] || !m_in_plan[leg.calf] || !m_in_plan[leg.foot])
+            {
+                continue;
+            }
+            const Xform& st = src(leg.thigh);
+            const Xform& sc = src(leg.calf);
+            const Xform& sf = src(leg.foot);
+            const double tc[3] = {sc.pos[0] - st.pos[0], sc.pos[1] - st.pos[1], sc.pos[2] - st.pos[2]};
+            const double cf[3] = {sf.pos[0] - sc.pos[0], sf.pos[1] - sc.pos[1], sf.pos[2] - sc.pos[2]};
+            const double length = vlen(tc) + vlen(cf);
+            if (!(length > 1.0e-3))
+            {
+                continue;
+            }
+            // legs are thicker than arms: the same share of the leg's length would reach far; use half of it
+            const double full_cm = 0.5 * m_hands.full_within * length;
+            const double fade_cm = std::max(full_cm + 1.0e-3, 0.5 * m_hands.fade_out * length);
+            double P[3];
+            for (int c = 0; c < 3; ++c)
+            {
+                P[c] = leg.ball >= 0 ? 0.5 * (sf.pos[c] + src(leg.ball).pos[c]) : sf.pos[c];
+            }
+            HandSample& sample = m_foot_samples[li];
+            double goal[3], turn[4], best_d = 0.0;
+            int32_t best_bone = -1;
+            const double weight = body_spot(pose, P, full_cm, fade_cm, goal, turn, best_d, best_bone, static_cast<int>(li)) * m_hands.strength;
+            sample.anchor = best_bone;
+            sample.distance = best_bone >= 0 ? best_d : 0.0;
+            double knee_goal[3], knee_turn[4], knee_d = 0.0;
+            int32_t knee_bone = -1;
+            const double knee_w = body_spot(pose, sc.pos, full_cm, fade_cm, knee_goal, knee_turn, knee_d, knee_bone, static_cast<int>(li)) * m_hands.strength;
+            if (weight < 1.0e-4)
+            {
+                continue; // knees alone are not moved (that would lift the foot off the ground); they only steer the bend
+            }
+            double pole_at[3];
+            const double* pole = nullptr;
+            if (knee_w > 1.0e-4)
+            {
+                const double* K = m_fresh[leg.calf].pos;
+                for (int c = 0; c < 3; ++c)
+                {
+                    pole_at[c] = K[c] + knee_w * (knee_goal[c] - K[c]);
+                }
+                pole = pole_at;
+            }
+            const Xform foot_now = m_fresh[leg.foot];
+            double point_now[3];
+            for (int c = 0; c < 3; ++c)
+            {
+                point_now[c] = leg.ball >= 0 ? 0.5 * (foot_now.pos[c] + m_fresh[leg.ball].pos[c]) : foot_now.pos[c];
+            }
+            double wanted_rot[4], rot[4], spin[4], inv[4];
+            xf::qmul(turn, sf.rot, wanted_rot);
+            nlerp(foot_now.rot, wanted_rot, weight, rot);
+            xf::qconj(foot_now.rot, inv);
+            xf::qmul(rot, inv, spin);
+            const double v[3] = {point_now[0] - foot_now.pos[0], point_now[1] - foot_now.pos[1], point_now[2] - foot_now.pos[2]};
+            double v2[3];
+            xf::qrotate(spin, v, v2);
+            double target[3];
+            for (int c = 0; c < 3; ++c)
+            {
+                target[c] = point_now[c] + weight * (goal[c] - point_now[c]) - v2[c];
+            }
+            reach_limb(leg_limb(li), sample, target, rot, pole);
+            const double moved[3] = {m_fresh[leg.foot].pos[0] - foot_now.pos[0], m_fresh[leg.foot].pos[1] - foot_now.pos[1],
+                                     m_fresh[leg.foot].pos[2] - foot_now.pos[2]};
             sample.weight = weight;
             sample.moved = vlen(moved);
         }
     }
 
-    // Two-bone IK in component space: turns the upper arm about the shoulder and the forearm about the elbow so the
-    // wrist lands on `target` (as fade_cm as the arm reaches), bending in the plane the elbow already bends in. The hand
-    // and everything below it take rotation `rot` and move with the wrist.
-    void RigSculptor::reach_hand(const ArmChain& arm, size_t arm_index, const double target[3], const double rot[4])
+    double RigSculptor::body_spot(const Xform* pose, const double P[3], double full_cm, double fade_cm, double goal[3], double turn[4], double& best_d,
+                                  int32_t& best_bone, int skip_leg)
+    {
+        auto src = [&](int32_t b) -> const Xform& { return m_in_plan[b] ? m_source[b] : pose[b]; };
+        auto out = [&](int32_t b) -> const Xform& { return m_in_plan[b] ? m_fresh[b] : pose[b]; };
+        // every body segment near the point votes for where it belongs now; the nearest ones decide
+        // (a vote fades within a few cm of the nearest distance, so moving between segments never jumps)
+        std::vector<HandNear>& close_list = m_hand_scratch;
+        close_list.clear();
+        best_d = 1.0e30;
+        best_bone = -1;
+        for (size_t k = 0; k < m_body_bones.size(); ++k)
+        {
+            const int32_t b = m_body_bones[k];
+            const int32_t a = m_body_from[k];
+            // a foot does not follow its own leg, nor another shin or foot (feet stand next to each other all the time)
+            if (skip_leg >= 0 && (m_leg_of[b] == skip_leg || m_leg_of[a] == skip_leg || (m_leg_of[a] >= 0 && m_leg_part[a] >= 2)))
+            {
+                continue;
+            }
+            const Xform& sa = src(a);
+            const Xform& sb = src(b);
+            const double ab[3] = {sb.pos[0] - sa.pos[0], sb.pos[1] - sa.pos[1], sb.pos[2] - sa.pos[2]};
+            const double ap[3] = {P[0] - sa.pos[0], P[1] - sa.pos[1], P[2] - sa.pos[2]};
+            const double len2 = vdot(ab, ab);
+            const double t = len2 > 1.0e-9 ? std::min(1.0, std::max(0.0, vdot(ap, ab) / len2)) : 1.0;
+            HandNear e{k, t, 0.0, {P[0] - (sa.pos[0] + t * ab[0]), P[1] - (sa.pos[1] + t * ab[1]), P[2] - (sa.pos[2] + t * ab[2])}};
+            e.d = vlen(e.o);
+            if (!(e.d < fade_cm))
+            {
+                continue;
+            }
+            if (e.d < best_d)
+            {
+                best_d = e.d;
+                best_bone = t > 0.5 ? b : a;
+            }
+            close_list.push_back(e);
+        }
+        if (close_list.empty())
+        {
+            return 0.0;
+        }
+        constexpr double kFade = 1.5; // cm
+        double sum_w = 0.0;
+        for (int c = 0; c < 3; ++c)
+        {
+            goal[c] = 0.0;
+        }
+        for (int c = 0; c < 4; ++c)
+        {
+            turn[c] = 0.0;
+        }
+        for (const HandNear& e : close_list)
+        {
+            const double w = std::exp(-(e.d - best_d) / kFade);
+            if (w < 1.0e-4)
+            {
+                continue;
+            }
+            const int32_t b = m_body_bones[e.k];
+            const int32_t a = m_body_from[e.k];
+            const double t = e.t;
+            // the same spot on the edited segment, with the offset carried by both ends' edits
+            const Xform& sa = src(a);
+            const Xform& sb = src(b);
+            const Xform& oa = out(a);
+            const Xform& ob = out(b);
+            double ca[3], cb[3];
+            carry(sa, oa, e.o, ca);
+            carry(sb, ob, e.o, cb);
+            double qa[4], qb[4], q[4];
+            turn_of(sa, oa, qa);
+            turn_of(sb, ob, qb);
+            nlerp(qa, qb, t, q);
+            for (int c = 0; c < 3; ++c)
+            {
+                const double spot = oa.pos[c] + t * (ob.pos[c] - oa.pos[c]);
+                goal[c] += w * (spot + ca[c] + t * (cb[c] - ca[c]));
+            }
+            const double sign = (turn[0] * q[0] + turn[1] * q[1] + turn[2] * q[2] + turn[3] * q[3]) < 0.0 ? -1.0 : 1.0;
+            for (int c = 0; c < 4; ++c)
+            {
+                turn[c] += w * sign * q[c];
+            }
+            sum_w += w;
+        }
+        if (!(sum_w > 0.0))
+        {
+            return 0.0;
+        }
+        for (int c = 0; c < 3; ++c)
+        {
+            goal[c] /= sum_w;
+        }
+        qnormalize(turn);
+        if (!std::isfinite(goal[0] + goal[1] + goal[2] + turn[0] + turn[1] + turn[2] + turn[3]))
+        {
+            return 0.0;
+        }
+        return best_d <= full_cm ? 1.0 : smooth((fade_cm - best_d) / (fade_cm - full_cm));
+    }
+
+    // Every finger joint below the hand (parents first) turns so the joint below it goes where the edited body has that
+    // joint's spot from the game's pose, by as much as that joint touched the body. At most 45 degrees per joint, bone
+    // lengths kept. Returns how many joints turned.
+    int RigSculptor::shape_fingers(const Xform* pose, const ArmChain& arm, size_t arm_index, double full_cm, double fade_cm, const double miss[3])
     {
         const int8_t ai = static_cast<int8_t>(arm_index);
-        HandSample& sample = m_hand_samples[arm_index];
+        const int32_t n = static_cast<int32_t>(m_names.size());
+        auto below = [&](int32_t i, int32_t j) {
+            for (int32_t p = m_parents[i]; p >= j; p = m_parents[p])
+            {
+                if (p == j)
+                {
+                    return true;
+                }
+            }
+            return false;
+        };
+        int turned = 0;
+        for (int32_t j = arm.hand + 1; j < n; ++j)
+        {
+            if (m_arm_of[j] != ai || m_arm_part[j] != 3 || !m_in_plan[j])
+            {
+                continue;
+            }
+            // the joint below it (first child)
+            int32_t c = -1;
+            for (int32_t i = j + 1; i < n && c < 0; ++i)
+            {
+                if (m_parents[i] == j && m_in_plan[i])
+                {
+                    c = i;
+                }
+            }
+            if (c < 0)
+            {
+                continue;
+            }
+            double goal[3], turn[4], best_d = 0.0;
+            int32_t best_bone = -1;
+            const double w = body_spot(pose, m_source[c].pos, full_cm, fade_cm, goal, turn, best_d, best_bone) * m_hands.strength;
+            if (w < 1.0e-3)
+            {
+                continue;
+            }
+            const double* J = m_fresh[j].pos;
+            const double* C = m_fresh[c].pos;
+            const double now[3] = {C[0] - J[0], C[1] - J[1], C[2] - J[2]};
+            double want[3];
+            for (int k = 0; k < 3; ++k)
+            {
+                want[k] = C[k] + w * (goal[k] + miss[k] - C[k]) - J[k];
+            }
+            double q[4];
+            if (!arc(now, want, q))
+            {
+                continue;
+            }
+            // at most 45 degrees per joint
+            const double half = std::acos(std::min(1.0, std::max(-1.0, q[3])));
+            constexpr double kMaxHalf = 0.3926990816987241; // 22.5 degrees (half of 45)
+            if (half < 1.0e-5)
+            {
+                continue;
+            }
+            if (half > kMaxHalf)
+            {
+                const double sh = std::sin(kMaxHalf) / std::sin(half);
+                q[0] *= sh;
+                q[1] *= sh;
+                q[2] *= sh;
+                q[3] = std::cos(kMaxHalf);
+            }
+            const double Jc[3] = {J[0], J[1], J[2]};
+            for (int32_t i = j; i < n; ++i)
+            {
+                if (i != j && !below(i, j))
+                {
+                    continue;
+                }
+                Xform& x = m_fresh[i];
+                turn_about(q, Jc, x.pos);
+                double r[4];
+                xf::qmul(q, x.rot, r);
+                qnormalize(r);
+                std::memcpy(x.rot, r, sizeof r);
+            }
+            ++turned;
+        }
+        return turned;
+    }
+
+    // Two-bone IK in component space: turns the upper arm about the shoulder and the forearm about the elbow so the
+    // wrist lands on `target` (as far as the arm reaches), bending in the plane the elbow already bends in. The hand
+    // and everything below it take rotation `rot` and move with the wrist.
+    void RigSculptor::reach_limb(const Limb& arm, HandSample& sample, const double target[3], const double rot[4], const double* pole)
+    {
+        const int8_t ai = arm.index;
         // Out of reach: first turn the collar bone toward the spot (the shoulder comes along).
         {
             const double* h0 = m_fresh[arm.upper].pos;
             const double* k0 = m_fresh[arm.lower].pos;
-            const double* f0 = m_fresh[arm.hand].pos;
+            const double* f0 = m_fresh[arm.end].pos;
             const double hk0[3] = {k0[0] - h0[0], k0[1] - h0[1], k0[2] - h0[2]};
             const double kf0[3] = {f0[0] - k0[0], f0[1] - k0[1], f0[2] - k0[2]};
             const double ht0[3] = {target[0] - h0[0], target[1] - h0[1], target[2] - h0[2]};
@@ -1697,7 +1969,7 @@ namespace uuepbs
                     double q[4] = {axis[0] / al * sh, axis[1] / al * sh, axis[2] / al * sh, std::cos(angle * 0.5)};
                     for (size_t i = static_cast<size_t>(arm.collar); i < m_names.size(); ++i)
                     {
-                        if (m_arm_of[i] != ai || !m_in_plan[i])
+                        if ((*arm.of)[i] != ai || !m_in_plan[i])
                         {
                             continue;
                         }
@@ -1715,8 +1987,8 @@ namespace uuepbs
 
         const double H[3] = {m_fresh[arm.upper].pos[0], m_fresh[arm.upper].pos[1], m_fresh[arm.upper].pos[2]};
         const double K[3] = {m_fresh[arm.lower].pos[0], m_fresh[arm.lower].pos[1], m_fresh[arm.lower].pos[2]};
-        const double F[3] = {m_fresh[arm.hand].pos[0], m_fresh[arm.hand].pos[1], m_fresh[arm.hand].pos[2]};
-        const double hand_rot[4] = {m_fresh[arm.hand].rot[0], m_fresh[arm.hand].rot[1], m_fresh[arm.hand].rot[2], m_fresh[arm.hand].rot[3]};
+        const double F[3] = {m_fresh[arm.end].pos[0], m_fresh[arm.end].pos[1], m_fresh[arm.end].pos[2]};
+        const double hand_rot[4] = {m_fresh[arm.end].rot[0], m_fresh[arm.end].rot[1], m_fresh[arm.end].rot[2], m_fresh[arm.end].rot[3]};
 
         const double hk[3] = {K[0] - H[0], K[1] - H[1], K[2] - H[2]};
         const double kf[3] = {F[0] - K[0], F[1] - K[1], F[2] - K[2]};
@@ -1743,6 +2015,26 @@ namespace uuepbs
             v[k] = hk[k] - along * u[k];
         }
         double vl = vlen(v);
+        if (pole)
+        {
+            // the middle joint (elbow / knee) touched the body too: bend toward where the body wants it
+            const double hp[3] = {pole[0] - H[0], pole[1] - H[1], pole[2] - H[2]};
+            const double pa = vdot(hp, u);
+            double pv[3];
+            for (int k = 0; k < 3; ++k)
+            {
+                pv[k] = hp[k] - pa * u[k];
+            }
+            const double pl = vlen(pv);
+            if (pl > 0.05 * a)
+            {
+                for (int k = 0; k < 3; ++k)
+                {
+                    v[k] = pv[k];
+                }
+                vl = pl;
+            }
+        }
         if (vl < 0.01 * a)
         {
             // (nearly) straight arm pointing at the target: the elbow keeps to the side it bends to in the
@@ -1798,13 +2090,13 @@ namespace uuepbs
         const double grow_shift[3] = {K2[0] - elbow_turned[0], K2[1] - elbow_turned[1], K2[2] - elbow_turned[2]};
         for (size_t i = static_cast<size_t>(arm.upper); i < m_names.size(); ++i)
         {
-            if (m_arm_of[i] != ai || !m_in_plan[i])
+            if ((*arm.of)[i] != ai || !m_in_plan[i])
             {
                 continue;
             }
             Xform& x = m_fresh[i];
             double q[4];
-            switch (m_arm_part[i])
+            switch ((*arm.part)[i])
             {
             case 1: // upper arm and what hangs from it above the elbow (twist bones, muscles)
                 turn_about(r1, H, x.pos);
@@ -1848,12 +2140,12 @@ namespace uuepbs
         {
             return "off";
         }
-        if (m_arms.empty())
-        {
-            return "no arms found (upper arm -> forearm -> hand by name)";
-        }
         std::string s;
         char line[384];
+        if (m_arms.empty())
+        {
+            s = "no arms found (upper arm -> forearm -> hand by name)";
+        }
         for (size_t ai = 0; ai < m_arms.size(); ++ai)
         {
             const ArmChain& arm = m_arms[ai];
@@ -1861,6 +2153,22 @@ namespace uuepbs
             std::snprintf(line, sizeof line, "%s%s: %s %.1f cm away, corrected %.0f%%, moved %.1f cm, shoulder turned %.0f deg, arm x%.2f, %.1f cm out of reach",
                           s.empty() ? "" : "; ", m_names[arm.hand].c_str(), h.anchor >= 0 ? m_names[h.anchor].c_str() : "no body bone", h.distance,
                           h.weight * 100.0, h.moved, h.turned, h.stretched, h.shortfall);
+            s += line;
+            if (h.elbow || h.fingers > 0)
+            {
+                std::snprintf(line, sizeof line, " (%s%s%d finger bones shaped)", h.elbow ? "elbow contact" : "", h.elbow ? ", " : "", h.fingers);
+                s += line;
+            }
+        }
+        for (size_t li = 0; li < m_legs.size() && li < m_foot_samples.size(); ++li)
+        {
+            const HandSample h = m_foot_samples[li];
+            if (h.weight <= 0.0)
+            {
+                continue;
+            }
+            std::snprintf(line, sizeof line, "; %s: %s %.1f cm away, corrected %.0f%%, moved %.1f cm, %.1f cm out of reach", m_names[m_legs[li].foot].c_str(),
+                          h.anchor >= 0 ? m_names[h.anchor].c_str() : "?", h.distance, h.weight * 100.0, h.moved, h.shortfall);
             s += line;
         }
         return s;
