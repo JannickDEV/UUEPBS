@@ -156,6 +156,16 @@ return {
     -- touches them.
     MeshDeformers = "auto",
 
+    -- Jiggle physics (breasts, butt, genitals, tails, hair) runs in the game's animation BEFORE the
+    -- sliders, so it bounces and collides at the original sizes. For characters whose sliders scale bones:
+    --   "follow" scales the physics shapes with the bones (Physics Asset bodies and joints used by Rigid
+    --            Body nodes, AnimDynamics, Kawaii Physics), relative to the whole body
+    --   "off"    switches the physics nodes off (Alpha 0) and pauses cloth while the character is edited
+    --   "keep"   leaves the game's physics alone
+    -- The window's choice (Character Scale > Overall) is remembered in _physics.txt and wins over this.
+    -- Console: "ubs physics [follow|off|keep]".
+    PhysicsMode = "follow",
+
     -- Auto Ground: longer legs sink the feet into the floor (the pelvis stays where the animation put
     -- it), shorter legs make them float. With this on, the player's mesh is moved up or down by what
     -- the sliders moved the lowest foot bones, worked out from the reference pose and the sliders in

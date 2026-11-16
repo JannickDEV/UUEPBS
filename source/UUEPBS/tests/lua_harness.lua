@@ -276,6 +276,7 @@ local outReads = 0
 local function map(p)
     -- the remembered Auto Ground switch (presets folder) lands in the work dir
     if p:find("\\_auto_ground.txt", 1, true) then return work .. "/_auto_ground.txt" end
+    if p:find("\\_physics.txt", 1, true) then return work .. "/_physics.txt" end
     if p:sub(1, #modPrefix) == modPrefix then return work .. "/" .. p:sub(#modPrefix + 1):gsub("\\", "/") end
     if p:sub(1, #legacyPrefix) == legacyPrefix then return work .. "/legacy/" .. p:sub(#legacyPrefix + 1):gsub("\\", "/") end
     return p
@@ -285,7 +286,7 @@ io.open = function(p, m)
     return realOpen(map(p), m)
 end
 os.remove = function(p) return realRemove(map(p)) end
-os.execute("rm -rf " .. work .. "/native " .. work .. "/Scripts " .. work .. "/legacy " .. work .. "/_auto_ground.txt && mkdir -p " .. work .. "/native")
+os.execute("rm -rf " .. work .. "/native " .. work .. "/Scripts " .. work .. "/legacy " .. work .. "/_auto_ground.txt " .. work .. "/_physics.txt && mkdir -p " .. work .. "/native")
 local legacyText = '{\n  // my notes survive the move\n  "Project": "SomeGame",\n  "PrimaryComponent": "CharacterMesh0",\n  "WorldMeshSearch": true,\n  "Hook": { "Slot": 303, "Buffers": "0x5A8", "ReadIndex": "0x674" },\n}\n'
 if mode == "legacy" then
     os.execute("mkdir -p " .. work .. "/legacy/Scripts/GameProfiles " .. work .. "/legacy/native")
@@ -343,11 +344,12 @@ local realPrint = print
 print = function(s) printed[#printed + 1] = s end
 
 local peerGround = "0:0" -- the window's Auto Ground switch keeps its last click count between calls
+local peerPhysics = nil -- the window's Jiggle physics choice "<clicks>:<mode>" (UUEPBS_PEER_PHYSICS)
 local function run_peer(rescan, pick, pickId, refresh, session, ui, morphs, keep, remember, relist, ground)
     ground = ground or peerGround
     peerGround = ground
     local report = work .. "/peer_report.txt"
-    os.execute(string.format((mode == "names" and "UUEPBS_PEER_ENGINE=1 " or "") .. '%s %s/native %d %d %s %d %s %d "%s" "%s" "%s" %d %s > %s', peer, work, rescan, pick, pickId, refresh, session or "dll1", ui or 0, morphs or "-", keep or "-", remember or "-", relist or 0, ground, report))
+    os.execute(string.format((peerPhysics and ("UUEPBS_PEER_PHYSICS=" .. peerPhysics .. " ") or "") .. (mode == "names" and "UUEPBS_PEER_ENGINE=1 " or "") .. '%s %s/native %d %d %s %d %s %d "%s" "%s" "%s" %d %s > %s', peer, work, rescan, pick, pickId, refresh, session or "dll1", ui or 0, morphs or "-", keep or "-", remember or "-", relist or 0, ground, report))
     local h = realOpen(report, "rb")
     local out = h:read("a")
     h:close()
@@ -703,6 +705,18 @@ run_peer(0, 0, "none", 0, "dll1", 1, "-", "-", "-", 1, "2:1")
 loop()
 s = run_peer(0, 0, "none", 0, "dll1", 1, "-", "-", "-", 1, "2:1")
 check(s:find("ground 1 ui 1\n", 1, true) and (read(work .. "/_auto_ground.txt") or ""):match("^on"), "and back on:\n" .. s)
+-- the window's Jiggle physics choice: follow by default, "off" taken, shown and remembered
+check(s:find("physics follow [", 1, true), "physics follows by default, shown in the window:\n" .. s)
+peerPhysics = "1:off"
+run_peer(0, 0, "none", 0, "dll1", 1, "-", "-", "-", 1)
+loop()
+s = run_peer(0, 0, "none", 0, "dll1", 1, "-", "-", "-", 1)
+check(s:find("physics off [", 1, true) and (read(work .. "/_physics.txt") or ""):match("^off"), "physics off from the window:\n" .. s)
+peerPhysics = "2:follow"
+run_peer(0, 0, "none", 0, "dll1", 1, "-", "-", "-", 1)
+loop()
+s = run_peer(0, 0, "none", 0, "dll1", 1, "-", "-", "-", 1)
+check(s:find("physics follow [", 1, true) and (read(work .. "/_physics.txt") or ""):match("^follow"), "and back to follow:\n" .. s)
 other._loc = { X = 0, Y = 0, Z = 0 }
 settle()
 run_peer(0, 0, "none", 0, "dll1", 0)

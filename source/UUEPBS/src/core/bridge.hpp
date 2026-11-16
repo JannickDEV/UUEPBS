@@ -150,6 +150,8 @@ namespace uuepbs::bridge
         bool ground_on{};      // ... with the wished state
         uint64_t collision{};  // "Collision follows Height" switch in the window: bumped on each click ...
         bool collision_on{};   // ... with the wished state
+        uint64_t physics{};       // Jiggle physics choice in the window: bumped on each click ...
+        std::string physics_mode; // ... with the wished mode (follow / off / keep)
         std::string hook_state{"waiting"};
         std::string hook_text;
         bool window_open{};

@@ -52,6 +52,11 @@ struct FakeTargets : ui::TargetSource
     void request_rescan() override {}
     std::string link_text() override { return "connected, script v2.0.0, 2 rigs"; }
     std::string hotkey_text() override { return "F6"; }
+    int auto_ground() override { return 1; }
+    std::string physics = "follow";
+    std::string physics_mode() override { return physics; }
+    void set_physics_mode(const std::string& m) override { physics = m; }
+    std::string physics_info() override { return "Roku (player): 1 Kawaii, 1 Rigid Body scaled"; }
 };
 
 // A stand-in preset thumbnail: a simple figure on a dark backdrop, written as an (uncompressed) PNG.
