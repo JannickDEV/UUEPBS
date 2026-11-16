@@ -221,6 +221,8 @@ int main()
         CHECK(std::fabs(head_scale - 1.89) < 1e-4); // once, not 1.89 * 1.89
         CHECK(mismatch(face.buf[1], body.buf[1]) < 1e-3);
         CHECK(face_follows() == copies);
+        // the sliders scale a bone: Lua is told to switch mesh deformers off on this character
+        CHECK(reg.scaling_actors() == std::vector<std::string>{kPlayerActor});
 
         // Character Scale > Height 1.2 on top
         set_scale_value(book, "height", 1.2);
@@ -231,6 +233,7 @@ int main()
 
         // Before/After: everything goes back to the game's own pose
         reg.set_compare(true);
+        CHECK(reg.scaling_actors().empty()); // showing the original: deformers back on
         run(copies, 2);
         CHECK(mismatch(face.buf[1], original) < 1e-6);
         reg.set_compare(false);
@@ -239,6 +242,7 @@ int main()
 
         // Sliders back to neutral: the face is the game's again either way.
         reg.clear_edits();
+        CHECK(reg.scaling_actors().empty());
         run(copies, 2);
         CHECK(mismatch(face.buf[1], original) < 1e-6);
         double w = 0;

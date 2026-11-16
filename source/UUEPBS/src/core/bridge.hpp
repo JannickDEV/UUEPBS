@@ -36,6 +36,7 @@
 //     ui <tab> <1 while the slider window is open, else 0>
 //     reply <tab> <command id> <tab> <text, newlines as \n>
 //     keep <tab> <actor key> <tab> <label>              (characters with edits: Lua keeps their meshes)
+//     scaled <tab> <actor key>                          (its sliders scale bones: Lua turns its mesh deformers off)
 //     remember <tab> <identity>                         (NPCs with saved sliders: Lua looks out for them)
 //     morph <tab> <revision>                            (then one mw line per morph to override)
 //     mw <tab> <name> <tab> <weight> <tab> <actor key>
@@ -154,6 +155,7 @@ namespace uuepbs::bridge
         std::vector<Morph> morphs; // weights Lua should apply (absent = game's own value)
         std::vector<std::pair<std::string, std::string>> keeps; // characters with edits: key, label
         std::vector<std::string> remembered;                    // identities with saved sliders
+        std::vector<std::string> scaled;                        // characters whose sliders scale bones right now
     };
 
     std::string format_dll_state(const DllState& state);

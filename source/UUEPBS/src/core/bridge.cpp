@@ -303,6 +303,10 @@ namespace uuepbs::bridge
         {
             out += "keep\t" + clean_field(key) + "\t" + clean_field(label) + "\n";
         }
+        for (const std::string& key : s.scaled)
+        {
+            out += "scaled\t" + clean_field(key) + "\n";
+        }
         for (const std::string& id : s.remembered)
         {
             out += "remember\t" + clean_field(id) + "\n";

@@ -1259,6 +1259,7 @@ namespace
             {
                 keeps.emplace_back(a.key, a.label);
             }
+            std::vector<std::string> scaled = reg.scaling_actors();
             {
                 std::lock_guard guard(m_lock);
                 if (morph_rev != m_out.morph_revision)
@@ -1280,6 +1281,11 @@ namespace
                 if (keeps != m_out.keeps)
                 {
                     m_out.keeps = std::move(keeps);
+                    m_out_dirty = true;
+                }
+                if (scaled != m_out.scaled)
+                {
+                    m_out.scaled = std::move(scaled);
                     m_out_dirty = true;
                 }
                 if (!m_out_dirty && Clock::now() - m_last_publish < std::chrono::seconds(5))

@@ -23,6 +23,20 @@ namespace uuepbs
         }
 
         constexpr uint64_t kDisabledBit = 1ull << 63;
+        // Any entry that scales a bone: a bone edit with a scale, or a Character Scale / Body tab
+        // slider that is a factor (Height, Head size, Muscle...). Offset sliders only move bones.
+        bool book_scales(const EditBook& book)
+        {
+            for (const auto& [key, entry] : book)
+            {
+                if (entry.edit.has_scale())
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
         constexpr uint64_t kFollowBit = 1ull << 62; // bound for an extra mesh that follows the main mesh
 
         Xform read_bone(const RawArray& pose, uint32_t elem_size, int32_t i)
@@ -636,6 +650,24 @@ namespace uuepbs
     {
         std::lock_guard guard(m_lock);
         return m_active;
+    }
+
+    std::vector<std::string> Registry::scaling_actors() const
+    {
+        std::vector<std::string> out;
+        if (!applying())
+        {
+            return out;
+        }
+        std::lock_guard guard(m_lock);
+        for (const auto& [key, a] : m_actors)
+        {
+            if (book_scales(a.book))
+            {
+                out.push_back(key);
+            }
+        }
+        return out;
     }
 
     std::vector<ActorSummary> Registry::edited_actors() const

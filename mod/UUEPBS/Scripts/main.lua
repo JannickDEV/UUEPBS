@@ -2751,6 +2751,7 @@ local function read_dll_state()
     local wanted, sawMorphs = {}, false
     local keep, keepList = {}, {}
     local rememberList = {}
+    local scaledNow = {} -- characters whose sliders scale bones ("scaled" lines)
     local dllSession = text:match("^UBS1 (%S+)")
     if dllSession ~= seen.session then
         -- New DLL session: take its counters as the baseline.
@@ -2833,6 +2834,10 @@ local function read_dll_state()
             elseif a ~= "" then
                 rememberList[#rememberList + 1] = a
             end
+        elseif kind == "scaled" then
+            if a ~= "" then
+                scaledNow[a] = true
+            end
         elseif kind == "keep" then
             if a ~= "" and not keep[a] then
                 keep[a] = b
@@ -2859,6 +2864,9 @@ local function read_dll_state()
         end
     end
     windowOpen = open
+    if late.deformers_scaled then
+        late.deformers_scaled(scaledNow)
+    end
     if sawMorphs then
         morphWanted = wanted
         morphDirty = true
@@ -2990,6 +2998,45 @@ if Config.Looks ~= false then
     end
 end
 
+-- Mesh deformers (uuepbs_deformers.lua): a dual quaternion skinning deformer cannot show scaled
+-- bones, so it is switched off on a character's meshes while its sliders scale bones.
+late.apply_deformers = function() end
+do
+    local mode = tostring(Config.MeshDeformers or "auto"):lower()
+    local okD, mod = pcall(require, "uuepbs_deformers")
+    if okD and type(mod) == "table" then
+        late.deformers = mod
+        mod.setup({ say = say })
+        local scaled, dirty = {}, true
+        late.deformers_scaled = function(now)
+            for k in pairs(now) do
+                if not scaled[k] then
+                    dirty = true
+                end
+            end
+            for k in pairs(scaled) do
+                if not now[k] then
+                    dirty = true
+                end
+            end
+            scaled = now
+        end
+        local lastRigs = nil
+        late.apply_deformers = function()
+            if not dirty and lastRigs == rigs and not rigsChanged then
+                return
+            end
+            dirty, lastRigs = false, rigs
+            local okA, err = pcall(mod.apply, rigs, scaled, mode)
+            if not okA then
+                say("mesh deformers: %s", tostring(err))
+            end
+        end
+    else
+        say("mesh deformer handling off: %s", tostring(mod))
+    end
+end
+
 -- Scene copies (uuepbs_copies.lua): the edited character as cutscenes and menu previews show it
 -- (their own actors with the same mesh assets) gets the same sliders. Kept in `late` (local limit).
 if Config.SceneCopies ~= false then
@@ -3104,6 +3151,7 @@ local function tick()
         if late.looks and late.looks.active() and late.looks.watch() then
             late.apply_looks() -- the game re-dressed a recoloured slot
         end
+        late.apply_deformers()
         write_state()
         if late.portraits and windowOpen then
             late.portraits.tick(now_ms())
@@ -3258,6 +3306,9 @@ local function console(_, params, out)
         reply(scan_status())
         if late.copies then
             reply(late.copies.status())
+        end
+        if late.deformers then
+            reply(late.deformers.status())
         end
         send_command("status", "", true)
     elseif verb == "copies" then

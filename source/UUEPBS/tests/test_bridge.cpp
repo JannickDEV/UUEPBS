@@ -55,6 +55,9 @@ int main(int argc, char** argv)
     CHECK(rn && rn->target.identity == "Anca" && rn->npcs.size() == 1 && rn->npcs[0].key == "77AA" && rn->npcs[0].identity == "Lacra" && rn->npcs[0].label == "Lacra_9");
     DllState dr; dr.remembered = {"Anca", "BP_NPC_C@SK_Head_B"};
     CHECK(format_dll_state(dr).find("remember\tAnca\nremember\tBP_NPC_C@SK_Head_B\nmorph\t") != std::string::npos);
+    // characters whose sliders scale bones (Lua turns their mesh deformers off meanwhile)
+    DllState ds; ds.keeps = {{"player", "Eve"}}; ds.scaled = {"player", "4D5E"};
+    CHECK(format_dll_state(ds).find("keep\tplayer\tEve\nscaled\tplayer\nscaled\t4D5E\nmorph\t") != std::string::npos);
     auto old = parse_lua_state("UBS1 s 6\ntarget\tauto\tRoku\n#end 6\n");
     CHECK(old && old->target.key == "player");
     CHECK(old && old->target.engine.empty() && mc && mc->candidates[0].engine.empty() && mc->rigs[0].engine.empty() && mc->rigs[0].owner_engine.empty());

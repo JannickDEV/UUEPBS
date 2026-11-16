@@ -45,6 +45,9 @@ Host-side tests (Linux/macOS/WSL with g++ 13+ or clang 17+). None of them need W
     # discovery, tan/sweat/hair maths, dynamic instances, reset, re-dressing, per-character reports
     lua looks_test.lua ../../../mod/UUEPBS/Scripts
 
+    # mesh deformers (dual quaternion skinning) switched off while sliders scale bones, and back on after
+    lua deformers_test.lua ../../../mod/UUEPBS/Scripts
+
     # names given to characters in the window (_characters/_names.txt) and portrait requests
     g++ -std=c++23 -I$S test_names.cpp $S/core/*.cpp -o test_names && ./test_names
 

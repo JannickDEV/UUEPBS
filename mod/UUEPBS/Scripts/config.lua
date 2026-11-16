@@ -127,6 +127,13 @@ return {
     -- dynamic material instances. false = the tab's sliders do nothing in the game.
     Looks = true,
 
+    -- Mesh deformers (Deformer Graphs, UE 5.2+) that some games draw characters with. A dual quaternion
+    -- skinning deformer (Afterparty) cannot show scaled bones: Head size, Hand size, Height... tear the
+    -- mesh apart. "auto" switches a character's deformers off while its sliders scale bones and puts
+    -- them back afterwards (whatever else they did, e.g. jiggle, is missing meanwhile). "keep" never
+    -- touches them.
+    MeshDeformers = "auto",
+
     Verbose = false,
 
     -- Starting values for a new game profile. The first time the mod runs in a game it writes

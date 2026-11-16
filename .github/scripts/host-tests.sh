@@ -39,6 +39,7 @@ end
 step "Lua tests (portraits, looks)"
 $LUA portraits_test.lua "$SCRIPTS" "$OUT/portraits"
 $LUA looks_test.lua "$SCRIPTS"
+$LUA deformers_test.lua "$SCRIPTS"
 end
 
 step "Lua <-> DLL bridge harness"

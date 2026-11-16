@@ -157,6 +157,10 @@ namespace uuepbs
         void replace_edits_of(const std::string& key, EditBook book);
         MorphBook morphs_of(const std::string& key) const;
         void replace_morphs_of(const std::string& key, MorphBook book);
+        // Characters whose sliders scale bones right now (on, not showing the original). Lua switches
+        // off mesh deformers on their meshes while so: a dual quaternion skinning deformer (Afterparty's
+        // Daz characters) ignores bone scale and tears the mesh apart (Scripts/main.lua, "Mesh deformers").
+        std::vector<std::string> scaling_actors() const;
         // Every character's morph weights (what Lua applies), keyed by actor key.
         std::map<std::string, MorphBook> all_morphs(uint64_t* revision = nullptr) const;
 
