@@ -3126,6 +3126,10 @@ if Config.SceneCopies ~= false then
             alive = alive,
             address_num = address_num,
             mesh_prop = mesh_prop,
+            mesh_asset_addr = function(comp)
+                local m = mesh_asset(comp)
+                return m and address_num(m) or nil
+            end,
             name_of = name_of,
             full_name = full_name,
             is_default_object = is_default_object,

@@ -36,11 +36,12 @@ $CXX -std=c++23 -I"$S" test_groups.cpp "${CORE[@]}" -o "$OUT/test_groups"
 "$OUT/test_groups" "$SCRIPTS/BoneDictionary.json"
 end
 
-step "Lua tests (portraits, looks, deformers, camera)"
+step "Lua tests (portraits, looks, deformers, camera, copies)"
 $LUA portraits_test.lua "$SCRIPTS" "$OUT/portraits"
 $LUA looks_test.lua "$SCRIPTS"
 $LUA deformers_test.lua "$SCRIPTS"
 $LUA camera_test.lua "$SCRIPTS"
+$LUA copies_test.lua "$SCRIPTS"
 end
 
 step "Lua <-> DLL bridge harness"

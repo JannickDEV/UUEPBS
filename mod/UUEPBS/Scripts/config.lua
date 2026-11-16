@@ -94,9 +94,10 @@ return {
     MaxTrackedMeshes = 64,
     -- Scene copies: cutscenes, inventory / equipment screens and other menus often show the character
     -- through an actor of their own that uses the same meshes. Those copies get the same sliders, so the
-    -- body doesn't snap back to its original sizes there. A copy has to share at least two of the
-    -- character's sculpted meshes (one when the character only has one) and must not be an AI-controlled
-    -- NPC sharing a single mesh. "ubs copies" searches for copies now and shows what was found.
+    -- body doesn't snap back to its original sizes there. A copy has to use the character's main (body)
+    -- mesh and share at least two of its sculpted meshes (one when the character only has one), and must
+    -- not be an AI-controlled NPC sharing a single mesh. (Shared eyes, lashes and hair alone don't count:
+    -- in many games every NPC wears those.) "ubs copies" searches for copies now and shows what was found.
     -- false = only the characters themselves are sculpted.
     SceneCopies = true,
     -- "outfit" (the rule above) or "mesh": one shared mesh is enough, for games whose cutscene / menu
