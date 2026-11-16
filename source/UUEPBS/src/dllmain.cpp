@@ -882,6 +882,25 @@ namespace
                 m_prev_preset_key.store(0);
             }
 
+            // Auto Ground (config.lua AutoGround / AutoGroundMode = "dll"); older scripts send nothing = off.
+            {
+                uuepbs::GroundOptions g;
+                g.enabled = state.setting("ground", "0") == "1";
+                g.leg_ik = state.setting("ground_ik", "1") == "1";
+                g.extra = std::strtod(state.setting("ground_extra", "0").c_str(), nullptr);
+                g.max = std::strtod(state.setting("ground_max", "40").c_str(), nullptr);
+                uuepbs::Registry& reg = uuepbs::Registry::instance();
+                const uuepbs::GroundOptions old = reg.ground();
+                if (old.enabled != g.enabled || old.leg_ik != g.leg_ik || old.extra != g.extra || old.max != g.max)
+                {
+                    reg.set_ground(g);
+                    g_log.line(std::string("auto ground: ") + (g.enabled ? "on" : "off") + (g.enabled ? std::string(", leg IK ") + (g.leg_ik ? "on" : "off") +
+                                                                                                   ", extra " + std::to_string(g.extra) + " cm, max " +
+                                                                                                   std::to_string(g.max) + " cm"
+                                                                                             : std::string()));
+                }
+            }
+
             const std::string folder = state.setting("presets");
             if (!m_shelf_ready || folder != m_shelf_source)
             {
@@ -1319,6 +1338,17 @@ namespace
             s += std::string("sliders ") + (reg.enabled() ? "enabled" : "disabled") + ", " + std::to_string(reg.edits().size()) + " edited bone(s), " +
                  std::to_string(reg.morphs().size()) + " of " + std::to_string(reg.morph_names().size()) + " morph(s) set\n";
             s += "mirroring: " + reg.mirror_source() + "\n";
+            {
+                const uuepbs::GroundOptions g = reg.ground();
+                char line[160];
+                std::snprintf(line, sizeof line, "auto ground: %s%s, player lift %.1f cm\n", g.enabled ? "on" : "off (Lua or none)",
+                              g.enabled ? (g.leg_ik ? " with leg IK" : " without leg IK") : "", reg.ground_lift_of(uuepbs::kPlayerActor));
+                s += line;
+                if (g.enabled)
+                {
+                    s += reg.ground_report();
+                }
+            }
             for (const auto& a : reg.edited_actors())
             {
                 s += std::string("  ") + (a.active ? "* " : "  ") + a.label + ": " + std::to_string(a.bones) + " bone(s), " + std::to_string(a.morphs) +
@@ -1338,6 +1368,7 @@ namespace
             for (const auto& r : reg.rigs())
             {
                 s += "  " + r.owner + " / " + r.label + ": " + std::to_string(r.bones) + " bones, " + std::to_string(r.frames) + " poses" +
+                     (r.legs > 0 ? ", " + std::to_string(r.legs) + " leg(s)" : "") +
                      (r.follows ? " (follows the main mesh)" : "") + (r.stale ? " (stale)" : "") + "\n";
             }
             s += "log: " + uuepbs::path_to_utf8(g_log.file());
