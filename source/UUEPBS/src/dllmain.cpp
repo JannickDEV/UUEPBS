@@ -705,7 +705,7 @@ namespace
             for (const auto& r : reg.rigs())
             {
                 text += "\n  " + r.label + (r.primary ? " (primary)" : "") + ": " + std::to_string(r.bones) + " bones, " + std::to_string(r.frames) +
-                        " poses edited" + (r.stale ? ", STALE" : "");
+                        " poses edited" + (r.follows ? ", follows the main mesh (not edited twice)" : "") + (r.stale ? ", STALE" : "");
                 any = any || r.frames > 0;
             }
             if (!any)
@@ -1259,6 +1259,7 @@ namespace
             {
                 keeps.emplace_back(a.key, a.label);
             }
+            std::vector<std::string> scaled = reg.scaling_actors();
             {
                 std::lock_guard guard(m_lock);
                 if (morph_rev != m_out.morph_revision)
@@ -1280,6 +1281,11 @@ namespace
                 if (keeps != m_out.keeps)
                 {
                     m_out.keeps = std::move(keeps);
+                    m_out_dirty = true;
+                }
+                if (scaled != m_out.scaled)
+                {
+                    m_out.scaled = std::move(scaled);
                     m_out_dirty = true;
                 }
                 if (!m_out_dirty && Clock::now() - m_last_publish < std::chrono::seconds(5))
@@ -1325,7 +1331,7 @@ namespace
             for (const auto& r : reg.rigs())
             {
                 s += "  " + r.owner + " / " + r.label + ": " + std::to_string(r.bones) + " bones, " + std::to_string(r.frames) + " poses" +
-                     (r.stale ? " (stale)" : "") + "\n";
+                     (r.follows ? " (follows the main mesh)" : "") + (r.stale ? " (stale)" : "") + "\n";
             }
             s += "log: " + uuepbs::path_to_utf8(g_log.file());
             return s;

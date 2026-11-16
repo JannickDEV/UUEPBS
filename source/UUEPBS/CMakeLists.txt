@@ -51,6 +51,7 @@ add_library(UUEPBS SHARED
     src/core/character_names.cpp
     src/core/changes.cpp
     src/core/character_memory.cpp
+    src/core/follow.cpp
     src/core/history.cpp
     src/core/looks.cpp
     src/core/bridge.cpp

@@ -2896,8 +2896,13 @@ namespace uuepbs::ui
             {
                 ImGui::TableNextRow();
                 ImGui::TableNextColumn();
-                ImGui::TextColored(r.stale ? warn() : r.active ? ImGui::GetStyleColorVec4(ImGuiCol_Text) : muted(), "%s / %s%s%s", r.owner.c_str(),
-                                   r.label.c_str(), r.primary && r.active ? " (bones listed)" : "", r.stale ? " (stale)" : "");
+                ImGui::TextColored(r.stale ? warn() : r.active ? ImGui::GetStyleColorVec4(ImGuiCol_Text) : muted(), "%s / %s%s%s%s", r.owner.c_str(),
+                                   r.label.c_str(), r.primary && r.active ? " (bones listed)" : "", r.follows ? " (follows the main mesh)" : "",
+                                   r.stale ? " (stale)" : "");
+                if (r.follows && ImGui::IsItemHovered())
+                {
+                    ImGui::SetTooltip("This mesh copies the main mesh's pose after the sliders are applied,\nso it already shows them and is not edited a second time.");
+                }
                 if (!r.owner.empty() && ImGui::IsItemHovered())
                 {
                     ImGui::SetTooltip("%s", r.owner.c_str());

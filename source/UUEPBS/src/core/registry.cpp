@@ -23,6 +23,38 @@ namespace uuepbs
         }
 
         constexpr uint64_t kDisabledBit = 1ull << 63;
+        // Any entry that scales a bone: a bone edit with a scale, or a Character Scale / Body tab
+        // slider that is a factor (Height, Head size, Muscle...). Offset sliders only move bones.
+        bool book_scales(const EditBook& book)
+        {
+            for (const auto& [key, entry] : book)
+            {
+                if (entry.edit.has_scale())
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        constexpr uint64_t kFollowBit = 1ull << 62; // bound for an extra mesh that follows the main mesh
+
+        Xform read_bone(const RawArray& pose, uint32_t elem_size, int32_t i)
+        {
+            if (elem_size == 96)
+            {
+                return static_cast<const Xform*>(pose.data)[i];
+            }
+            Xform x{};
+            const XformF& f = static_cast<const XformF*>(pose.data)[i];
+            for (int a = 0; a < 4; ++a)
+            {
+                x.rot[a] = f.rot[a];
+                x.pos[a] = f.pos[a];
+                x.scl[a] = f.scl[a];
+            }
+            return x;
+        }
 
         // Frames to wait before measuring mirroring from a live pose (lets the idle animation settle).
         constexpr uint64_t kLiveMirrorFrame = 30;
@@ -382,10 +414,18 @@ namespace uuepbs
             return;
         }
 
+        // An extra mesh (head, face, eyes, hair...) that copies the main mesh's finished pose
+        // already shows the edits: editing it as well would apply every slider twice.
+        if (!rig->primary)
+        {
+            judge_follow_locked(*rig, pose);
+        }
+        const bool follows = !rig->primary && rig->follow.copies();
+
         // Each mesh is sculpted with its own character's edits.
         const bool on = applying(); // off, or showing the original for a before/after compare
-        const uint64_t wanted = rig->actor->revision | (on ? 0 : kDisabledBit);
-        const EditBook& book = on ? rig->actor->book : m_empty_book;
+        const uint64_t wanted = rig->actor->revision | (on ? 0 : kDisabledBit) | (follows ? kFollowBit : 0);
+        const EditBook& book = on && !follows ? rig->actor->book : m_empty_book;
         const bool proportions = has_proportions(book);
         const uint64_t body_rev = proportions ? BodyMapSource::instance().revision() : 0;
         if (rig->sculptor.bound_revision() != wanted || rig->bound_body != body_rev)
@@ -499,6 +539,51 @@ namespace uuepbs
         }
     }
 
+    void Registry::judge_follow_locked(Rig& rig, const RawArray& pose)
+    {
+        const Rig* main = nullptr;
+        for (const auto& r : m_rigs)
+        {
+            if (r.get() != &rig && r->primary && !r->stale && r->actor_key == rig.actor_key)
+            {
+                main = r.get();
+                break;
+            }
+        }
+        if (!main)
+        {
+            return;
+        }
+        const int32_t n = rig.sculptor.bone_count();
+        if (rig.follow_main != main->component || rig.follow_main_bones != main->sculptor.bone_count() ||
+            rig.to_main.size() != static_cast<size_t>(n))
+        {
+            rig.to_main.assign(static_cast<size_t>(n), -1);
+            const auto& names = rig.sculptor.names();
+            for (int32_t i = 0; i < n; ++i)
+            {
+                rig.to_main[i] = main->sculptor.find(names[i]);
+            }
+            rig.follow_main = main->component;
+            rig.follow_main_bones = main->sculptor.bone_count();
+            rig.follow.reset();
+        }
+        rig.samples.clear();
+        for (int32_t i = 0; i < n && i < pose.num; ++i)
+        {
+            const int32_t j = rig.to_main[i];
+            Xform source;
+            Xform result;
+            if (j < 0 || !main->sculptor.last_sample(j, source, result))
+            {
+                continue;
+            }
+            const Xform now = read_bone(pose, m_layout.elem_size, i);
+            rig.samples.push_back({rig.sculptor.untouched(pose.data, i, now), source, result});
+        }
+        rig.follow.feed(judge_follow(rig.samples));
+    }
+
     void Registry::bump_edits(Actor& actor)
     {
         actor.revision = m_edit_revision.fetch_add(1, std::memory_order_acq_rel) + 1;
@@ -565,6 +650,24 @@ namespace uuepbs
     {
         std::lock_guard guard(m_lock);
         return m_active;
+    }
+
+    std::vector<std::string> Registry::scaling_actors() const
+    {
+        std::vector<std::string> out;
+        if (!applying())
+        {
+            return out;
+        }
+        std::lock_guard guard(m_lock);
+        for (const auto& [key, a] : m_actors)
+        {
+            if (book_scales(a.book))
+            {
+                out.push_back(key);
+            }
+        }
+        return out;
     }
 
     std::vector<ActorSummary> Registry::edited_actors() const
@@ -941,7 +1044,8 @@ namespace uuepbs
         out.reserve(m_rigs.size());
         for (const auto& rig : m_rigs)
         {
-            out.push_back({rig->label, rig->owner, rig->sculptor.bone_count(), rig->frames, rig->stale, rig->primary, rig->actor_key, rig->actor_key == m_active});
+            out.push_back({rig->label, rig->owner, rig->sculptor.bone_count(), rig->frames, rig->stale, rig->primary, rig->actor_key, rig->actor_key == m_active,
+                           !rig->primary && rig->follow.copies()});
         }
         return out;
     }

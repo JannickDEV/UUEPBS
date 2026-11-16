@@ -14,6 +14,9 @@ Host-side tests (Linux/macOS/WSL with g++ 13+ or clang 17+). None of them need W
     # Character Scale > Muscle (girth only, measured bone axes) and the Body tab's bone-built sliders (Penis length...)
     g++ -std=c++23 -I$S test_body_editor.cpp $S/core/*.cpp -o test_body_editor && ./test_body_editor
 
+    # extra meshes (separate head/face/eyes/hair) that copy the body's edited pose get the edits once, not twice
+    g++ -std=c++23 -O1 -I$S test_follow.cpp $S/core/*.cpp -o test_follow && ./test_follow
+
     # undo/redo history, "Changed only" filter and preset details
     g++ -std=c++23 -I$S test_changes.cpp $S/core/*.cpp -o test_changes && ./test_changes
 
@@ -41,6 +44,9 @@ Host-side tests (Linux/macOS/WSL with g++ 13+ or clang 17+). None of them need W
     # Looks applied in the game (Scripts/uuepbs_looks.lua) against a mocked engine: slot classing, parameter
     # discovery, tan/sweat/hair maths, dynamic instances, reset, re-dressing, per-character reports
     lua looks_test.lua ../../../mod/UUEPBS/Scripts
+
+    # mesh deformers (dual quaternion skinning) switched off while sliders scale bones, and back on after
+    lua deformers_test.lua ../../../mod/UUEPBS/Scripts
 
     # names given to characters in the window (_characters/_names.txt) and portrait requests
     g++ -std=c++23 -I$S test_names.cpp $S/core/*.cpp -o test_names && ./test_names
