@@ -81,6 +81,8 @@ namespace uuepbs
         std::string actor; // actor key
         bool active{};     // belongs to the character picked in the window
         bool follows{};    // an extra mesh that copies the main mesh's edited pose: left alone (follow.hpp)
+        int32_t legs{};    // legs found for Auto Ground
+        bool lifted{};     // Auto Ground, mesh without legs: took the body's lift (false = follows the body already)
     };
 
     // A character that has bone or morph edits.
@@ -176,6 +178,14 @@ namespace uuepbs
         void replace_edits(EditBook book);
         void clear_edits();
 
+        // Auto Ground (see GroundOptions in sculpt.hpp), for every tracked mesh.
+        void set_ground(const GroundOptions& options);
+        GroundOptions ground() const;
+        // Lift (cm) the character's leg mesh used on its last frame, 0 when none.
+        double ground_lift_of(const std::string& key) const;
+        // One line per tracked mesh of edited characters with what Auto Ground saw and did (diagnostics).
+        std::string ground_report() const;
+
         bool enabled() const { return m_enabled.load(std::memory_order_relaxed); }
         void set_enabled(bool on); // also bumps the morph revision (morphs are sent to Lua only while enabled)
 
@@ -223,6 +233,18 @@ namespace uuepbs
             std::string engine; // engine object name (empty when not known)
             EditBook book;
             uint64_t revision{}; // value of m_edit_revision at its last change (unique across actors)
+            double ground_lift{}; // Auto Ground: lift the character's leg mesh measured last (shared with its other meshes)
+            std::string hip_bone;  // ... its hip bone (folded name) and that bone's height before / after the edit
+            double hip_before{};
+            double hip_after{};
+            // The main mesh's bones (folded names) and where they were before / after its last edit (x, y, z each),
+            // for the character's other meshes to tell whether they copy its pose.
+            std::map<std::string, int32_t> main_lookup;
+            uintptr_t main_component{};
+            int32_t main_bones{};
+            uint64_t main_revision{};
+            std::vector<double> main_before;
+            std::vector<double> main_after;
         };
 
         struct Rig
@@ -252,6 +274,10 @@ namespace uuepbs
             int32_t follow_main_bones{};      // and its bone count then
             std::vector<int32_t> to_main;     // this rig's bone -> the main mesh's bone (-1 = none)
             std::vector<FollowSample> samples; // scratch
+            std::string probe_name;      // Auto Ground: actor hip bone name looked up last, and its index here
+            int32_t probe_index{-1};
+            std::vector<int32_t> follow_map; // this mesh's bones -> the main mesh's (-1 = not there)
+            uint64_t follow_revision{~0ull};  // Actor::main_revision the map was built for
         };
 
         bool peek_raw(uintptr_t address, void* out, size_t size) const;
@@ -281,6 +307,7 @@ namespace uuepbs
         std::atomic<uint64_t> m_edit_revision{1};
         std::atomic<bool> m_enabled{true};
         CompareSwitch m_compare;
+        GroundOptions m_ground{}; // guarded by m_lock
 
         SkeletonView m_view;
         std::atomic<uint64_t> m_skeleton_revision{0};
