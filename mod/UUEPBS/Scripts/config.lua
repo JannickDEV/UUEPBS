@@ -112,6 +112,19 @@ return {
     -- Nothing runs at this rate when no character has them.
     CameraPollMs = 50,
 
+    -- Collision follows Height: a character's collision capsule (half height and radius) grows and
+    -- shrinks with its Height slider, so a tall character no longer walks through low ceilings and walls
+    -- and a small one no longer floats. The feet stay on the floor (the actor moves up by what the capsule
+    -- grew and the mesh down by as much), crouching keeps working, and MaxStepHeight grows along.
+    -- Every character with a capsule (ACharacter or a capsule root). "ubs collision" shows the sizes.
+    -- The switch in the window (Character Scale > Overall) and "ubs collision on|off" are remembered in
+    -- <presets folder>\_collision.txt and win over this. false = off until switched on; "never" = the
+    -- capsule is never touched and the switch is hidden.
+    CollisionFollow = true,
+    CollisionRadius = true,      -- false = only the height follows (the capsule keeps the game's width)
+    CollisionStepHeight = true,  -- false = keep the game's step height
+    CollisionPollMs = 50,        -- how often the capsule is checked (crouching changes it); idle when nothing to do
+
     -- How often the script talks to the DLL (console commands, picker, rescans).
     PollIntervalMs = 600,
     -- How often it checks that the characters and their meshes are still the same.
@@ -156,7 +169,7 @@ return {
     -- Auto Ground: longer legs sink the feet into the floor (the pelvis stays where the animation put
     -- it), shorter legs make them float. With this on, the player's mesh is moved up or down by what
     -- the sliders moved the lowest foot bones, worked out from the reference pose and the sliders in
-    -- _last_session.json. Visual only: the collision capsule stays the same.
+    -- _last_session.json. Visual only: the collision capsule follows Height alone (CollisionFollow).
     -- Console: "ubs ground" (status), "ubs ground on|off", "ubs ground <cm>" (extra, this session).
     -- The switch in the window (Character Scale > Overall) and "ubs ground on|off" are remembered in
     -- <presets folder>\_auto_ground.txt and win over this; delete that file to go back to this setting.

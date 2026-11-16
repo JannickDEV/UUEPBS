@@ -11,7 +11,8 @@
 --      drawn into a render target, so this works even when the image only exists on the GPU.
 --   2. A head shot: a SceneCapture2D is placed in front of the head bone, renders only that character
 --      into a small render target, and is removed again. "PortraitBone", "PortraitDistance" (cm) and
---      "PortraitFov" (degrees) in the game profile tune it.
+--      "PortraitFov" (degrees) in the game profile tune it. The level's own lights rarely light a face from
+--      the front, so the shot brings two studio lights of its own (see studio_lights; "PortraitLight").
 -- The render target comes from KismetRenderingLibrary::CreateRenderTarget2D, or from
 -- CanvasRenderTarget2D::CreateCanvasRenderTarget2D where that one is unusable. It is written with
 -- KismetRenderingLibrary::ExportRenderTarget (PNG), or, if that is not available, read back pixel by
@@ -394,7 +395,175 @@ local function draw_texture(world, rt, tex)
     return drawn
 end
 
+-- Spawns `cls` at `xf` with BeginDeferredActorSpawnFromClass / FinishSpawningActor. `before(actor)` runs
+-- between the two (properties that must be in place when the components are set up). Returns the actor,
+-- or nil and why not.
+local function spawn(world, cls, xf, what, before)
+    local gs = statics()
+    -- 1 = always spawn; no owner; (UE5.3+) scale method 1 = multiply with root
+    local ok, a = ucall(gs, "BeginDeferredActorSpawnFromClass", table.pack(world, cls, xf, 1, nil), table.pack(1))
+    if not ok or not valid(a) then
+        return nil, "could not spawn a " .. what .. " (" .. (ok and "nothing came back" or short(a)) .. ")"
+    end
+    if before then
+        pcall(before, a)
+    end
+    local finished, ferr = ucall(gs, "FinishSpawningActor", table.pack(a, xf), table.pack(1))
+    if not finished then
+        pcall(function()
+            a:K2_DestroyActor()
+        end)
+        return nil, "could not finish spawning the " .. what .. " (" .. short(ferr) .. ")"
+    end
+    return a
+end
+
+local function destroy(a)
+    pcall(function()
+        a:K2_DestroyActor()
+    end)
+end
+
+-- ---------------------------------------------------------------- studio lights
+--
+-- A scene capture sees the level's own lights only. Those are set up for the camera the player uses, so a
+-- face shot from the front is usually lit from behind or above and comes out almost black, with a thin rim.
+-- So every shot gets two point lights of its own for the moment of the capture: a key light up and to one
+-- side of the camera and a weaker fill from the other side. They are spawned, used for one CaptureScene
+-- and destroyed in the same tick, so the game's own view never sees them.
+--
+-- How bright: the light is matched to the level's sun (the brightest directional light, in lux), so the
+-- face gets about as much light as a sunlit wall. That keeps it right both in games tuned to physical
+-- values (100000 lux sun) and in games with a 3-10 lux sun, and the game's own exposure handles the rest.
+-- No sun found: DEFAULT_LUX. The game profile's "PortraitLight" scales it (2 = twice as bright);
+-- 0 or false turns the studio lights off.
+local DEFAULT_LUX = 10
+local KEY, FILL = 1.0, 0.35
+
+local function level_lux()
+    local best = nil
+    pcall(function()
+        for _, l in ipairs(FindAllOf("DirectionalLightComponent") or {}) do
+            local ok, v = pcall(function()
+                if l.bAffectsWorld == false or l.bVisible == false then
+                    return nil
+                end
+                return tonumber(l.Intensity)
+            end)
+            if ok and v and v > 0 and (not best or v > best) then
+                best = v
+            end
+        end
+    end)
+    return best
+end
+
+local function light_gain()
+    local g = ctx.profile().PortraitLight
+    if g == false then
+        return 0
+    end
+    return tonumber(g) or 1
+end
+
+-- One point light at `pos`, `cd` candela. Movable (a light spawned at run time cannot be anything else),
+-- no shadows, inverse-square falloff. The intensity goes in through SetIntensity after spawning, which
+-- pushes it to the renderer at once (a property write alone would only show up next frame); it is set
+-- to 0 first because SetIntensity ignores a value equal to the current one.
+local function point_light(world, pos, cd, reach)
+    local cls = find("/Script/Engine.PointLight")
+    if not cls then
+        return nil, "no PointLight class"
+    end
+    local xf = { Rotation = { X = 0, Y = 0, Z = 0, W = 1 }, Translation = pos, Scale3D = { X = 1, Y = 1, Z = 1 } }
+    local function comp_of(a)
+        local c = nil
+        pcall(function()
+            c = a.PointLightComponent
+        end)
+        if not valid(c) then
+            pcall(function()
+                c = a.LightComponent
+            end)
+        end
+        return valid(c) and c or nil
+    end
+    local light, why = spawn(world, cls, xf, "PointLight", function(a)
+        local c = comp_of(a)
+        if not c then
+            return
+        end
+        pcall(function()
+            c.Mobility = 2 -- movable
+        end)
+        pcall(function()
+            c.IntensityUnits = 1 -- candela
+        end)
+        pcall(function()
+            c.bUseInverseSquaredFalloff = true
+        end)
+        pcall(function()
+            c.CastShadows = false
+        end)
+        pcall(function()
+            c.AttenuationRadius = reach
+        end)
+    end)
+    if not light then
+        return nil, why
+    end
+    local c = comp_of(light)
+    if not c then
+        destroy(light)
+        return nil, "PointLight has no light component"
+    end
+    ucall(c, "SetMobility", table.pack(2))
+    ucall(c, "SetAttenuationRadius", table.pack(reach))
+    ucall(c, "SetIntensity", table.pack(0))
+    local ok, err = ucall(c, "SetIntensity", table.pack(cd))
+    if not ok then
+        pcall(function()
+            c.Intensity = cd
+        end)
+        log("SetIntensity failed (%s), wrote the property instead", short(err))
+    end
+    return light
+end
+
+-- Key and fill around a camera at `cam` looking along `look` (unit, horizontal) at `centre`, `dist` cm away.
+-- Returns the spawned lights (possibly none) and a short description for the log.
+local function studio_lights(world, cam, look, centre, dist)
+    local gain = light_gain()
+    if gain <= 0 then
+        return {}, "no studio light"
+    end
+    local sun = level_lux()
+    local lux = (sun or DEFAULT_LUX) * gain
+    local right = { X = -look.Y, Y = look.X }
+    local lights = {}
+    local function put(side, up, strength)
+        local pos = {
+            X = cam.X + right.X * side * dist,
+            Y = cam.Y + right.Y * side * dist,
+            Z = cam.Z + up * dist,
+        }
+        local dx, dy, dz = centre.X - pos.X, centre.Y - pos.Y, centre.Z - pos.Z
+        local r = math.sqrt(dx * dx + dy * dy + dz * dz)
+        local m = r / 100
+        local l, why = point_light(world, pos, lux * strength * m * m, math.max(r * 3, 500))
+        if l then
+            lights[#lights + 1] = l
+        else
+            log("studio light: %s", tostring(why))
+        end
+    end
+    put(0.6, 0.5, KEY)
+    put(-0.7, 0.1, FILL)
+    return lights, string.format("lit at %.4g lux (%s)", lux, sun and "matched to the sun" or "no sun found")
+end
+
 -- Renders only `actor` into `rt` from a camera `dist` cm in front of `centre`, looking back at it.
+-- Returns ok, and why not or how it was lit.
 local function scene_shot(actor, rt, centre, dist, fov, lift, pitch)
     local gs, cls = statics(), find("/Script/Engine.SceneCapture2D")
     if not gs or not cls then
@@ -409,18 +578,13 @@ local function scene_shot(actor, rt, centre, dist, fov, lift, pitch)
     local yaw = math.deg(math.atan(fwd.Y, fwd.X)) + 180
     local xf = { Rotation = quat(pitch, yaw, 0), Translation = cam, Scale3D = { X = 1, Y = 1, Z = 1 } }
 
-    -- 1 = always spawn; no owner; (UE5.3+) scale method 1 = multiply with root
-    local ok, cap = ucall(gs, "BeginDeferredActorSpawnFromClass", table.pack(actor, cls, xf, 1, nil), table.pack(1))
-    if not ok or not valid(cap) then
-        return false, "could not spawn a SceneCapture2D (" .. (ok and "nothing came back" or short(cap)) .. ")"
+    local cap, err = spawn(actor, cls, xf, "SceneCapture2D")
+    if not cap then
+        return false, err
     end
-    local finished, ferr = ucall(gs, "FinishSpawningActor", table.pack(cap, xf), table.pack(1))
-    if not finished then
-        pcall(function()
-            cap:K2_DestroyActor()
-        end)
-        return false, "could not finish spawning the SceneCapture2D (" .. short(ferr) .. ")"
-    end
+    local flat = math.sqrt(fwd.X * fwd.X + fwd.Y * fwd.Y)
+    local look = flat > 0.01 and { X = -fwd.X / flat, Y = -fwd.Y / flat } or { X = -1, Y = 0 }
+    local lights, lit = studio_lights(actor, cam, look, centre, dist)
     local shot, why = pcall(function()
         local comp = cap.CaptureComponent2D
         comp.TextureTarget = rt
@@ -428,20 +592,21 @@ local function scene_shot(actor, rt, centre, dist, fov, lift, pitch)
         comp.bCaptureEveryFrame = false
         comp.bCaptureOnMovement = false
         comp.FOVAngle = fov
-        comp.PrimitiveRenderMode = 2 -- only what is in the show-only list
-        local shown, err = ucall(comp, "ShowOnlyActorComponents", table.pack(actor, true))
+        comp.PrimitiveRenderMode = 2 -- only what is in the show-only list (lights are not primitives, they still count)
+        local shown, serr = ucall(comp, "ShowOnlyActorComponents", table.pack(actor, true))
         if not shown then
-            error(err, 0)
+            error(serr, 0)
         end
         comp:CaptureScene()
     end)
-    pcall(function()
-        cap:K2_DestroyActor()
-    end)
+    destroy(cap)
+    for _, l in ipairs(lights) do
+        destroy(l)
+    end
     if not shot then
         return false, "capture failed: " .. short(why)
     end
-    return true
+    return true, lit
 end
 
 local function head_shot(actor, rt)
@@ -454,7 +619,7 @@ local function head_shot(actor, rt)
     if not ok then
         return false, why
     end
-    return true, "head shot at " .. tostring(bone)
+    return true, "head shot at " .. tostring(bone) .. ", " .. why
 end
 
 -- The whole character, for preset thumbnails: framed from the actor's bounds when the engine gives
@@ -493,7 +658,7 @@ local function body_shot(actor, rt)
     if not ok then
         return false, why
     end
-    return true, "body shot, " .. how
+    return true, "body shot, " .. how .. ", " .. why
 end
 
 -- ---------------------------------------------------------------- requests

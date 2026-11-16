@@ -103,6 +103,23 @@ static void test_bridge()
 }
 
 // Saved like the other Character Scale values: presets and share codes carry them.
+// "Collision follows Height": the window's switch and the per-character Height lines.
+static void test_collision_lines()
+{
+    bridge::DllState d;
+    d.heights = {{"player", 2.0}, {"7FF6AB", 0.75}};
+    d.collision = 3;
+    d.collision_on = false;
+    const std::string out = bridge::format_dll_state(d);
+    CHECK(out.find("height\tplayer\t2.0000\n") != std::string::npos);
+    CHECK(out.find("height\t7FF6AB\t0.7500\n") != std::string::npos);
+    CHECK(out.find("collui\t3\t0\n") != std::string::npos);
+    CHECK(out.ends_with("#end\n"));
+    bridge::DllState none;
+    const std::string idle = bridge::format_dll_state(none);
+    CHECK(idle.find("height\t") == std::string::npos && idle.find("collui\t0\t0\n") != std::string::npos);
+}
+
 static void test_presets()
 {
     EditBook book;
@@ -126,6 +143,7 @@ int main()
     test_sliders();
     test_no_bones();
     test_bridge();
+    test_collision_lines();
     test_presets();
     if (g_fail == 0)
     {

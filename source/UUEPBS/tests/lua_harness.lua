@@ -216,6 +216,7 @@ os.clock = function() return fakeNow end
 local pollMs
 local fastMs
 local camMs, camLoop
+local colMs, colLoop
 function LoopInGameThreadWithDelay(ms, fn)
     if not loop then
         pollMs = ms
@@ -223,9 +224,12 @@ function LoopInGameThreadWithDelay(ms, fn)
     elseif not fast then
         fastMs = ms -- the morph loop (runs only while the window is open)
         fast = function() fakeNow = fakeNow + ms / 1000; fn() end
-    else
+    elseif not camLoop then
         camMs = ms -- the camera loop (does nothing until a character has Camera sliders)
         camLoop = fn
+    else
+        colMs = ms -- the collision loop (does nothing until a character's Height is not 1)
+        colLoop = fn
     end
     return 1
 end
@@ -392,6 +396,7 @@ check(loop and console.uuepbs and console.ubs and not console.xbs, "registration
 check(pollMs == 400, "poll interval " .. tostring(pollMs))
 check(fast and fastMs == 100, "morph loop registered at 100 ms: " .. tostring(fastMs))
 check(camLoop and camMs == 50, "camera loop registered at 50 ms: " .. tostring(camMs))
+check(colLoop and colMs == 50, "collision loop registered at 50 ms: " .. tostring(colMs))
 for _ = 1, 3 do
     camLoop() -- idle: no cam lines from the DLL
 end

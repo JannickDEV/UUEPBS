@@ -295,6 +295,7 @@ namespace uuepbs::bridge
         out += "refresh\t" + std::to_string(s.refresh) + "\n";
         out += "relist\t" + std::to_string(s.relist) + "\n";
         out += "groundui\t" + std::to_string(s.ground) + "\t" + (s.ground_on ? "1" : "0") + "\n";
+        out += "collui\t" + std::to_string(s.collision) + "\t" + (s.collision_on ? "1" : "0") + "\n";
         out += "physicsui\t" + std::to_string(s.physics) + "\t" + clean_field(s.physics_mode) + "\n";
         out += "hook\t" + clean_field(s.hook_state) + "\t" + clean_field(s.hook_text) + "\n";
         out += std::string("ui\t") + (s.window_open ? "1" : "0") + "\n";
@@ -317,6 +318,12 @@ namespace uuepbs::bridge
         for (const auto& [key, wish] : s.cameras)
         {
             out += "cam\t" + clean_field(key) + "\t" + format_camera_fields(wish) + "\n";
+        }
+        for (const auto& [key, height] : s.heights)
+        {
+            char buf[32];
+            std::snprintf(buf, sizeof(buf), "%.4f", height);
+            out += "height\t" + clean_field(key) + "\t" + buf + "\n";
         }
         out += "morph\t" + std::to_string(s.morph_revision) + "\n";
         for (const DllState::Morph& m : s.morphs)

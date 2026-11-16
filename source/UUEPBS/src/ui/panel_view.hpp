@@ -74,6 +74,10 @@ namespace uuepbs::ui
         // the script, which applies it in either AutoGroundMode and remembers it in the presets folder.
         virtual int auto_ground() { return -1; }
         virtual void set_auto_ground(bool on) { (void)on; }
+        // "Collision follows Height" (config.lua CollisionFollow): 1 on, 0 off, -1 unknown (older script).
+        // The script sizes each character's collision capsule with its Height and remembers the switch.
+        virtual int collision_follow() { return -1; }
+        virtual void set_collision_follow(bool on) { (void)on; }
         // Jiggle physics (config.lua PhysicsMode, uuepbs_physics.lua): "follow", "off", "keep", "" = an older
         // script without it. The window's choice asks the script, which applies and remembers it.
         virtual std::string physics_mode() { return {}; }
