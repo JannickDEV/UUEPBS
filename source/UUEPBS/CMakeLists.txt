@@ -49,6 +49,7 @@ add_library(UUEPBS SHARED
     src/core/body_groups.cpp
     src/core/bone_parts.cpp
     src/core/character_names.cpp
+    src/core/camera.cpp
     src/core/changes.cpp
     src/core/character_memory.cpp
     src/core/follow.cpp

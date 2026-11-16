@@ -23,7 +23,7 @@ end() { echo "::endgroup::"; }
 CORE=("$S"/core/*.cpp)
 IMGUI_SRC=("$IMGUI/imgui.cpp" "$IMGUI/imgui_draw.cpp" "$IMGUI/imgui_tables.cpp" "$IMGUI/imgui_widgets.cpp")
 
-for t in sculpt changes symmetry mirror preset_library looks names share compare morph_sort body_editor follow; do
+for t in sculpt changes symmetry mirror preset_library looks names share compare morph_sort body_editor follow camera; do
   step "test_$t"
   opt=""; [ "$t" = sculpt ] && opt="-O1"
   $CXX -std=c++23 $opt -I"$S" "test_$t.cpp" "${CORE[@]}" -o "$OUT/test_$t"
@@ -36,10 +36,11 @@ $CXX -std=c++23 -I"$S" test_groups.cpp "${CORE[@]}" -o "$OUT/test_groups"
 "$OUT/test_groups" "$SCRIPTS/BoneDictionary.json"
 end
 
-step "Lua tests (portraits, looks)"
+step "Lua tests (portraits, looks, deformers, camera)"
 $LUA portraits_test.lua "$SCRIPTS" "$OUT/portraits"
 $LUA looks_test.lua "$SCRIPTS"
 $LUA deformers_test.lua "$SCRIPTS"
+$LUA camera_test.lua "$SCRIPTS"
 end
 
 step "Lua <-> DLL bridge harness"

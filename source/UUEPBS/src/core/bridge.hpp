@@ -40,6 +40,8 @@
 //     remember <tab> <identity>                         (NPCs with saved sliders: Lua looks out for them)
 //     morph <tab> <revision>                            (then one mw line per morph to override)
 //     mw <tab> <name> <tab> <weight> <tab> <actor key>
+//     cam <tab> <actor key> <tab> <lift cm> <tab> <distance> <tab> <follow 0/1> <tab> <height>
+//                                                       (Character Scale > Camera; none = the game's own camera)
 //
 // Actor keys: "player" for the default character (the controlled pawn or the profile's Target),
 // otherwise the actor's address in hex. "primary" is the main mesh of that character.
@@ -49,6 +51,7 @@
 // DLL only accepts it when the header and the trailer carry the same sequence number.
 #pragma once
 
+#include "camera.hpp"
 #include "xform.hpp"
 
 #include <cstdint>
@@ -156,6 +159,7 @@ namespace uuepbs::bridge
         std::vector<std::pair<std::string, std::string>> keeps; // characters with edits: key, label
         std::vector<std::string> remembered;                    // identities with saved sliders
         std::vector<std::string> scaled;                        // characters whose sliders scale bones right now
+        std::vector<std::pair<std::string, CameraWish>> cameras; // Character Scale > Camera, per actor key
     };
 
     std::string format_dll_state(const DllState& state);

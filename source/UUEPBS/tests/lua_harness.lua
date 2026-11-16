@@ -212,13 +212,17 @@ local fakeNow = 0
 os.clock = function() return fakeNow end
 local pollMs
 local fastMs
+local camMs, camLoop
 function LoopInGameThreadWithDelay(ms, fn)
     if not loop then
         pollMs = ms
         loop = function() fakeNow = fakeNow + ms / 1000; fn() end
-    else
+    elseif not fast then
         fastMs = ms -- the morph loop (runs only while the window is open)
         fast = function() fakeNow = fakeNow + ms / 1000; fn() end
+    else
+        camMs = ms -- the camera loop (does nothing until a character has Camera sliders)
+        camLoop = fn
     end
     return 1
 end
@@ -377,6 +381,10 @@ check(loaded and loaded[1] == project .. "\\Binaries\\Win64\\ue4ss\\Mods\\UUEPBS
 check(loop and console.uuepbs and console.ubs and not console.xbs, "registrations")
 check(pollMs == 400, "poll interval " .. tostring(pollMs))
 check(fast and fastMs == 100, "morph loop registered at 100 ms: " .. tostring(fastMs))
+check(camLoop and camMs == 50, "camera loop registered at 50 ms: " .. tostring(camMs))
+for _ = 1, 3 do
+    camLoop() -- idle: no cam lines from the DLL
+end
 
 -- TEKKEN 8 (polaris): the pawn you control is only a controller / camera; the fighters are
 -- PolarisCharacterActor (an Actor, not a Character). The profile v2.7.1 wrote on its first run (defaults,

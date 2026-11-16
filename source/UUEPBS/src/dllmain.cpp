@@ -1260,6 +1260,8 @@ namespace
                 keeps.emplace_back(a.key, a.label);
             }
             std::vector<std::string> scaled = reg.scaling_actors();
+            // Character Scale > Camera: none while off or comparing (Lua puts the game's camera back).
+            auto cameras = send_morphs ? reg.camera_wishes() : decltype(reg.camera_wishes()){};
             {
                 std::lock_guard guard(m_lock);
                 if (morph_rev != m_out.morph_revision)
@@ -1286,6 +1288,11 @@ namespace
                 if (scaled != m_out.scaled)
                 {
                     m_out.scaled = std::move(scaled);
+                    m_out_dirty = true;
+                }
+                if (cameras != m_out.cameras)
+                {
+                    m_out.cameras = std::move(cameras);
                     m_out_dirty = true;
                 }
                 if (!m_out_dirty && Clock::now() - m_last_publish < std::chrono::seconds(5))
