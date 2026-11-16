@@ -3,6 +3,8 @@
 -- Checks: request file parsing, one picture per gap, the head-shot call sequence (spawn a
 -- SceneCapture2D, show only the character, capture, export, destroy), the game-portrait path,
 -- the read-back PNG fallback, and that a failing character is given up after two tries.
+-- The mocked UFunctions check their argument count the way UE4SS does ("UFunction expected 7
+-- parameters, received 6"), against UE4.26 signatures by default and UE5.3 ones in section 10.
 local scripts, dir = arg[1], arg[2] or "/tmp/uuepbs_portraits"
 package.path = scripts .. "/?.lua;" .. package.path
 os.execute('mkdir -p "' .. dir .. '/_portraits"')
@@ -25,26 +27,56 @@ local function obj(t)
 end
 
 -- Mocked engine -------------------------------------------------------------------------
+-- Parameter counts (return value not counted), per engine version.
+local UE4 = {
+    CreateRenderTarget2D = 6, ReleaseRenderTarget2D = 1, ExportRenderTarget = 4, ReadRenderTargetRaw = 3,
+    BeginDrawCanvasToRenderTarget = 5, EndDrawCanvasToRenderTarget = 2, K2_DrawTexture = 9,
+    BeginDeferredActorSpawnFromClass = 5, FinishSpawningActor = 2, ShowOnlyActorComponents = 2, GetActorBounds = 4,
+    CreateCanvasRenderTarget2D = 4, UpdateResourceImmediate = 1,
+}
+local UE53 = {}
+for k, v in pairs(UE4) do
+    UE53[k] = v
+end
+UE53.CreateRenderTarget2D = 7 -- bSupportUAVs
+UE53.BeginDeferredActorSpawnFromClass = 6 -- TransformScaleMethod
+UE53.FinishSpawningActor = 3 -- TransformScaleMethod
+local sig = UE4
+local argCounts = {}
+local function ufn(name, fn)
+    return function(self, ...)
+        local n = select("#", ...)
+        if sig[name] and n ~= sig[name] then
+            error(string.format("[UFunction::setup_metamethods -> __call] UFunction expected %d parameters, received %d", sig[name], n))
+        end
+        argCounts[name] = n
+        return fn(self, ...)
+    end
+end
+local kismetRT = true
 local exportWorks = true
 local spawnWorks = true
 local captures = {}
 local rendering = obj({
-    CreateRenderTarget2D = function(_, world, w, h, fmt)
+    CreateRenderTarget2D = ufn("CreateRenderTarget2D", function(_, world, w, h, fmt)
+        if not kismetRT then
+            error("blocked in this game", 0)
+        end
         calls[#calls + 1] = "rt " .. w .. "x" .. h .. " fmt " .. fmt
         return obj({ kind = "rt" })
-    end,
-    ReleaseRenderTarget2D = function()
+    end),
+    ReleaseRenderTarget2D = ufn("ReleaseRenderTarget2D", function()
         calls[#calls + 1] = "release"
-    end,
-    ExportRenderTarget = function(_, world, rt, folder, file)
+    end),
+    ExportRenderTarget = ufn("ExportRenderTarget", function(_, world, rt, folder, file)
         calls[#calls + 1] = "export " .. file
         if exportWorks then
             local f = assert(io.open(folder .. "\\" .. file, "wb"))
             f:write(string.rep("x", 100))
             f:close()
         end
-    end,
-    ReadRenderTargetRaw = function()
+    end),
+    ReadRenderTargetRaw = ufn("ReadRenderTargetRaw", function()
         calls[#calls + 1] = "readraw"
         return {
             ForEach = function(_, fn)
@@ -53,36 +85,50 @@ local rendering = obj({
                 end
             end,
         }
-    end,
-    BeginDrawCanvasToRenderTarget = function(_, world, rt, canvasOut, sizeOut, ctxOut)
+    end),
+    BeginDrawCanvasToRenderTarget = ufn("BeginDrawCanvasToRenderTarget", function(_, world, rt, canvasOut, sizeOut, ctxOut)
         calls[#calls + 1] = "canvas"
-        return obj({ K2_DrawTexture = function(_, tex) calls[#calls + 1] = "draw " .. tex.name end }), { X = 256, Y = 256 }, { ctx = true }
-    end,
-    EndDrawCanvasToRenderTarget = function()
+        return obj({ K2_DrawTexture = ufn("K2_DrawTexture", function(_, tex) calls[#calls + 1] = "draw " .. tex.name end) }), { X = 256, Y = 256 }, { ctx = true }
+    end),
+    EndDrawCanvasToRenderTarget = ufn("EndDrawCanvasToRenderTarget", function()
         calls[#calls + 1] = "endcanvas"
-    end,
+    end),
+})
+local canvasRT = obj({
+    CreateCanvasRenderTarget2D = ufn("CreateCanvasRenderTarget2D", function(_, world, cls, w, h)
+        calls[#calls + 1] = "canvasrt " .. w .. "x" .. h
+        return obj({
+            kind = "canvasrt",
+            RenderTargetFormat = 13,
+            UpdateResourceImmediate = ufn("UpdateResourceImmediate", function(self)
+                calls[#calls + 1] = "update fmt " .. self.RenderTargetFormat
+            end),
+        })
+    end),
 })
 local statics = obj({
-    BeginDeferredActorSpawnFromClass = function(_, world, cls, xf)
+    BeginDeferredActorSpawnFromClass = ufn("BeginDeferredActorSpawnFromClass", function(_, world, cls, xf)
         calls[#calls + 1] = "spawn"
         if not spawnWorks then
             return nil
         end
         local comp = obj({
-            ShowOnlyActorComponents = function(_, actor) calls[#calls + 1] = "showonly " .. actor.name end,
+            ShowOnlyActorComponents = ufn("ShowOnlyActorComponents", function(_, actor) calls[#calls + 1] = "showonly " .. actor.name end),
             CaptureScene = function(self)
                 calls[#calls + 1] = "capture"
                 captures[#captures + 1] = self
             end,
         })
         return obj({ CaptureComponent2D = comp, K2_DestroyActor = function() calls[#calls + 1] = "destroy" end, xf = xf })
-    end,
-    FinishSpawningActor = function() end,
+    end),
+    FinishSpawningActor = ufn("FinishSpawningActor", function() end),
 })
 local objects = {
     ["/Script/Engine.Default__KismetRenderingLibrary"] = rendering,
     ["/Script/Engine.Default__GameplayStatics"] = statics,
     ["/Script/Engine.SceneCapture2D"] = obj({}),
+    ["/Script/Engine.Default__CanvasRenderTarget2D"] = canvasRT,
+    ["/Script/Engine.CanvasRenderTarget2D"] = obj({}),
 }
 function StaticFindObject(path)
     return objects[path]
@@ -215,9 +261,9 @@ local function setup(portraitsOn)
     })
 end
 setup(true)
-actors.auto.GetActorBounds = function(_, onlyColliding, originOut, extentOut)
+actors.auto.GetActorBounds = ufn("GetActorBounds", function(_, onlyColliding, originOut, extentOut)
     return { X = 0, Y = 0, Z = 88 }, { X = 30, Y = 30, Z = 90 }
-end
+end)
 calls, captures = {}, {}
 requests("")
 P.tick(90000)
@@ -255,6 +301,58 @@ calls = {}
 P.tick(97000)
 check(#calls == 0, "portraits off: no portrait taken")
 profile.ThumbnailDistance = nil
+
+-- 10. UE5.3 signatures: the calls are refitted to the longer parameter lists (UE4SS refuses a
+-- call with too few arguments, which is what made every portrait fail with "could not create a render target")
+sig = UE53
+said, calls, captures = {}, {}, {}
+setup(true)
+requests("auto\tHero\t20\n")
+thumbs("")
+P.tick(100000)
+seq = table.concat(calls, ",")
+check(seq:find("rt 256x256 fmt 2", 1, true) and seq:find("spawn,showonly Hero,capture,destroy", 1, true) and seq:find("export Hero.auto.png", 1, true),
+    "UE5.3: portrait taken: " .. seq .. " | " .. table.concat(said, " | "))
+check(argCounts.CreateRenderTarget2D == 7 and argCounts.BeginDeferredActorSpawnFromClass == 6 and argCounts.FinishSpawningActor == 3,
+    "UE5.3: argument lists refitted")
+check(#said == 0, "UE5.3: nothing reported: " .. table.concat(said, " | "))
+
+-- 11. an older engine with shorter lists (no bAutoGenerateMipMaps, no bIncludeFromChildActors)
+sig = {}
+for k, v in pairs(UE4) do
+    sig[k] = v
+end
+sig.CreateRenderTarget2D, sig.ShowOnlyActorComponents = 5, 1
+calls = {}
+requests("auto\tHero\t21\n")
+P.tick(110000)
+seq = table.concat(calls, ",")
+check(seq:find("export Hero.auto.png", 1, true) and argCounts.CreateRenderTarget2D == 5 and argCounts.ShowOnlyActorComponents == 1,
+    "older engine: shorter argument lists: " .. seq)
+
+-- 12. CreateRenderTarget2D unusable: a CanvasRenderTarget2D switched to RGBA8 is used instead
+sig = UE53
+kismetRT = false
+calls = {}
+requests("auto\tHero\t22\n")
+P.tick(120000)
+seq = table.concat(calls, ",")
+check(seq:find("canvasrt 256x256,update fmt 2", 1, true) and seq:find("export Hero.auto.png", 1, true),
+    "canvas render target fallback: " .. seq)
+
+-- 13. no render target at all: the reason is reported, not just "could not create a render target"
+objects["/Script/Engine.Default__CanvasRenderTarget2D"] = nil
+P = nil
+package.loaded.uuepbs_portraits = nil
+P = require("uuepbs_portraits")
+said = {}
+setup(true)
+requests("auto\tHero\t23\n")
+P.tick(130000)
+P.tick(140000)
+check(#said == 1 and said[1]:find("could not create a render target (CreateRenderTarget2D: blocked in this game", 1, true),
+    "reason given: " .. table.concat(said, " | "))
+kismetRT = true
 
 print(failures == 0 and "portraits: all checks passed" or (failures .. " failure(s)"))
 os.exit(failures == 0 and 0 or 1)
