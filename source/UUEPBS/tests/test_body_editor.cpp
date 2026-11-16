@@ -108,6 +108,12 @@ int main()
         // UE mannequin ball_l / ball_r are toes, not testicles.
         CHECK(balls && balls->size() == 3 && has(balls, "Testicle_L") && has(balls, "Scrotum") && !has(balls, "ball_l"));
         CHECK(vulva && vulva->size() == 2);
+        // Daz Genesis face bones are not genitals (Afterparty: "nasolabial" holds "labia").
+        const auto daz = resolve_bone_parts({"lNasolabialLower", "rNasolabialMouthCorner", "lLipNasolabialCrease", "Labia_L"});
+        BodyMap md;
+        md.parts = daz;
+        const auto* dv = part_bones(md, "vulva");
+        CHECK(dv && dv->size() == 1 && has(dv, "Labia_L"));
 
         // Bones a Body tab group already took are left alone.
         std::vector<uint8_t> taken(names.size(), 0);

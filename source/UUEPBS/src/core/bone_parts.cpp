@@ -28,7 +28,8 @@ namespace uuepbs
             {"vulva", "vulva",
              {"vagina#", "*vagina*", "vulva#", "*vulva*", "labia#", "*labia*", "labium#", "*labium*", "pussy#", "*pussy*", "clit#",
               "*clitoris*"},
-             {}},
+             // Daz face bones (lNasolabialLower, lLipNasolabialCrease) hold "labia" inside "nasolabial".
+             {"nasolabial"}},
         };
         return parts;
     }
