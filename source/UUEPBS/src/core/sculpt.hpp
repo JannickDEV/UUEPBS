@@ -106,6 +106,14 @@ namespace uuepbs
         // Bones the last apply() wrote (restores included).
         const std::vector<int32_t>& touched() const { return m_touched; }
 
+        // What the last apply() did to `bone`: its pose before and after our edits (component
+        // space). False when that apply did not rebuild the bone, or bind() ran since.
+        bool last_sample(int32_t bone, Xform& source, Xform& result) const;
+
+        // `current` (what `key`'s buffer holds for `bone` now) without our edit: the untouched
+        // value we remembered when the buffer still holds what we wrote, else `current` itself.
+        Xform untouched(const void* key, int32_t bone, const Xform& current) const;
+
       private:
         struct Memo
         {
@@ -134,6 +142,7 @@ namespace uuepbs
         std::vector<uint8_t> m_in_plan;
         std::vector<int32_t> m_inputs; // m_plan plus the parents it reads, ascending, unique
         std::vector<int32_t> m_touched;
+        std::vector<uint8_t> m_last_ok; // bone -> m_source / m_fresh hold the last apply()'s values
 
         // scratch
         std::vector<Xform> m_source;

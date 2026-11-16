@@ -166,6 +166,7 @@ namespace uuepbs
         m_source.assign(n, xf::identity());
         m_for_children.assign(n, xf::identity());
         m_fresh.assign(n, xf::identity());
+        m_last_ok.assign(n, 0);
         m_plan.clear();
         m_inputs.clear();
         m_touched.clear();
@@ -197,6 +198,7 @@ namespace uuepbs
         m_inputs.clear();
         std::fill(m_edit_slot.begin(), m_edit_slot.end(), -1);
         std::fill(m_in_plan.begin(), m_in_plan.end(), 0);
+        std::fill(m_last_ok.begin(), m_last_ok.end(), 0);
         if (n == 0)
         {
             return;
@@ -290,6 +292,30 @@ namespace uuepbs
         }
     }
 
+    bool RigSculptor::last_sample(int32_t bone, Xform& source, Xform& result) const
+    {
+        if (bone < 0 || static_cast<size_t>(bone) >= m_last_ok.size() || !m_last_ok[bone])
+        {
+            return false;
+        }
+        source = m_source[bone];
+        result = m_fresh[bone];
+        return true;
+    }
+
+    Xform RigSculptor::untouched(const void* key, int32_t bone, const Xform& current) const
+    {
+        for (const Memo& m : m_memos)
+        {
+            if (m.buffer == key && bone >= 0 && static_cast<size_t>(bone) < m.marked.size() && m.marked[bone] &&
+                xf::same_bits(current, m.result[bone]))
+            {
+                return m.source[bone];
+            }
+        }
+        return current;
+    }
+
     void RigSculptor::forget_buffers()
     {
         for (Memo& m : m_memos)
@@ -349,6 +375,7 @@ namespace uuepbs
 
         Memo& memo = memo_for(key);
         int32_t written = 0;
+        std::fill(m_last_ok.begin(), m_last_ok.end(), 0);
 
         // 1) Put back bones we edited earlier but no longer plan to touch, as long as
         //    the engine has not refreshed them since (i.e. they still hold our output).
@@ -472,6 +499,7 @@ namespace uuepbs
             memo.source[i] = m_source[i];
             memo.result[i] = m_fresh[i];
             memo.marked[i] = 1;
+            m_last_ok[i] = 1;
             m_touched.push_back(i);
             ++written;
         }

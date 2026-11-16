@@ -705,7 +705,7 @@ namespace
             for (const auto& r : reg.rigs())
             {
                 text += "\n  " + r.label + (r.primary ? " (primary)" : "") + ": " + std::to_string(r.bones) + " bones, " + std::to_string(r.frames) +
-                        " poses edited" + (r.stale ? ", STALE" : "");
+                        " poses edited" + (r.follows ? ", follows the main mesh (not edited twice)" : "") + (r.stale ? ", STALE" : "");
                 any = any || r.frames > 0;
             }
             if (!any)
@@ -1325,7 +1325,7 @@ namespace
             for (const auto& r : reg.rigs())
             {
                 s += "  " + r.owner + " / " + r.label + ": " + std::to_string(r.bones) + " bones, " + std::to_string(r.frames) + " poses" +
-                     (r.stale ? " (stale)" : "") + "\n";
+                     (r.follows ? " (follows the main mesh)" : "") + (r.stale ? " (stale)" : "") + "\n";
             }
             s += "log: " + uuepbs::path_to_utf8(g_log.file());
             return s;
