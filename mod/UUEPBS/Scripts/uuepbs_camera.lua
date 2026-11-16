@@ -12,6 +12,9 @@
 -- "Follow height" adds (Height - 1) x the pivot's height above the feet, and scales the arm by
 -- Height, so the character is framed as before. A camera attached to the mesh (first person,
 -- on the head bone) already moves with the scaled pose, so it only gets the manual offset.
+-- "Collision follows Height" (uuepbs_collision.lua) moves the capsule, and with it a camera boom,
+-- camera or eye height hanging on it, up by what the capsule grew; Follow height takes that off
+-- its own lift (and off the measured pivot), so the camera is not raised twice.
 --
 -- The game may change these values itself (zoom, aiming, crouching). A value that moves away
 -- from what we wrote, outside the range between the game's value and ours, is taken as the
@@ -265,6 +268,12 @@ Kinds.eyes = {
     end,
 }
 
+-- How far the collision script raised the pawn (its capsule centre), cm.
+local function raised(pawn)
+    local r = ctx.raised and num(ctx.raised(pawn)) or 0
+    return r or 0
+end
+
 local function feet_of(pawn, key)
     local z = ctx.feet_z and ctx.feet_z(pawn, key)
     if num(z) then
@@ -336,6 +345,9 @@ local function capture(pawn, key)
         return nil
     end
     c.pivot = Kinds[kind].pivot(c, feet_of(pawn, key))
+    if c.pivot and not onMesh then
+        c.pivot = c.pivot - raised(pawn) -- measured where the game's own capsule would have it
+    end
     if not c.pivot or c.pivot <= 1 then
         c.pivot = 160 -- feet unknown: a person-sized guess
     end
@@ -373,12 +385,14 @@ local function apply(c, w)
     if rebased and c.kind ~= "arm" then
         -- the game moved the camera / eye height: measure the pivot again
         local p = Kinds[c.kind].pivot(c, feet_of(c.pawn, c.key))
+        p = p and not c.onMesh and p - raised(c.pawn) or p
         if p and p > 1 then
             c.pivot = p
         end
     end
     local h = w.follow and w.height or 1
-    local followLift = (w.follow and not c.onMesh) and (h - 1) * c.pivot or 0
+    -- (the capsule, and the camera on it, may already be raised by the collision script)
+    local followLift = (w.follow and not c.onMesh) and (h - 1) * c.pivot - raised(c.pawn) or 0
     local lift = clamp(followLift + w.lift, -MAX_LIFT, MAX_LIFT)
     local dist = w.dist * (w.follow and h or 1)
     local want = {}

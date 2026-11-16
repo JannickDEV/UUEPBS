@@ -144,6 +144,8 @@ namespace uuepbs
         std::vector<ActorSummary> edited_actors() const;
         // Character Scale > Camera of every character that wants the game's camera moved.
         std::vector<std::pair<std::string, CameraWish>> camera_wishes() const;
+        // Character Scale > Height of every character whose Height is not 1 (Lua sizes its collision capsule).
+        std::vector<std::pair<std::string, double>> height_wishes() const;
         // Drops a character's edits (its meshes are released once Lua hears of it).
         // forget_memory: also forget the remembered identity (Release / reset all). A character that
         // merely despawned keeps its memory, so its sliders come back when it appears again.

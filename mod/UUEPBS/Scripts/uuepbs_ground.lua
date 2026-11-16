@@ -585,6 +585,15 @@ function M.new(opts)
         end
     end
 
+    -- The mesh height (RelativeLocation Z) without our lift, nil when this mesh is not lifted.
+    function self.base_z(comp)
+        local ok, a = pcall(function()
+            return comp:GetAddress()
+        end)
+        local e = ok and type(a) == "number" and self.applied[string.format("%X", a)] or nil -- keyed like rig.address
+        return e and e.base and e.base[3] or nil
+    end
+
     function self.set_extra(cm)
         self.extra = cm
     end

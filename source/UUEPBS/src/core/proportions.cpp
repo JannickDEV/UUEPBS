@@ -48,7 +48,8 @@ namespace uuepbs
         static const std::vector<ScaleSlider> sliders = {
             {"height", "Overall", "Height",
              "The whole character, scaled from the mesh origin (the feet on most characters), so it stays on the ground.\n"
-             "Every mesh of the character scales with it. Collision stays as it is; the camera can follow it (Camera section).",
+             "Every mesh of the character scales with it, and so does its collision capsule (switch below). The camera can follow it "
+             "(Camera section).",
              {}, ScaleAxes::Uniform, Spread::Chain, 0.5, 2.0},
             {"head", "Proportions", "Head size", "The head and everything on it (face, hair bones).", {"Head"}, ScaleAxes::Uniform, Spread::Chain,
              0.5, 2.0},

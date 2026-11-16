@@ -32,6 +32,7 @@ https://github.com/user-attachments/assets/4e4372bc-8a64-4255-b8ae-a33645ce187e
 * Body tab morph names from Daz Genesis, VRoid and Character Creator rigs read cleanly (*Breasts size*, not *PBM breasts size*) and land in the right category
 * **Search** on the Body tab (every category at once, by slider, bone or morph name) and in **Choose character**
 * **Auto Ground switch** in Character Scale > Overall, remembered between sessions (`_auto_ground.txt` in the presets folder; it wins over `config.lua`)
+* **Collision follows Height**: a character's collision capsule grows and shrinks with its Height, so a tall character no longer walks through low ceilings and walls and a small one no longer floats. The feet stay on the floor, crouching keeps working, the step height grows along, and Camera > Follow height takes the raised capsule into account. Switch in Character Scale > Overall, on by default and remembered (`_collision.txt`; `CollisionFollow` in `config.lua`, console `ubs collision [on|off]`)
 * **Nipple length** and **Glans size** also work on rigs without bones named for them (Daz Genesis as in Afterparty): the ends of the breast chains and the last bone of the penis chain are used
 * Afterparty: game profile with the pose hook pinned
 
@@ -294,7 +295,7 @@ If a game update moves things, the check fails, the log says so, and you delete 
 * `"scale": 1.2` and `"scale": [1, 1.2, 1.2]` shortcuts work. Older `.rbs` files still load.
 * Thumbnails and tags are not part of the preset file; they live in `UUEPBS Presets\_library\` (see the preset browser above).
 ### Limits
-* The change is visual only. Collision capsules, physics bodies and hit boxes keep their original size.
+* The change is visual only, except for the collision capsule, which follows Height (switch in Character Scale > Overall). Physics bodies and hit boxes keep their original size, and the capsule does not follow the other proportion sliders.
 * <b>UUEPBS presets are generally not interchangeable between games, that is to say a preset made for Stellar Blade will not work with a preset made for Wuchang, and that won't work with a preset made for Expedition 33. This is simply because every UE game developer uses different practices and character rigs for the player. And thus there is no possibility to generalise the naming scheme of body models.</b>
 * Generally, it should work for most UE4.2x–5.x game that runs UE4SS Lua mods and animates characters with skeletal meshes, however, there maybe edge cases where if the game uses its own custom UE build, it may not work until a new config for it is made.
   The following aren't supported, so do not even try it:
