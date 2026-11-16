@@ -144,6 +144,8 @@ namespace uuepbs::bridge
         std::string pick_id;
         uint64_t refresh{};
         uint64_t relist{}; // re-sort the character list from what Lua already knows (no object search)
+        uint64_t ground{};     // Auto Ground switch in the window: bumped on each click ...
+        bool ground_on{};      // ... with the wished state
         std::string hook_state{"waiting"};
         std::string hook_text;
         bool window_open{};

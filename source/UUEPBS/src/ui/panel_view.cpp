@@ -912,6 +912,11 @@ namespace uuepbs::ui
         m_choose_close = false;
         ImGui::SetCursorPos(after);
         ImGui::Dummy(ImVec2(0.0f, dpi_px(4.0f)));
+        ImGui::SetNextItemWidth(std::min(ImGui::GetContentRegionAvail().x, dpi_px(360.0f)));
+        ImGui::InputTextWithHint("##findchar", "Search characters...", m_char_filter, sizeof(m_char_filter));
+        tooltip("Matches the shown name and the engine name / identity under it.");
+        const std::string char_needle = fold_case(m_char_filter);
+        ImGui::Dummy(ImVec2(0.0f, dpi_px(4.0f)));
         ImGui::Separator();
         ImGui::Dummy(ImVec2(0.0f, dpi_px(8.0f)));
 
@@ -981,14 +986,26 @@ namespace uuepbs::ui
             ++index;
         };
 
-        tile("auto", "Automatic", "the character you control", "AUTO", m_target.id == "auto", is_edited(kPlayerActor), nullptr);
+        if (contains_folded("Automatic player", char_needle))
+        {
+            tile("auto", "Automatic", "the character you control", "AUTO", m_target.id == "auto", is_edited(kPlayerActor), nullptr);
+        }
         for (const TargetChoice& t : m_target_list)
         {
             const std::string identity = identity_of(t.key);
             const std::string name = CharacterNames::instance().shown(t.label, t.key, identity);
             const std::string sub = !t.engine.empty() ? t.engine : !identity.empty() ? identity : std::string();
+            if (!char_needle.empty() && !contains_folded(name, char_needle) && !contains_folded(sub, char_needle) &&
+                !contains_folded(t.label, char_needle))
+            {
+                continue;
+            }
             ImTextureData* face = portrait_or_request(t.id, t.key, identity, t.label, t.engine);
             tile(t.id, name, sub, face ? std::string() : monogram(name), t.id == m_target.id, is_edited(t.key), face);
+        }
+        if (index == 0)
+        {
+            ImGui::TextColored(muted(), "No loaded character matches the search. Refresh searches the whole level again.");
         }
         ImGui::EndChild();
         ImGui::PushTextWrapPos(0.0f);
@@ -1271,14 +1288,14 @@ namespace uuepbs::ui
         return pressed;
     }
 
-    void PanelView::draw_category_rail(const std::vector<Category>& cats, float width)
+    bool PanelView::draw_category_rail(const std::vector<Category>& cats, float width)
     {
-        draw_rail("##categories", "BODY", cats, width, m_category,
+        return draw_rail("##categories", "BODY", cats, width, m_category,
                   "Sliders belong to the character: the player's are saved with the session, NPCs are remembered by name. "
                   "Save a preset to reuse a shape.");
     }
 
-    void PanelView::draw_rail(const char* id, const char* heading, const std::vector<Category>& cats, float width, std::string& picked_name,
+    bool PanelView::draw_rail(const char* id, const char* heading, const std::vector<Category>& cats, float width, std::string& picked_name,
                               const char* note)
     {
         Skin& sk = skin();
@@ -1291,6 +1308,7 @@ namespace uuepbs::ui
         ImGui::PopFont();
         ImGui::Dummy(ImVec2(0.0f, dpi_px(2.0f)));
         const float row_h = std::floor(ImGui::GetFrameHeight() * 1.25f);
+        bool clicked = false;
         ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(style.ItemSpacing.x, dpi_px(3.0f)));
         const float small = style.FontSizeBase * style.FontScaleDpi * 0.8f;
         for (const Category& c : cats)
@@ -1302,6 +1320,7 @@ namespace uuepbs::ui
             if (ImGui::InvisibleButton("##cat", ImVec2(w, row_h)))
             {
                 picked_name = c.name;
+                clicked = true;
             }
             const bool hovered = ImGui::IsItemHovered();
             const ImVec2 b(a.x + w, a.y + row_h);
@@ -1354,6 +1373,7 @@ namespace uuepbs::ui
         const ImVec2 r = ImGui::GetItemRectMax();
         const float x = r.x + ImGui::GetStyle().ItemSpacing.x;
         ImGui::GetWindowDrawList()->AddLine(ImVec2(x, ImGui::GetItemRectMin().y), ImVec2(x, r.y), u32(sk.color(Role::Border)), 1.0f);
+        return clicked;
     }
 
     bool PanelView::hairline_slider(const char* id, float* v, float lo, float hi, bool log, float neutral)
@@ -1569,6 +1589,50 @@ namespace uuepbs::ui
         return m_covered_sliders.count(sl.id) > 0 && std::fabs(scale_value(m_book, sl.id) - sl.neutral()) < kScaleNeutralEps;
     }
 
+    bool PanelView::body_hit(const GroupBones& gb) const
+    {
+        const std::string needle = fold_case(m_body_filter);
+        if (needle.empty() || contains_folded(friendly_group_title(gb.group.title), needle) || contains_folded(gb.group.title, needle))
+        {
+            return true;
+        }
+        return std::any_of(gb.bones.begin(), gb.bones.end(), [&](const std::string& b) { return contains_folded(b, needle); });
+    }
+
+    bool PanelView::body_hit(const ScaleSlider& sl) const
+    {
+        const std::string needle = fold_case(m_body_filter);
+        return needle.empty() || contains_folded(sl.title, needle) || contains_folded(sl.id, needle);
+    }
+
+    bool PanelView::body_hit(const MorphGroupMorphs& mg) const
+    {
+        const std::string needle = fold_case(m_body_filter);
+        if (needle.empty() || contains_folded(mg.group.title, needle))
+        {
+            return true;
+        }
+        return std::any_of(mg.morphs.begin(), mg.morphs.end(), [&](const std::string& m) { return contains_folded(m, needle); });
+    }
+
+    size_t PanelView::body_hits(const Category& cat) const
+    {
+        size_t n = 0;
+        for (const GroupBones& gb : m_body.groups)
+        {
+            n += gb.group.section == cat.name && !group_hidden(gb) && body_hit(gb);
+        }
+        for (const ScaleSlider* sl : m_body_sliders)
+        {
+            n += cat.name == sl->section && !slider_hidden(*sl) && body_hit(*sl);
+        }
+        for (const MorphGroupMorphs& mg : m_morph_groups)
+        {
+            n += (mg.group.section.empty() ? std::string("Morphs") : mg.group.section) == cat.name && body_hit(mg);
+        }
+        return n;
+    }
+
     void PanelView::refresh_body_sliders()
     {
         // Per slider: a clearly named morph target first, then the bone-built slider; morphs with
@@ -1605,9 +1669,18 @@ namespace uuepbs::ui
         draw_changed_only_filter();
         ImGui::SameLine();
         ImGui::AlignTextToFramePadding();
-        ImGui::TextColored(muted(), cat.changed ? "%zu of %zu sliders changed. Click a number to type it."
-                           : cat.parts == 1 ? "%zu slider. Click a number to type it." : "%zu sliders. Click a number to type it.",
-                           cat.changed ? cat.changed : cat.parts, cat.parts);
+        const bool searching = m_body_filter[0] != '\0';
+        if (searching)
+        {
+            const size_t hits = body_hits(cat);
+            ImGui::TextColored(muted(), hits == 1 ? "%zu of %zu sliders matches the search." : "%zu of %zu sliders match the search.", hits, cat.parts);
+        }
+        else
+        {
+            ImGui::TextColored(muted(), cat.changed ? "%zu of %zu sliders changed. Click a number to type it."
+                               : cat.parts == 1 ? "%zu slider. Click a number to type it." : "%zu sliders. Click a number to type it.",
+                               cat.changed ? cat.changed : cat.parts, cat.parts);
+        }
         ImGui::PopFont();
         ImGui::Dummy(ImVec2(0.0f, dpi_px(4.0f)));
 
@@ -1618,7 +1691,7 @@ namespace uuepbs::ui
         float label_w = ImGui::CalcTextSize("Depth").x;
         for (const GroupBones& gb : m_body.groups)
         {
-            if (gb.group.section == cat.name && !group_hidden(gb))
+            if (gb.group.section == cat.name && !group_hidden(gb) && body_hit(gb))
             {
                 ++n_groups;
                 label_w = std::max(label_w, ImGui::CalcTextSize(friendly_group_title(gb.group.title).c_str()).x);
@@ -1626,7 +1699,7 @@ namespace uuepbs::ui
         }
         for (const ScaleSlider* sl : m_body_sliders)
         {
-            if (cat.name == sl->section && !slider_hidden(*sl))
+            if (cat.name == sl->section && !slider_hidden(*sl) && body_hit(*sl))
             {
                 ++n_shapes;
                 label_w = std::max(label_w, ImGui::CalcTextSize(sl->title).x);
@@ -1634,7 +1707,7 @@ namespace uuepbs::ui
         }
         for (const MorphGroupMorphs& mg : m_morph_groups)
         {
-            if (morph_section(mg) == cat.name)
+            if (morph_section(mg) == cat.name && body_hit(mg))
             {
                 ++n_shapes;
                 label_w = std::max(label_w, ImGui::CalcTextSize(mg.group.title.c_str()).x);
@@ -1656,7 +1729,7 @@ namespace uuepbs::ui
         for (const GroupBones& gb : m_body.groups)
         {
             const BodyGroup& g = gb.group;
-            if (g.section != cat.name || group_hidden(gb) || (m_simplified_changed_only && !group_changed(gb, m_book)))
+            if (g.section != cat.name || group_hidden(gb) || !body_hit(gb) || (m_simplified_changed_only && !group_changed(gb, m_book)))
             {
                 continue;
             }
@@ -1741,7 +1814,7 @@ namespace uuepbs::ui
         {
             const double value = scale_value(m_book, sl->id);
             const bool edited = std::fabs(value - sl->neutral()) >= kScaleNeutralEps;
-            if (cat.name != sl->section || slider_hidden(*sl) || (m_simplified_changed_only && !edited))
+            if (cat.name != sl->section || slider_hidden(*sl) || !body_hit(*sl) || (m_simplified_changed_only && !edited))
             {
                 continue;
             }
@@ -1779,7 +1852,7 @@ namespace uuepbs::ui
 
         for (const MorphGroupMorphs& mg : m_morph_groups)
         {
-            if (morph_section(mg) != cat.name || (m_simplified_changed_only && !morph_group_changed(mg, m_morphs)))
+            if (morph_section(mg) != cat.name || !body_hit(mg) || (m_simplified_changed_only && !morph_group_changed(mg, m_morphs)))
             {
                 continue;
             }
@@ -1832,7 +1905,9 @@ namespace uuepbs::ui
         }
         if (shown == 0)
         {
-            ImGui::TextColored(muted(), "Nothing in %s is changed yet. Untick \"Changed only\" to see every slider.", cat.name.c_str());
+            ImGui::TextColored(muted(), searching ? "Nothing in %s that matches the search is changed yet."
+                                                  : "Nothing in %s is changed yet. Untick \"Changed only\" to see every slider.",
+                               cat.name.c_str());
         }
         sk.end_child();
         ImGui::PopStyleVar();
@@ -1863,16 +1938,46 @@ namespace uuepbs::ui
         rail_w = std::min(rail_w + ImGui::GetFontSize() * 5.0f, ImGui::GetContentRegionAvail().x * 0.29f);
 
         draw_symmetry_tools(true);
-        draw_category_rail(cats, rail_w);
+        if (draw_category_rail(cats, rail_w))
+        {
+            m_body_filter[0] = '\0'; // picking a category ends the search
+        }
         ImGui::SameLine(0.0f, ImGui::GetStyle().ItemSpacing.x * 2.0f + 1.0f);
         ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0, 0, 0, 0));
         ImGui::BeginChild("##parts", ImVec2(0, 0), ImGuiChildFlags_None);
         ImGui::PopStyleColor();
-        for (const Category& c : cats)
+        // Search every category at once (Daz / Afterparty meshes bring hundreds of morph sliders).
+        ImGui::SetNextItemWidth(-FLT_MIN);
+        ImGui::InputTextWithHint("##findbody", "Search sliders in every category (name, bone or morph)...", m_body_filter, sizeof(m_body_filter));
+        tooltip("Lists every slider of every category whose name matches, or whose bones / morph targets do.\n"
+                "Click a category on the left to go back to it.");
+        if (m_body_filter[0])
         {
-            if (c.name == m_category)
+            size_t found = 0;
+            for (const Category& c : cats)
             {
-                draw_category(c);
+                if (body_hits(c) > 0)
+                {
+                    ++found;
+                    ImGui::PushID(c.name.c_str()); // one "Changed only" box and section child per category
+                    draw_category(c);
+                    ImGui::PopID();
+                    ImGui::Dummy(ImVec2(0.0f, dpi_px(6.0f)));
+                }
+            }
+            if (found == 0)
+            {
+                ImGui::TextColored(muted(), "No slider matches the search. Advanced > Bones and Morphs list everything the mesh has.");
+            }
+        }
+        else
+        {
+            for (const Category& c : cats)
+            {
+                if (c.name == m_category)
+                {
+                    draw_category(c);
+                }
             }
         }
         if (m_morphs_advanced_only > 0 && (m_category == cats.back().name || m_morph_groups.empty()))
@@ -2003,6 +2108,21 @@ namespace uuepbs::ui
             }
             ImGui::PopTextWrapPos();
             ImGui::PopFont();
+            // Auto Ground (config.lua AutoGround, "ubs ground"): one switch for every character, remembered.
+            const int ground = (cat->name == "Overall" || cat->name == "Proportions") && m_targets ? m_targets->auto_ground() : -1;
+            if (ground >= 0)
+            {
+                bool on = ground == 1;
+                if (sk.checkbox("Auto Ground: keep the feet on the floor", &on))
+                {
+                    m_targets->set_auto_ground(on);
+                    set_message(on ? "Auto Ground on" : "Auto Ground off");
+                }
+                tooltip("Longer legs sink the feet into the floor and shorter legs make them float. With this on, the body is lifted or "
+                        "lowered by what the sliders moved the feet, and the legs bend so both feet stay on stairs and slopes.\n"
+                        "Visual only: the collision capsule stays the same. For every character; remembered in the presets folder "
+                        "(_auto_ground.txt). Console: ubs ground.");
+            }
             ImGui::Dummy(ImVec2(0.0f, dpi_px(4.0f)));
 
             float label_w = 0.0f;
