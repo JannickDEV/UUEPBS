@@ -339,6 +339,27 @@ namespace
             m_out_dirty = true;
         }
 
+        std::string physics_mode() override
+        {
+            std::lock_guard guard(m_lock);
+            return m_physics_wish.empty() ? m_state.setting("physics_ui") : m_physics_wish;
+        }
+
+        void set_physics_mode(const std::string& mode) override
+        {
+            std::lock_guard guard(m_lock);
+            ++m_out.physics;
+            m_out.physics_mode = mode;
+            m_physics_wish = mode;
+            m_out_dirty = true;
+        }
+
+        std::string physics_info() override
+        {
+            std::lock_guard guard(m_lock);
+            return m_state.setting("physics_info");
+        }
+
         std::string compare_hotkey_text() override
         {
             const int vk = m_compare_key.load();
@@ -855,6 +876,10 @@ namespace
                 if (m_ground_wish >= 0 && m_state.setting("ground_ui") == (m_ground_wish == 1 ? "1" : "0"))
                 {
                     m_ground_wish = -1; // the script took the window's Auto Ground switch
+                }
+                if (!m_physics_wish.empty() && m_state.setting("physics_ui") == m_physics_wish)
+                {
+                    m_physics_wish.clear(); // the script took the window's Jiggle physics choice
                 }
             }
             for (const auto& c : todo)
@@ -1579,6 +1604,7 @@ namespace
         uuepbs::ThumbnailRequests m_thumbnail_requests; // preset thumbnails (same lock)
         uuepbs::bridge::LuaState m_state;
         uuepbs::bridge::DllState m_out;
+        std::string m_physics_wish; // Jiggle physics choice not yet confirmed by the script (m_lock)
         int m_ground_wish{-1}; // Auto Ground switch clicked in the window and not yet confirmed by the script (m_lock)
         bool m_out_dirty{true};
         Clock::time_point m_last_publish{};

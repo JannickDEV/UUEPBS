@@ -34,6 +34,7 @@ https://github.com/user-attachments/assets/4e4372bc-8a64-4255-b8ae-a33645ce187e
 * **Auto Ground switch** in Character Scale > Overall, remembered between sessions (`_auto_ground.txt` in the presets folder; it wins over `config.lua`)
 * **Nipple length** and **Glans size** also work on rigs without bones named for them (Daz Genesis as in Afterparty): the ends of the breast chains and the last bone of the penis chain are used
 * Afterparty: game profile with the pose hook pinned
+* **Jiggle physics follows the sliders** (Character Scale > Overall > *Jiggle physics*): the physics in a character's animation (Rigid Body with the Physics Asset, AnimDynamics, Kawaii Physics) used to bounce and collide at the original sizes, so a bigger chest went through the arms. Now the physics shapes and joints of the bones your sliders scale grow with them (*Follow the sliders*, the default), or that character's physics and cloth are switched off while it is edited (*Off while edited*), or left alone (*Game's own*). Everything goes back when the sliders are back to 1, on Before, or with sliders off. Remembered in `_physics.txt` in the presets folder; `PhysicsMode` in `config.lua`; console `ubs physics [follow|off|keep]` (the log lists the physics nodes it found)
 
 ### V2.7.0 - Changelogs
 * New window look: flat slate-navy theme with sharp corners, flush text tabs (**Body**, **Presets**, **Advanced**, **Status**) and 1px bordered groups

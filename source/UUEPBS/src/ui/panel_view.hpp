@@ -74,6 +74,11 @@ namespace uuepbs::ui
         // the script, which applies it in either AutoGroundMode and remembers it in the presets folder.
         virtual int auto_ground() { return -1; }
         virtual void set_auto_ground(bool on) { (void)on; }
+        // Jiggle physics (config.lua PhysicsMode, uuepbs_physics.lua): "follow", "off", "keep", "" = an older
+        // script without it. The window's choice asks the script, which applies and remembers it.
+        virtual std::string physics_mode() { return {}; }
+        virtual void set_physics_mode(const std::string& mode) { (void)mode; }
+        virtual std::string physics_info() { return {}; } // what the script did, one line
         // Who an actor key is across reloads (character_memory.hpp), "" when unknown. Renames are
         // stored under it, so they survive reloads.
         virtual std::string identity_of(const std::string& key) { (void)key; return {}; }

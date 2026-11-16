@@ -2123,6 +2123,55 @@ namespace uuepbs::ui
                         "Visual only: the collision capsule stays the same. For every character; remembered in the presets folder "
                         "(_auto_ground.txt). Console: ubs ground.");
             }
+            // Jiggle physics (config.lua PhysicsMode, "ubs physics"): one choice for every character, remembered.
+            const std::string physics = (cat->name == "Overall" || cat->name == "Proportions") && m_targets ? m_targets->physics_mode() : std::string();
+            if (!physics.empty())
+            {
+                static const char* const kModes[][2] = {
+                    {"follow", "Follow the sliders"},
+                    {"off", "Off while edited"},
+                    {"keep", "Game's own"},
+                };
+                const char* shown = kModes[0][1];
+                for (const auto& m : kModes)
+                {
+                    if (physics == m[0])
+                    {
+                        shown = m[1];
+                    }
+                }
+                ImGui::AlignTextToFramePadding();
+                ImGui::TextUnformatted("Jiggle physics");
+                ImGui::SameLine();
+                ImGui::SetNextItemWidth(std::min(dpi_px(220.0f), ImGui::GetContentRegionAvail().x));
+                if (ImGui::BeginCombo("##physics", shown))
+                {
+                    for (const auto& m : kModes)
+                    {
+                        if (ImGui::Selectable(m[1], physics == m[0]))
+                        {
+                            m_targets->set_physics_mode(m[0]);
+                            set_message(std::string("Jiggle physics: ") + m[1]);
+                        }
+                    }
+                    ImGui::EndCombo();
+                }
+                tooltip("Bouncing breasts, butt and genitals, tails and hair come from physics in the game's animation, which runs at the "
+                        "original sizes: a bigger chest goes through the arms, a longer penis swings like the short one.\n"
+                        "Follow the sliders: the physics shapes (Physics Asset bodies and joints, AnimDynamics, Kawaii Physics) of a "
+                        "character whose sliders scale bones grow and shrink with them. Height alone changes nothing.\n"
+                        "Off while edited: that character's physics is switched off and its cloth paused.\n"
+                        "Game's own: untouched.\n"
+                        "Everything goes back when the sliders are back to 1, on Before, or with sliders off. For every character; "
+                        "remembered in the presets folder (_physics.txt). Console: ubs physics.");
+                const std::string info = m_targets->physics_info();
+                if (!info.empty())
+                {
+                    ImGui::PushTextWrapPos(0.0f);
+                    ImGui::TextColored(muted(), "%s", info.c_str());
+                    ImGui::PopTextWrapPos();
+                }
+            }
             ImGui::Dummy(ImVec2(0.0f, dpi_px(4.0f)));
 
             float label_w = 0.0f;
@@ -3082,8 +3131,8 @@ namespace uuepbs::ui
         ImGui::Spacing();
         ImGui::PushTextWrapPos(0.0f);
         const std::string key = m_targets ? m_targets->hotkey_text() : std::string("F6");
-        ImGui::TextColored(muted(), "%s opens/closes this window (in game or here). Changes are visual only: collision, "
-                                    "physics bodies and sockets keep their original size. While the game is paused the "
+        ImGui::TextColored(muted(), "%s opens/closes this window (in game or here). Changes are visual only: the collision capsule "
+                                    "and sockets keep their original size (jiggle physics: Character Scale > Overall). While the game is paused the "
                                     "pose updates on the next animated frame.",
                            key.c_str());
         ImGui::PopTextWrapPos();

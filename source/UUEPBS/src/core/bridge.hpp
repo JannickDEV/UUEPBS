@@ -146,6 +146,8 @@ namespace uuepbs::bridge
         uint64_t relist{}; // re-sort the character list from what Lua already knows (no object search)
         uint64_t ground{};     // Auto Ground switch in the window: bumped on each click ...
         bool ground_on{};      // ... with the wished state
+        uint64_t physics{};       // Jiggle physics choice in the window: bumped on each click ...
+        std::string physics_mode; // ... with the wished mode (follow / off / keep)
         std::string hook_state{"waiting"};
         std::string hook_text;
         bool window_open{};

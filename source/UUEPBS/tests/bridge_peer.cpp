@@ -21,6 +21,7 @@ int main(int argc, char** argv)
     std::printf("session %s seq %lld\n", st->session.c_str(), (long long)st->seq);
     std::printf("presets %s\nkey %s\ngame %s\nengine %s\n", st->setting("presets").c_str(), st->setting("key").c_str(), st->setting("game").c_str(), st->setting("engine").c_str());
     std::printf("ground %s ui %s\n", st->setting("ground").c_str(), st->setting("ground_ui").c_str());
+    std::printf("physics %s [%s]\n", st->setting("physics_ui").c_str(), st->setting("physics_info").c_str());
     std::printf("target %s %s key=%s\n", st->target.id.c_str(), st->target.label.c_str(), st->target.key.c_str());
     std::printf("candidates %zu\n", st->candidates.size());
     for (auto& c : st->candidates) std::printf("cand %s key=%s\n", c.label.c_str(), c.key.c_str());
@@ -65,6 +66,12 @@ int main(int argc, char** argv)
         const std::string g = argv[12];
         out.ground = std::stoull(g.substr(0, g.find(':')));
         out.ground_on = g.size() > 2 && g.back() == '1';
+    }
+    if (const char* p = std::getenv("UUEPBS_PEER_PHYSICS")) // Jiggle physics choice "<clicks>:<mode>"
+    {
+        const std::string g = p;
+        out.physics = std::stoull(g.substr(0, g.find(':')));
+        out.physics_mode = g.substr(g.find(':') + 1);
     }
     out.hook_state = "live"; out.hook_text = "pose hook live on vtable 0x77ED320 slot 374";
     if (argc > 8 && std::string(argv[8]) != "-")
