@@ -36,11 +36,12 @@ $CXX -std=c++23 -I"$S" test_groups.cpp "${CORE[@]}" -o "$OUT/test_groups"
 "$OUT/test_groups" "$SCRIPTS/BoneDictionary.json"
 end
 
-step "Lua tests (portraits, looks, deformers, camera)"
+step "Lua tests (portraits, looks, deformers, camera, copies)"
 $LUA portraits_test.lua "$SCRIPTS" "$OUT/portraits"
 $LUA looks_test.lua "$SCRIPTS"
 $LUA deformers_test.lua "$SCRIPTS"
 $LUA camera_test.lua "$SCRIPTS"
+$LUA copies_test.lua "$SCRIPTS"
 end
 
 step "Lua <-> DLL bridge harness"
@@ -49,6 +50,9 @@ $CXX -std=c++23 -I"$S" test_bridge.cpp "${CORE[@]}" -o "$OUT/test_bridge"
 mkdir -p "$OUT/bridge"
 $LUA lua_harness.lua "$SCRIPTS" "$OUT/bridge_peer" "$OUT/bridge" gon
 "$OUT/test_bridge" "$OUT/bridge/bridge_in.txt"
+echo "--- harness mode: gon, mesh asset property unreadable (UE4SS FObjectPtrProperty)"
+mkdir -p "$OUT/bridge_objptr"
+UUEPBS_OBJPTR=1 $LUA lua_harness.lua "$SCRIPTS" "$OUT/bridge_peer" "$OUT/bridge_objptr" gon
 for m in generic nodir broken legacy polaris nobody tekkenedit tekkenjson names; do
   echo "--- harness mode: $m"
   $LUA lua_harness.lua "$SCRIPTS" "$OUT/bridge_peer" "$OUT/bridge" "$m"

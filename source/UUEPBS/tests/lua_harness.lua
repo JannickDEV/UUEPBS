@@ -137,12 +137,15 @@ local cdo = obj("BP_Guard_C /Game/Chars/BP_Guard.Default__BP_Guard_C")
 
 local refCalls, scanCalls, searches, morphReads, morphWrites = 0, 0, 0, 0, 0
 local charSearches = 0 -- FindAllOf("Character")
+-- UUEPBS_OBJPTR=1: a UE4SS build that cannot read the UE 5.1+ object pointer property (Afterparty, UE 5.7):
+-- SkeletalMeshAsset reads back as the same object on every component; only GetSkinnedAsset tells the truth.
+local bogusMeshProp = os.getenv("UUEPBS_OBJPTR") and obj("Object /Script/CoreUObject.FObjectPtrProperty_unreadable") or nil
 local function comp(name, outer, mesh, names, parents, withRef)
     local c = obj("SkeletalMeshComponent /Game/Maps/Lvl.Lvl:PersistentLevel." .. name)
     c.GetFName = function() return FNameObj(name) end
     c.GetOuter = function() return outer end
     c.GetSkinnedAsset = function() return mesh end
-    c.SkeletalMeshAsset = mesh -- the property UE 5.1+ components have
+    c.SkeletalMeshAsset = bogusMeshProp or mesh -- the property UE 5.1+ components have
     c.GetNumBones = function() return #names end
     c._names = 0
     c.GetBoneName = function(_, i) c._names = c._names + 1; return FNameObj(names[i + 1]) end
@@ -1527,6 +1530,8 @@ if mode == "gon" then
     check(guard2Body._morphs.BreastSize == nil and statueBody._morphs.BreastSize == nil, "not the NPCs sharing a mesh")
     check(scanCalls == scans0, "new meshes found without a world search: " .. (scanCalls - scans0))
     check(table.concat(printed, ""):find("scene copy of BP_Rokuv3_C_1 (player) found: 2 mesh(es) on BP_Cine_Roku_C_2147480001", 1, true), "found logged")
+    check((table.concat(printed, ""):find("mesh asset property reads back wrong", 1, true) ~= nil) == (bogusMeshProp ~= nil),
+        "an unreadable mesh property is noticed (and only then)")
     -- the cutscene ends: its actor goes, its copies are dropped and their morphs left alone
     cine._valid, cineBody._valid, cineShirt._valid, cineHair._valid = false, false, false, false
     cine2._valid, cine2Body._valid, cine2Shirt._valid = false, false, false
@@ -1568,7 +1573,7 @@ if mode == "gon" then
     for _ = 1, 30 do loop() end
     check(scanCalls == back, "idle again once back in view: " .. (scanCalls - back))
     -- the preview's mesh is swapped for another character's: dropped
-    previewBody.SkeletalMeshAsset = hairMesh
+    previewBody.SkeletalMeshAsset, previewBody.GetSkinnedAsset = hairMesh, function() return hairMesh end
     loop()
     s = run_peer(6, 4, "auto", 5, "dll1", 0, "BreastSize=0.7", "-", remember)
     check(not s:find("rig %x+ Mesh %(scene copy%)") and s:find("Outfit (scene copy)", 1, true), "copy with another mesh dropped:\n" .. s)

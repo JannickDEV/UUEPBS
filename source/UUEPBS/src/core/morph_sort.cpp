@@ -75,7 +75,7 @@ namespace uuepbs
                 {"len", "length"},    {"lng", "length"},    {"sz", "size"},      {"rot", "rotate"},    {"fwd", "forward"},
                 {"bwd", "backward"},  {"dn", "down"},       {"crctve", "corrective"}, {"crct", "corrective"},
                 {"eth", "ethnicity"}, {"exp", "expression"}, {"mth", "mouth"},   {"brw", "brow"},      {"chk", "cheek"},
-                {"tum", "tummy"},     {"stom", "stomach"},  {"mus", "muscle"},   {"musc", "muscle"},
+                {"tum", "tummy"},     {"shldr", "shoulder"},     {"stom", "stomach"},  {"mus", "muscle"},   {"musc", "muscle"},
             };
             return table;
         }
@@ -107,13 +107,17 @@ namespace uuepbs
                                  "emotion", "speech", "viseme", "phoneme", "oral", "mouth", "lip", "jaw", "cheek", "nose",
                                  "nostril", "ear", "smile", "frown", "happy", "sad", "anger", "angry", "fear", "scared",
                                  "surprise", "surprised", "disgust", "tongue", "teeth", "tooth", "chin", "forehead", "face",
-                                 "facial", "kiss", "pout", "sneer", "grin", "snarl", "pupil", "iris", "dimple"}},
+                                 "facial", "kiss", "pout", "sneer", "grin", "snarl", "pupil", "iris", "dimple", "cheekbone", "eyelash",
+                                 "lash", "eyeball", "jawline", "temple", "philtrum", "septum", "nasolabial", "earlobe", "fang",
+                                 "fcl"}}, // fcl: VRoid / VRM face morphs (Fcl_EYE_Close, Fcl_MTH_A)
+                // Before Groin, so "Nipple_Erect" stays with the chest.
+                {"Chest", true, {"nipple", "areola", "areolae"}},
                 {"Groin", false, {"labia", "pussy", "vagina", "vaginal", "vulva", "clit", "clitoris", "anal", "anus", "gooch",
                                   "perineum", "cock", "penis", "dick", "glans", "foreskin", "shaft", "ball", "scrotum",
                                   "testicle", "package", "gen", "genital", "genitalia", "crotch", "crotchless", "flash",
                                   "flaccid", "erect", "erection", "groin", "pubic", "pube"}},
                 {"Chest", true, {"breast", "boob", "bust", "nipple", "areola", "chest", "pec", "pectoral", "cleavage", "tit",
-                                 "mammary", "underbust"}},
+                                 "mammary", "underbust", "busty"}},
                 {"Head & Neck", true, {"head", "skull", "neck", "throat", "hair", "horn"}},
                 {"Arms", true, {"arm", "upperarm", "forearm", "bicep", "tricep", "elbow", "hand", "finger", "thumb", "wrist",
                                 "palm", "nail", "knuckle"}},
@@ -122,10 +126,11 @@ namespace uuepbs
                 {"Torso", false, {"pregnant", "pregnancy"}},
                 {"Torso", true, {"waist", "belly", "stomach", "tummy", "ab", "abdomen", "abdominal", "torso", "spine", "back",
                                  "rib", "ribcage", "navel", "upper body", "love handle", "shoulder", "collarbone", "clavicle",
-                                 "trapezius", "lat"}},
+                                 "trapezius", "lat", "trap", "sixpack", "bellybutton", "midriff", "oblique"}},
                 {"Body shape", true, {"fat", "chubby", "thin", "skinny", "slim", "muscle", "muscular", "weight", "obese", "fit",
                                       "athletic", "bodybuilder", "curvy", "petite", "emaciated", "build", "physique", "body",
-                                      "bulk", "toned", "plump", "heavy", "lean", "age", "old", "young"}},
+                                      "bulk", "toned", "plump", "heavy", "lean", "age", "old", "young", "voluptuous", "hourglass", "pear",
+                                      "figure", "curvaceous", "slender", "stocky", "chunky", "thick", "height", "tall"}},
                 {"Body shape", false, {"form", "ethnicity", "race", "species", "gender", "male", "female", "masculine",
                                        "feminine"}},
             };
@@ -217,17 +222,65 @@ namespace uuepbs
             return s;
         }
 
+        // Rig naming prefixes that say which file or tool a morph came from, never part of a label:
+        // Daz Genesis (PBMBreastsSize, FBMHeavy, PHMEarsElf, CTRLBreastsNatural, eCTRLSmile, pJCMShldrUp),
+        // VRoid / VRM (Fcl_ALL_Joy, Fcl_MTH_A), Character Creator's ARKit numbering (A01_Brow_Inner_Up).
+        bool rig_prefix(const std::string& w)
+        {
+            return w == "pbm" || w == "fbm" || w == "phm" || w == "fhm" || w == "ctrl" || w == "jcm" || w == "fcl";
+        }
+
+        // VRoid face groups after "Fcl_": ALL (whole face) adds nothing, the others name the part.
+        const char* vroid_group(const std::string& w)
+        {
+            if (w == "all")
+            {
+                return "";
+            }
+            if (w == "mouth" || w == "brow" || w == "eye")
+            {
+                return w.c_str(); // already spelled out (MTH, BRW)
+            }
+            if (w == "ha" || w == "hau")
+            {
+                return "teeth";
+            }
+            return nullptr;
+        }
+
         std::string label_of(const Parsed& p, std::string_view name)
         {
             std::vector<std::string> words;
             size_t i = 0;
-            if (p.words.size() > 2 && p.words[0] == "m" && p.words[1] == "gen")
+            bool vroid = false;
+            // a lone "e" / "p" in front of a Daz prefix (eCTRL, pJCM, pCTRL)
+            while (i + 1 < p.words.size() &&
+                   (rig_prefix(p.words[i]) || ((p.words[i] == "e" || p.words[i] == "p") && rig_prefix(p.words[i + 1]))))
             {
-                i = 2; // mGen_Balls -> "Balls"
+                vroid = vroid || p.words[i] == "fcl";
+                ++i;
             }
-            else if (p.words.size() > 1 && p.words[0] == "expression")
+            if (i + 2 < p.raw.size() && p.raw[i].size() == 1 && is_upper(p.raw[i][0]) &&
+                std::all_of(p.raw[i + 1].begin(), p.raw[i + 1].end(), [](char c) { return is_digit(c); }))
             {
-                i = 1; // Exp_Happy -> "Happy" (it sits under Face anyway)
+                i += 2; // A01_Brow_Inner_Up -> "Brow inner up"
+            }
+            if (vroid && i + 1 < p.words.size() && vroid_group(p.words[i]))
+            {
+                const char* part = vroid_group(p.words[i]);
+                if (*part)
+                {
+                    words.push_back(part);
+                }
+                ++i;
+            }
+            if (p.words.size() > i + 2 && p.words[i] == "m" && p.words[i + 1] == "gen")
+            {
+                i += 2; // mGen_Balls -> "Balls"
+            }
+            else if (p.words.size() > i + 1 && p.words[i] == "expression")
+            {
+                ++i; // Exp_Happy -> "Happy" (it sits under Face anyway)
             }
             for (; i < p.raw.size(); ++i)
             {
@@ -300,6 +353,37 @@ namespace uuepbs
     {
         const MorphSort s = sort_morph(name);
         return s.label + side_suffix(s.side);
+    }
+
+    Side morph_side(std::string_view name)
+    {
+        const Side side = find_side(name).side;
+        if (side != Side::None)
+        {
+            return side;
+        }
+        const MorphSide glued = parse(name).side;
+        return glued == MorphSide::Left ? Side::Left : glued == MorphSide::Right ? Side::Right : Side::None;
+    }
+
+    std::string mirror_morph_name(std::string_view name)
+    {
+        std::string out = mirror_bone_name(name);
+        if (!out.empty() || name.empty() || parse(name).side == MorphSide::None)
+        {
+            return out;
+        }
+        out.assign(name);
+        char& c = out.back();
+        switch (c)
+        {
+        case 'L': c = 'R'; break;
+        case 'R': c = 'L'; break;
+        case 'l': c = 'r'; break;
+        case 'r': c = 'l'; break;
+        default: return {};
+        }
+        return out;
     }
 
     int section_rank(std::string_view section)

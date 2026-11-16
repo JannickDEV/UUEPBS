@@ -10,9 +10,12 @@
 --   * uses a mesh asset the mod sculpts on an edited character (the "source"),
 --   * is not on a character that is already sculpted (the plan), and
 --   * sits on an actor that looks like a copy of that character, not like an NPC that merely shares
---     a body mesh: its meshes include at least two of the character's sculpted mesh assets (one, when
---     the character only has one), and it is not controlled by the player. An AI-controlled actor needs
---     two shared assets even when the character has only one mesh (NPCs often share a body mesh).
+--     a body mesh: its meshes include the character's main (body) mesh asset and at least two of the
+--     character's sculpted mesh assets (one, when the character only has one), and it is not controlled
+--     by the player. An AI-controlled actor needs two shared assets even when the character has only one
+--     mesh (NPCs often share a body mesh). Shared eyes, eyelashes or hair alone never make a copy: in
+--     games like Afterparty every NPC wears the same ones as the player.
+--   * really uses that asset: the match is checked once more with GetSkinnedAsset before it is taken.
 -- Copies are sent to the DLL as extra (non-primary) meshes of that character, so they get its bone
 -- edits, proportions, morphs and looks. They are dropped as soon as they go away or change mesh.
 --
@@ -40,6 +43,7 @@ local MAX_PENDING = 512
 
 local sources = {} -- mesh asset address -> { key, label, ownerLabel, ownerEngine }
 local keyAssets = {} -- actor key -> number of distinct sculpted mesh assets
+local mainAsset = {} -- actor key -> mesh asset address of the character's main (primary) mesh
 local tracked = {} -- component address -> true (meshes sculpted as part of a character)
 local planned = {} -- actor address -> true (characters being sculpted)
 local primary = nil -- { comp, full } the edited character's main mesh (for the rendering check)
@@ -197,9 +201,19 @@ local function consider(comp)
     if n < need then
         return 0
     end
+    -- the body: without the character's main mesh it is an NPC wearing the same eyes / hair / outfit piece
+    local main = mainAsset[src.key]
+    if ctx.match ~= "mesh" and main and not shared[main] then
+        return 0
+    end
     local added = 0
     for _, e in ipairs(list) do
         local ca = addr(e.comp)
+        -- the property read says it uses the character's asset: the engine must agree
+        local real = ctx.mesh_asset_addr and ctx.mesh_asset_addr(e.comp)
+        if ctx.mesh_asset_addr and real ~= e.asset then
+            ca = nil
+        end
         if ca and not tracked[ca] and not copies[ca] then
             local rig = ctx.build(e.comp, e.src, owner)
             if rig then
@@ -320,7 +334,7 @@ end
 -- The meshes sculpted as part of characters (main.lua's rigs before copies are added) and the
 -- characters being sculpted (actor address -> true). Copies whose source went away are dropped.
 function C.set_sources(rigs, plannedAddr)
-    sources, keyAssets, tracked, planned = {}, {}, {}, {}
+    sources, keyAssets, tracked, planned, mainAsset = {}, {}, {}, {}, {}
     primary = nil
     local perKey = {}
     local sig = {}
@@ -339,6 +353,9 @@ function C.set_sources(rigs, plannedAddr)
             end
             if r.primary and not primary then
                 primary = { comp = r.comp, full = r.full }
+            end
+            if r.primary and r.meshAddr and not mainAsset[r.actorKey] then
+                mainAsset[r.actorKey] = r.meshAddr
             end
         end
     end
@@ -463,7 +480,7 @@ end
 
 -- Tests
 C._debug = function()
-    return { sources = sources, copies = copies, pending = pending, searches = searches, away = away, unsupported = unsupported, sig = sourceSig }
+    return { sources = sources, mainAsset = mainAsset, copies = copies, pending = pending, searches = searches, away = away, unsupported = unsupported, sig = sourceSig }
 end
 
 return C

@@ -53,6 +53,9 @@ Host-side tests (Linux/macOS/WSL with g++ 13+ or clang 17+). None of them need W
     # the camera moved in the game (Scripts/uuepbs_camera.lua) against a mocked engine: the active camera's spring arm,
     # Follow height, lift and distance, the game zooming vs easing back, restoring, camera / eye height fallbacks
     lua camera_test.lua ../../../mod/UUEPBS/Scripts
+    # scene copies (Scripts/uuepbs_copies.lua): an NPC wearing the character's eyes / hair with a body of its
+    # own is not a copy, a match must be confirmed by GetSkinnedAsset (Afterparty laptops and bicycles)
+    lua copies_test.lua ../../../mod/UUEPBS/Scripts
 
     # names given to characters in the window (_characters/_names.txt) and portrait requests
     g++ -std=c++23 -I$S test_names.cpp $S/core/*.cpp -o test_names && ./test_names

@@ -13,7 +13,7 @@
 -- those it only checks that the objects it already holds are still valid, and it only
 -- rewrites the bridge file when something actually changed.
 
-local VERSION = "2.7.3"
+local VERSION = "2.8.0"
 local TAG = "[UUEPBS] "
 local Config = require("config")
 
@@ -462,18 +462,48 @@ local function mesh_asset(comp)
     return alive(mesh) and mesh or nil
 end
 
--- Address of the component's mesh asset from its properties (a plain read, no engine call).
-local function mesh_prop(comp)
-    local mesh
-    pcall(function()
-        mesh = comp.SkeletalMeshAsset -- UE 5.1+
-    end)
-    if mesh == nil then
+-- Address of the component's mesh asset. A plain property read (no engine call) once it has been seen to
+-- agree with GetSkinnedAsset on a few different meshes. Some UE4SS builds cannot read the UE 5.1+ object
+-- pointer property (UE4SS.log: "Failed to expose size of 'class RC::Unreal::FObjectPtrProperty'", seen in
+-- Afterparty, UE 5.7); then the read can hand back the same address for every component, every skeletal
+-- mesh in the level looks like the character's mesh, and scene copies pick up laptops and bicycles.
+local mesh_prop
+do
+    local trust = nil -- nil = not known yet, true = the property read agrees, false = always ask the engine
+    local agreed = {}
+    local agreedCount = 0
+    local function by_property(comp)
+        local mesh
         pcall(function()
-            mesh = comp.SkeletalMesh -- UE4 / UE 5.0
+            mesh = comp.SkeletalMeshAsset -- UE 5.1+
         end)
+        if mesh == nil then
+            pcall(function()
+                mesh = comp.SkeletalMesh -- UE4 / UE 5.0
+            end)
+        end
+        return mesh ~= nil and address_num(mesh) or nil
     end
-    return mesh ~= nil and address_num(mesh) or nil
+    mesh_prop = function(comp)
+        if trust then
+            return by_property(comp)
+        end
+        local m = mesh_asset(comp)
+        local real = m and address_num(m) or nil
+        if trust == nil and real ~= nil then
+            local p = by_property(comp)
+            if p ~= real then
+                trust = false
+                say("mesh asset property reads back wrong here (%s, engine says %s): asking the engine for every mesh instead",
+                    tostring(p), tostring(real))
+            elseif not agreed[real] then
+                agreed[real] = true
+                agreedCount = agreedCount + 1
+                trust = agreedCount >= 3 or nil
+            end
+        end
+        return real
+    end
 end
 
 local function mesh_path(comp)
@@ -822,7 +852,7 @@ local late = {}
 local function actor_label(actor, pawn)
     local engine = name_of(actor)
     local label = late.display_name and late.display_name(actor) or engine
-    if pawn and same_object(actor, pawn) then
+    if pawn and same_object(actor, pawn) and label ~= "Player" then
         label = label .. " (player)"
     end
     local v = Prefer.value(actor)
@@ -1407,7 +1437,12 @@ do
                 end
             end
         end
-        return Names.clean(raw) or Names.clean(cls) or raw, "clean"
+        local cleaned = Names.clean(raw) or Names.clean(cls)
+        if not cleaned and same_object(actor, player_pawn()) then
+            -- a bare engine pawn ("Pawn_2147444437") says nothing; it is the one you play
+            return "Player", "clean"
+        end
+        return cleaned or raw, "clean"
     end
 
     local function display_name(actor)
@@ -3091,6 +3126,10 @@ if Config.SceneCopies ~= false then
             alive = alive,
             address_num = address_num,
             mesh_prop = mesh_prop,
+            mesh_asset_addr = function(comp)
+                local m = mesh_asset(comp)
+                return m and address_num(m) or nil
+            end,
             name_of = name_of,
             full_name = full_name,
             is_default_object = is_default_object,

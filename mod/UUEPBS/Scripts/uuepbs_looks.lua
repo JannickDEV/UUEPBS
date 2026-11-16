@@ -35,7 +35,10 @@ local DEFAULTS = {
         Slots = { "*skin*", "*body*", "*head*", "*face*", "*torso*", "*arm*", "*leg*", "*hand*", "*foot*", "*feet*", "*neck*", "*chest*",
             "*nude*", "*naked*" },
         ExcludeSlots = { "*mouth*", "*teeth*", "*tooth*", "*tongue*", "*eye*", "*lash*", "*brow*", "*hair*", "*nail*", "*tear*", "*gum*",
-            "*cloth*", "*armor*", "*armour*", "*glove*", "*boot*", "*shoe*", "*sock*", "*cornea*", "*iris*", "*occlusion*", "*shadow*" },
+            "*cloth*", "*armor*", "*armour*", "*glove*", "*boot*", "*shoe*", "*sock*", "*cornea*", "*iris*", "*occlusion*", "*shadow*",
+            -- outfit pieces whose names contain a body part (LeggingsMat, ArmSleeve, BodySuit_Shirt)
+            "*legging*", "*pant*", "*trouser*", "*jean*", "*short*", "*shirt*", "*sleeve*", "*jacket*", "*coat*", "*vest*", "*dress*",
+            "*skirt*", "*bikini*", "*bra*", "*thong*", "*sneaker*", "*glass*" },
         Tint = { "*skin*tint*", "*skin*col*", "*skin*tone*", "*base*col*tint*", "*albedo*tint*", "*diffuse*tint*", "*tint*",
             "*basecol*", "*albedo*col*", "*diffuse*col*" },
         Brightness = { "*skin*bright*", "*albedo*bright*", "*brightness*" },
@@ -358,6 +361,8 @@ local function slot_names(comp)
     end)
     return names
 end
+
+L.DEFAULTS = DEFAULTS -- (tests)
 
 -- "skin", "hair" or nil, from "<slot name>|<material name>".
 function L.classify(text, skin, hair)

@@ -148,6 +148,13 @@ do
     check(L.look_of({ ["look:skin.tone"] = { weight = 0 } }) == nil, "neutral looks are no look")
     check(L.classify("Body|MI_Body_Skin", { Slots = { "*body*" }, ExcludeSlots = {} }, { Slots = { "*hair*" }, ExcludeSlots = {} }) == "skin", "classify skin")
     check(L.classify("Eyes|MI_Eye", { Slots = { "*e*" }, ExcludeSlots = { "*eye*" } }, { Slots = {}, ExcludeSlots = {} }) == nil, "exclude wins")
+    -- the built-in patterns: skin parts yes, outfit pieces named after a body part no
+    local D = L.DEFAULTS
+    for _, c in ipairs({ { "Body|MI_Body_Skin", "skin" }, { "Legs|MI_Legs", "skin" }, { "Arms|MI_Arms", "skin" }, { "Hair|MI_Hair_Long", "hair" },
+        { "Legs|MI_Leggings", nil }, { "Arms|MI_ArmSleeve", nil }, { "Body|MI_Body_Shirt", nil }, { "Shorts|MI_Jeans_Shorts", nil },
+        { "Chest|MI_Bikini_Top", nil }, { "Torso|MI_Jacket", nil } }) do
+        check(L.classify(c[1], D.Skin, D.Hair) == c[2], "default classing of " .. c[1] .. ": " .. tostring(L.classify(c[1], D.Skin, D.Hair)))
+    end
     local picked = L.pick({ ["emissivecolor"] = "EmissiveColor", ["skintint"] = "SkinTint" }, { "*tint*", "*col*" })
     check(#picked == 1 and picked[1] == "SkinTint", "first matching pattern wins, glow params never")
     local explicit = L.pick({}, { "BaseSkinColor" })
