@@ -37,7 +37,6 @@ namespace uuepbs
             return false;
         }
 
-        constexpr uint64_t kFollowBit = 1ull << 62; // bound for an extra mesh that follows the main mesh
 
         Xform read_bone(const RawArray& pose, uint32_t elem_size, int32_t i)
         {
@@ -414,18 +413,12 @@ namespace uuepbs
             return;
         }
 
-        // An extra mesh (head, face, eyes, hair...) that copies the main mesh's finished pose
-        // already shows the edits: editing it as well would apply every slider twice.
-        if (!rig->primary)
-        {
-            judge_follow_locked(*rig, pose);
-        }
-        const bool follows = !rig->primary && rig->follow.copies();
-
-        // Each mesh is sculpted with its own character's edits.
+        // Each mesh is sculpted with its own character's edits. An extra mesh (head, face, eyes, hair...) that copies
+        // the main mesh's finished pose is told apart inside the sculptor (RigSculptor::decide_copy): the bones it
+        // shares with the main mesh already carry the edits and are left alone, its own bones are still edited.
         const bool on = applying(); // off, or showing the original for a before/after compare
-        const uint64_t wanted = rig->actor->revision | (on ? 0 : kDisabledBit) | (follows ? kFollowBit : 0);
-        const EditBook& book = on && !follows ? rig->actor->book : m_empty_book;
+        const uint64_t wanted = rig->actor->revision | (on ? 0 : kDisabledBit);
+        const EditBook& book = on ? rig->actor->book : m_empty_book;
         rig->sculptor.set_ground(m_ground); // cheap when unchanged; a change forces the re-bind below
         // Auto Ground: the character's main mesh measures the lift. Its other meshes (head, outfit - even ones on
         // the full skeleton with legs) compare their pose with the main mesh's: a pose copied from the main mesh's
@@ -610,51 +603,6 @@ namespace uuepbs
                 }
             }
         }
-    }
-
-    void Registry::judge_follow_locked(Rig& rig, const RawArray& pose)
-    {
-        const Rig* main = nullptr;
-        for (const auto& r : m_rigs)
-        {
-            if (r.get() != &rig && r->primary && !r->stale && r->actor_key == rig.actor_key)
-            {
-                main = r.get();
-                break;
-            }
-        }
-        if (!main)
-        {
-            return;
-        }
-        const int32_t n = rig.sculptor.bone_count();
-        if (rig.follow_main != main->component || rig.follow_main_bones != main->sculptor.bone_count() ||
-            rig.to_main.size() != static_cast<size_t>(n))
-        {
-            rig.to_main.assign(static_cast<size_t>(n), -1);
-            const auto& names = rig.sculptor.names();
-            for (int32_t i = 0; i < n; ++i)
-            {
-                rig.to_main[i] = main->sculptor.find(names[i]);
-            }
-            rig.follow_main = main->component;
-            rig.follow_main_bones = main->sculptor.bone_count();
-            rig.follow.reset();
-        }
-        rig.samples.clear();
-        for (int32_t i = 0; i < n && i < pose.num; ++i)
-        {
-            const int32_t j = rig.to_main[i];
-            Xform source;
-            Xform result;
-            if (j < 0 || !main->sculptor.last_sample(j, source, result))
-            {
-                continue;
-            }
-            const Xform now = read_bone(pose, m_layout.elem_size, i);
-            rig.samples.push_back({rig.sculptor.untouched(pose.data, i, now), source, result});
-        }
-        rig.follow.feed(judge_follow(rig.samples));
     }
 
     void Registry::set_ground(const GroundOptions& options)
@@ -1168,7 +1116,7 @@ namespace uuepbs
         for (const auto& rig : m_rigs)
         {
             out.push_back({rig->label, rig->owner, rig->sculptor.bone_count(), rig->frames, rig->stale, rig->primary, rig->actor_key, rig->actor_key == m_active,
-                           !rig->primary && rig->follow.copies(), static_cast<int32_t>(rig->sculptor.legs().size()), rig->sculptor.took_shared_lift()});
+                           !rig->primary && rig->sculptor.copy_state() == 1, static_cast<int32_t>(rig->sculptor.legs().size()), rig->sculptor.took_shared_lift()});
         }
         return out;
     }

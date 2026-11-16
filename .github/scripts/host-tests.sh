@@ -42,6 +42,11 @@ $CXX -std=c++23 -I"$S" test_ground.cpp "${CORE[@]}" -o "$OUT/test_ground"
 "$OUT/test_ground" "$OUT/roku_cache.txt" 184
 end
 
+step "test_audit (every slider x every edit, copy-pose meshes, Auto Ground)"
+$CXX -std=c++23 -O1 -I"$S" test_audit.cpp "${CORE[@]}" -o "$OUT/test_audit"
+"$OUT/test_audit" "$OUT/roku_cache.txt" "$SCRIPTS/BoneDictionary.json" 184
+end
+
 step "Lua tests (portraits, looks, deformers, camera, copies)"
 $LUA portraits_test.lua "$SCRIPTS" "$OUT/portraits"
 $LUA looks_test.lua "$SCRIPTS"

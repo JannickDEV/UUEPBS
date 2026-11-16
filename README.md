@@ -30,6 +30,10 @@ https://github.com/user-attachments/assets/4e4372bc-8a64-4255-b8ae-a33645ce187e
 * Character Scale > **Camera**: **Follow height** raises the third-person camera with Height, plus **Camera height** and **Camera distance** (`CameraControl` in `config.lua`, console `ubs camera`)
 * F6 reopens the window after closing it (the focus goes back to the game first)
 * Body tab morph names from Daz Genesis, VRoid and Character Creator rigs read cleanly (*Breasts size*, not *PBM breasts size*) and land in the right category
+* **Search** on the Body tab (every category at once, by slider, bone or morph name) and in **Choose character**
+* **Auto Ground switch** in Character Scale > Overall, remembered between sessions (`_auto_ground.txt` in the presets folder; it wins over `config.lua`)
+* **Nipple length** and **Glans size** also work on rigs without bones named for them (Daz Genesis as in Afterparty): the ends of the breast chains and the last bone of the penis chain are used
+* Afterparty: game profile with the pose hook pinned
 
 ### V2.7.0 - Changelogs
 * New window look: flat slate-navy theme with sharp corners, flush text tabs (**Body**, **Presets**, **Advanced**, **Status**) and 1px bordered groups

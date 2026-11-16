@@ -32,6 +32,9 @@ Host-side tests (Linux/macOS/WSL with g++ 13+ or clang 17+). None of them need W
     python3 ref_to_cache.py roku_ref.txt roku_cache.txt
     g++ -std=c++23 -I$S test_ground.cpp $S/core/*.cpp -o test_ground
     ./test_ground roku_cache.txt 184
+    # whole-slider audit: every group and bone x every edit, copy-pose meshes, Auto Ground on and off
+    g++ -std=c++23 -O1 -I$S test_audit.cpp $S/core/*.cpp -o test_audit
+    ./test_audit roku_cache.txt ../../../mod/UUEPBS/Scripts/BoneDictionary.json 184
 
     # hook finder against a real game exe on disk (expects GON's slot 374, +0x644/+0x648)
     g++ -std=c++23 -O2 -I$S test_resolver.cpp $S/core/*.cpp -o test_resolver && ./test_resolver path/to/Roku3-Win64-Shipping.exe

@@ -1,6 +1,5 @@
-// Host-side tests for extra meshes that copy the main mesh's edited pose (core/follow.hpp):
+// Host-side tests for extra meshes that copy the main mesh's edited pose (RigSculptor::decide_copy, through the Registry):
 // a separate head/face mesh must end up with the body's edits once, never twice.
-#include "core/follow.hpp"
 #include "core/proportions.hpp"
 #include "core/registry.hpp"
 #include "core/sculpt.hpp"
@@ -98,28 +97,6 @@ struct FakeComp
 
 int main()
 {
-    // --- judge_follow / FollowLatch on their own -------------------------------------------
-    {
-        Xform a = xf::identity(), b = xf::identity();
-        b.scl[0] = b.scl[1] = b.scl[2] = 1.89;
-        b.pos[2] = 10;
-        CHECK(judge_follow({{a, a, b}}) == FollowVerdict::Own);
-        CHECK(judge_follow({{b, a, b}}) == FollowVerdict::Copies);
-        CHECK(judge_follow({{a, a, a}}) == FollowVerdict::Unknown); // no edit: nothing to tell
-        Xform far = xf::identity();
-        far.pos[0] = 500;
-        CHECK(judge_follow({{far, a, b}}) == FollowVerdict::Unknown); // a different pose altogether
-        FollowLatch latch;
-        CHECK(latch.feed(FollowVerdict::Copies) == FollowVerdict::Unknown);
-        CHECK(latch.feed(FollowVerdict::Copies) == FollowVerdict::Unknown);
-        CHECK(latch.feed(FollowVerdict::Copies) == FollowVerdict::Copies);
-        CHECK(latch.feed(FollowVerdict::Own) == FollowVerdict::Copies);
-        CHECK(latch.feed(FollowVerdict::Unknown) == FollowVerdict::Copies); // unclear frames change nothing
-        CHECK(latch.feed(FollowVerdict::Own) == FollowVerdict::Copies);
-        CHECK(latch.feed(FollowVerdict::Own) == FollowVerdict::Copies);
-        CHECK(latch.feed(FollowVerdict::Own) == FollowVerdict::Own);
-    }
-
     const Skel s = load();
     CHECK(s.names.size() > 100);
     int head = -1;
