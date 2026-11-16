@@ -2723,6 +2723,9 @@ local function build_state()
         "hands_anims=" .. clean(Config.HandContactAnims or ""),
         -- the window's "Collision follows Height" switch shows this ("" = collision handling off in config.lua)
         "collision_ui=" .. (late.collision and (late.collisionWanted and "1" or "0") or ""),
+        -- the window's "Jiggle physics" choice and what it did (uuepbs_physics.lua)
+        "physics_ui=" .. (late.physics and late.physics.mode() or ""),
+        "physics_info=" .. clean(late.physics and late.physics.summary() or ""),
     }, "\t"))
     add("scan\t" .. scanCount)
     -- engine names go last on each line (older DLLs ignore the extra field)
@@ -2782,7 +2785,7 @@ local function write_state()
     stateDirty = false
 end
 
-local seen = { rescan = 0, pick = 0, refresh = 0, relist = 0, groundui = 0, collui = 0, session = nil }
+local seen = { rescan = 0, pick = 0, refresh = 0, relist = 0, groundui = 0, collui = 0, physicsui = 0, session = nil }
 local hookState, hookText = "waiting", ""
 local windowOpen = false
 local lastDllText = nil
@@ -2815,7 +2818,7 @@ local function read_dll_state()
     if dllSession ~= seen.session then
         -- New DLL session: take its counters as the baseline.
         seen.session = dllSession
-        seen.rescan, seen.pick, seen.refresh, seen.relist, seen.groundui, seen.collui = -1, -1, -1, -1, -1, -1
+        seen.rescan, seen.pick, seen.refresh, seen.relist, seen.groundui, seen.collui, seen.physicsui = -1, -1, -1, -1, -1, -1, -1
     end
     local mine = false -- ack/replies are only ours once the DLL has seen this script's session
     local open = false
@@ -2869,6 +2872,13 @@ local function read_dll_state()
                 late.set_collision(b == "1")
             end
             seen.collui = n
+        elseif kind == "physicsui" then
+            -- the window's Jiggle physics choice (Character Scale tab)
+            local n = tonumber(a) or 0
+            if seen.physicsui >= 0 and n ~= seen.physicsui and late.set_physics then
+                late.set_physics(b)
+            end
+            seen.physicsui = n
         elseif kind == "relist" then
             local n = tonumber(a) or 0
             if seen.relist >= 0 and n ~= seen.relist then
@@ -2948,6 +2958,7 @@ local function read_dll_state()
     if late.deformers_scaled then
         late.deformers_scaled(scaledNow)
     end
+    late.physicsScaled = scaledNow
     if late.camera then
         late.camera.want(cams)
     end
@@ -3192,6 +3203,55 @@ if Config.HandContact ~= false then
     end
 end
 
+-- Jiggle physics (uuepbs_physics.lua): physics nodes of a character whose sliders scale bones follow
+-- the new sizes ("follow"), are switched off ("off") or are left to the game ("keep"). The window's
+-- choice and "ubs physics" are remembered in the presets folder and win over config.lua PhysicsMode.
+late.apply_physics = function() end
+late.physicsScaled = {}
+do
+    local okP, mod = pcall(require, "uuepbs_physics")
+    if okP and type(mod) == "table" then
+        late.physics = mod
+        mod.setup({ say = say, fname = function(name)
+            return FName(name)
+        end })
+        local file = presetFolder .. "\\_physics.txt"
+        mod.set_mode(tostring(Config.PhysicsMode or "follow"))
+        local saved = read_text(file)
+        saved = saved and saved:match("^%s*(%a+)")
+        if saved then
+            mod.set_mode(saved)
+        end
+        late.set_physics = function(m)
+            if not mod.set_mode(m) then
+                return false
+            end
+            stateDirty = true
+            local f = io.open(file, "wb")
+            if f then
+                f:write(mod.mode() .. "\n")
+                f:close()
+            end
+            say("jiggle physics: %s", mod.mode())
+            return true
+        end
+        local lastInfo = nil
+        late.apply_physics = function()
+            local okA, err = pcall(mod.apply, rigs, late.physicsScaled, now_ms())
+            if not okA then
+                say("physics: %s", tostring(err))
+            end
+            local info = mod.summary()
+            if info ~= lastInfo then
+                lastInfo = info
+                stateDirty = true -- the window shows it
+            end
+        end
+    else
+        say("physics handling off: %s", tostring(mod))
+    end
+end
+
 -- Scene copies (uuepbs_copies.lua): the edited character as cutscenes and menu previews show it
 -- (their own actors with the same mesh assets) gets the same sliders. Kept in `late` (local limit).
 if Config.SceneCopies ~= false then
@@ -3416,6 +3476,7 @@ local function tick()
             late.apply_looks() -- the game re-dressed a recoloured slot
         end
         late.apply_deformers()
+        late.apply_physics()
         late.ground.tick(rigs)
         if late.hands then
             local okH, changed = pcall(late.hands.poll, rigs)
@@ -3584,7 +3645,7 @@ local function rest_of(params, first)
     return table.concat(parts, " ")
 end
 
-local usage = "uuepbs (or ubs) ui | status | rescan | copies | camera | collision [on|off] | hands | list | load <name> | next | prev | save <name> | on | off | compare [on|off] | reset [all] | diag | skin [name] | morph <name> [weight] | ground [on|off|<extra cm>]"
+local usage = "uuepbs (or ubs) ui | status | rescan | copies | camera | collision [on|off] | hands | list | load <name> | next | prev | save <name> | on | off | compare [on|off] | reset [all] | diag | skin [name] | morph <name> [weight] | ground [on|off|<extra cm>] | physics [follow|off|keep]"
 
 local function console(_, params, out)
     local verb = string.lower(params[1] or "")
@@ -3611,6 +3672,9 @@ local function console(_, params, out)
         if late.deformers then
             reply(late.deformers.status())
         end
+        if late.physics then
+            reply(late.physics.status())
+        end
         send_command("status", "", true)
     elseif verb == "copies" then
         if late.copies then
@@ -3625,6 +3689,16 @@ local function console(_, params, out)
     elseif verb == "hands" then
         reply(late.hands and late.hands.status() or "hand contact is off (HandContact in config.lua)")
         send_command("hands", "", true)
+    elseif verb == "physics" then
+        -- ubs physics [follow | off | keep]
+        local arg = string.lower(params[2] or "")
+        if not late.physics then
+            reply("physics handling is not loaded")
+        elseif arg ~= "" and not late.set_physics(arg) then
+            reply("ubs physics follow | off | keep")
+        else
+            reply(late.physics.status())
+        end
     elseif verb == "camera" then
         reply(late.camera and late.camera.status() or "camera control is off (CameraControl in config.lua)")
     elseif verb == "collision" then

@@ -300,6 +300,7 @@ namespace uuepbs::bridge
         out += "relist\t" + std::to_string(s.relist) + "\n";
         out += "groundui\t" + std::to_string(s.ground) + "\t" + (s.ground_on ? "1" : "0") + "\n";
         out += "collui\t" + std::to_string(s.collision) + "\t" + (s.collision_on ? "1" : "0") + "\n";
+        out += "physicsui\t" + std::to_string(s.physics) + "\t" + clean_field(s.physics_mode) + "\n";
         out += "hook\t" + clean_field(s.hook_state) + "\t" + clean_field(s.hook_text) + "\n";
         out += std::string("ui\t") + (s.window_open ? "1" : "0") + "\n";
         for (const Reply& r : s.replies)

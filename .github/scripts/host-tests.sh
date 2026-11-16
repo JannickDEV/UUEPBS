@@ -53,10 +53,11 @@ $CXX -std=c++23 -O1 -I"$S" test_audit.cpp "${CORE[@]}" -o "$OUT/test_audit"
 "$OUT/test_audit" "$OUT/roku_cache.txt" "$SCRIPTS/BoneDictionary.json" 184
 end
 
-step "Lua tests (portraits, looks, deformers, camera, collision, copies, hands)"
+step "Lua tests (portraits, looks, deformers, physics, camera, collision, copies, hands)"
 $LUA portraits_test.lua "$SCRIPTS" "$OUT/portraits"
 $LUA looks_test.lua "$SCRIPTS"
 $LUA deformers_test.lua "$SCRIPTS"
+$LUA physics_test.lua "$SCRIPTS"
 $LUA camera_test.lua "$SCRIPTS"
 $LUA collision_test.lua "$SCRIPTS"
 $LUA copies_test.lua "$SCRIPTS"

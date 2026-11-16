@@ -56,6 +56,11 @@ Host-side tests (Linux/macOS/WSL with g++ 13+ or clang 17+). None of them need W
     # mesh deformers (dual quaternion skinning) switched off while sliders scale bones, and back on after
     lua deformers_test.lua ../../../mod/UUEPBS/Scripts
 
+    # jiggle physics (Scripts/uuepbs_physics.lua) against a mocked engine: physics nodes found in the main and
+    # post-process blueprints, "follow" scales Physics Asset shapes/joints and AnimDynamics/Kawaii fields,
+    # blueprint restarts (not during a montage), "off" (Alpha 0, cloth paused), "keep", everything put back
+    lua physics_test.lua ../../../mod/UUEPBS/Scripts
+
     # Character Scale > Camera: sliders, "cam" lines, presets / share codes (core/camera.*)
     g++ -std=c++23 -I$S test_camera.cpp $S/core/*.cpp -o test_camera && ./test_camera
     # the camera moved in the game (Scripts/uuepbs_camera.lua) against a mocked engine: the active camera's spring arm,
