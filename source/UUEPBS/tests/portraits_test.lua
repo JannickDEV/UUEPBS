@@ -33,6 +33,7 @@ local UE4 = {
     BeginDrawCanvasToRenderTarget = 5, EndDrawCanvasToRenderTarget = 2, K2_DrawTexture = 9,
     BeginDeferredActorSpawnFromClass = 5, FinishSpawningActor = 2, ShowOnlyActorComponents = 2, GetActorBounds = 4,
     CreateCanvasRenderTarget2D = 4, UpdateResourceImmediate = 1,
+    SetMobility = 1, SetAttenuationRadius = 1, SetIntensity = 1,
 }
 local UE53 = {}
 for k, v in pairs(UE4) do
@@ -57,6 +58,15 @@ local kismetRT = true
 local exportWorks = true
 local spawnWorks = true
 local captures = {}
+local lights = {} -- every studio light spawned: { comp, xf, destroyed }
+local suns = { { Intensity = 10, bAffectsWorld = true, bVisible = true } }
+function FindAllOf(name)
+    if name == "DirectionalLightComponent" then
+        return suns
+    end
+    return nil
+end
+local pointLightClass = obj({ name = "PointLight" })
 local rendering = obj({
     CreateRenderTarget2D = ufn("CreateRenderTarget2D", function(_, world, w, h, fmt)
         if not kismetRT then
@@ -108,6 +118,29 @@ local canvasRT = obj({
 })
 local statics = obj({
     BeginDeferredActorSpawnFromClass = ufn("BeginDeferredActorSpawnFromClass", function(_, world, cls, xf)
+        if cls == pointLightClass then
+            calls[#calls + 1] = "light"
+            local rec = { xf = xf, setBefore = {} }
+            local comp
+            comp = obj({
+                Intensity = 5000, IntensityUnits = 0, Mobility = 1, AttenuationRadius = 1000, CastShadows = true,
+                SetMobility = ufn("SetMobility", function(self, m) self.Mobility = m end),
+                SetAttenuationRadius = ufn("SetAttenuationRadius", function(self, r) self.AttenuationRadius = r end),
+                SetIntensity = ufn("SetIntensity", function(self, v)
+                    if self.Mobility ~= 2 then
+                        error("not movable", 0)
+                    end
+                    self.Intensity = v
+                    rec.pushed = v
+                end),
+            })
+            rec.comp = comp
+            lights[#lights + 1] = rec
+            return obj({ PointLightComponent = comp, K2_DestroyActor = function()
+                calls[#calls + 1] = "unlight"
+                rec.destroyed = true
+            end })
+        end
         calls[#calls + 1] = "spawn"
         if not spawnWorks then
             return nil
@@ -127,6 +160,7 @@ local objects = {
     ["/Script/Engine.Default__KismetRenderingLibrary"] = rendering,
     ["/Script/Engine.Default__GameplayStatics"] = statics,
     ["/Script/Engine.SceneCapture2D"] = obj({}),
+    ["/Script/Engine.PointLight"] = pointLightClass,
     ["/Script/Engine.Default__CanvasRenderTarget2D"] = canvasRT,
     ["/Script/Engine.CanvasRenderTarget2D"] = obj({}),
 }
@@ -181,7 +215,7 @@ requests("auto\tHero\t1\n7FF1\tAnca\t2\n")
 P.tick(10000)
 local seq = table.concat(calls, ",")
 check(seq:find("rt 256x256 fmt 2", 1, true), "render target RGBA8 256: " .. seq)
-check(seq:find("spawn,showonly Hero,capture,destroy", 1, true), "head-shot sequence: " .. seq)
+check(seq:find("spawn,light,light,showonly Hero,capture,destroy,unlight,unlight", 1, true), "head-shot sequence: " .. seq)
 check(seq:find("export Hero.auto.png", 1, true) and seq:find("release", 1, true), "exported and released: " .. seq)
 check(captures[1] and captures[1].PrimitiveRenderMode == 2 and captures[1].CaptureSource == 2 and captures[1].bCaptureEveryFrame == false,
     "capture settings (show-only list, LDR, not every frame)")
@@ -274,7 +308,7 @@ requests("7FF1\tAnca\t11\n") -- a portrait is waiting too
 thumbs("auto\tOld preset\t100\nauto\tCurvy\t101\n")
 P.tick(91000)
 seq = table.concat(calls, ",")
-check(seq:find("spawn,showonly Hero,capture,destroy", 1, true) and seq:find("export Curvy.auto.png", 1, true), "thumbnail taken first: " .. seq)
+check(seq:find("spawn,light,light,showonly Hero,capture,destroy,unlight,unlight", 1, true) and seq:find("export Curvy.auto.png", 1, true), "thumbnail taken first: " .. seq)
 check(not seq:find("Anca", 1, true), "portrait waits for the next tick")
 local cap = captures[1]
 check(cap and cap.FOVAngle == 40, "thumbnail field of view")
@@ -311,7 +345,7 @@ requests("auto\tHero\t20\n")
 thumbs("")
 P.tick(100000)
 seq = table.concat(calls, ",")
-check(seq:find("rt 256x256 fmt 2", 1, true) and seq:find("spawn,showonly Hero,capture,destroy", 1, true) and seq:find("export Hero.auto.png", 1, true),
+check(seq:find("rt 256x256 fmt 2", 1, true) and seq:find("spawn,light,light,showonly Hero,capture,destroy,unlight,unlight", 1, true) and seq:find("export Hero.auto.png", 1, true),
     "UE5.3: portrait taken: " .. seq .. " | " .. table.concat(said, " | "))
 check(argCounts.CreateRenderTarget2D == 7 and argCounts.BeginDeferredActorSpawnFromClass == 6 and argCounts.FinishSpawningActor == 3,
     "UE5.3: argument lists refitted")
@@ -353,6 +387,56 @@ P.tick(140000)
 check(#said == 1 and said[1]:find("could not create a render target (CreateRenderTarget2D: blocked in this game", 1, true),
     "reason given: " .. table.concat(said, " | "))
 kismetRT = true
+
+-- 14. studio lights: key + fill, movable, candela, matched to the sun, gone after the capture
+objects["/Script/Engine.Default__CanvasRenderTarget2D"] = canvasRT
+sig = UE4
+local function shoot(nonce)
+    lights, calls, captures, said = {}, {}, {}, {}
+    requests("auto\tHero\t" .. nonce .. "\n")
+    P.tick(150000 + nonce * 10000)
+    return table.concat(calls, ",")
+end
+seq = shoot(30)
+check(#lights == 2, "two studio lights: " .. seq)
+local key, fill = lights[1], lights[2]
+if key and fill then
+    check(key.comp.Mobility == 2 and key.comp.IntensityUnits == 1 and key.comp.CastShadows == false, "key light movable, candela, no shadows")
+    check(key.pushed and fill.pushed and key.pushed > fill.pushed * 2, "key brighter than fill: " .. tostring(key.pushed) .. " / " .. tostring(fill.pushed))
+    -- head at (0,0,160), camera 60 cm in front: the key sits up and to the side, its intensity gives ~10 lux at the face
+    local dx, dy, dz = key.xf.Translation.X, key.xf.Translation.Y, key.xf.Translation.Z - 160
+    local r2 = (dx * dx + dy * dy + dz * dz) / 10000
+    check(math.abs(key.pushed / r2 - 10) < 0.01, "key matched to a 10 lux sun: " .. tostring(key.pushed / r2))
+    check(key.xf.Translation.Z > 170 and key.xf.Translation.X > 50 and math.abs(key.xf.Translation.Y) > 20, "key above and beside the camera")
+    check(key.xf.Translation.Y * fill.xf.Translation.Y < 0, "fill on the other side")
+    check(key.destroyed and fill.destroyed, "lights removed after the capture")
+end
+check(seq:find("capture,destroy,unlight,unlight", 1, true), "lights live across the capture: " .. seq)
+-- a physically lit level: 100000 lux sun -> 10000x brighter lights
+suns[1].Intensity = 100000
+suns[2] = { Intensity = 500000, bAffectsWorld = false } -- switched off, ignored
+shoot(31)
+local k2 = lights[1]
+check(k2 and math.abs(k2.pushed / ((k2.xf.Translation.X ^ 2 + k2.xf.Translation.Y ^ 2 + (k2.xf.Translation.Z - 160) ^ 2) / 10000) - 100000) < 1, "matched to a bright sun")
+-- no sun: default; profile gain doubles it
+suns = {}
+profile.PortraitLight = 2
+shoot(32)
+k2 = lights[1]
+check(k2 and math.abs(k2.pushed / ((k2.xf.Translation.X ^ 2 + k2.xf.Translation.Y ^ 2 + (k2.xf.Translation.Z - 160) ^ 2) / 10000) - 20) < 0.01, "no sun: default x gain")
+-- off
+profile.PortraitLight = false
+seq = shoot(33)
+check(#lights == 0 and seq:find("spawn,showonly Hero,capture,destroy", 1, true) and seq:find("export Hero.auto.png", 1, true), "studio lights off: " .. seq)
+-- no PointLight class (stripped game): the shot is still taken
+profile.PortraitLight = nil
+objects["/Script/Engine.PointLight"] = nil
+P = nil
+package.loaded.uuepbs_portraits = nil
+P = require("uuepbs_portraits")
+setup(true)
+seq = shoot(34)
+check(#lights == 0 and seq:find("export Hero.auto.png", 1, true) and #said == 0, "no PointLight: unlit shot still saved: " .. seq)
 
 print(failures == 0 and "portraits: all checks passed" or (failures .. " failure(s)"))
 os.exit(failures == 0 and 0 or 1)
