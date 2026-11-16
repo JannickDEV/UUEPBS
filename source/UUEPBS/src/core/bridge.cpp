@@ -1,4 +1,5 @@
 #include "bridge.hpp"
+#include "camera.hpp"
 
 #include "sculpt.hpp"
 
@@ -306,6 +307,10 @@ namespace uuepbs::bridge
         for (const std::string& id : s.remembered)
         {
             out += "remember\t" + clean_field(id) + "\n";
+        }
+        for (const auto& [key, wish] : s.cameras)
+        {
+            out += "cam\t" + clean_field(key) + "\t" + format_camera_fields(wish) + "\n";
         }
         out += "morph\t" + std::to_string(s.morph_revision) + "\n";
         for (const DllState::Morph& m : s.morphs)

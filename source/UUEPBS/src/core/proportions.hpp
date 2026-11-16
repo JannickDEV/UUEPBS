@@ -40,9 +40,15 @@ namespace uuepbs
         Lift,     // offset slider: move up (+) or down (-)
         Push,     // offset slider: move forward (+) or back (-)
         Together, // offset slider: move towards the middle (+) or apart (-)
+        // Character Scale > Camera (camera.hpp): no bones, the Lua script moves the game's camera.
+        CameraFollow,   // toggle (offset kind, 0 = off, 1 = on): the camera follows Height
+        CameraLift,     // offset slider in centimetres: camera pivot up (+) or down (-)
+        CameraDistance, // factor: how far the camera sits from the character
     };
     // True for the axes kinds whose value is an offset (neutral 0, -1..1) rather than a factor.
     bool is_offset_axes(ScaleAxes axes);
+    // True for the Camera sliders: they never touch a bone.
+    bool is_camera_axes(ScaleAxes axes);
 
     struct ScaleSlider
     {

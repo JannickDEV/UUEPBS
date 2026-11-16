@@ -2751,6 +2751,7 @@ local function read_dll_state()
     local wanted, sawMorphs = {}, false
     local keep, keepList = {}, {}
     local rememberList = {}
+    local cams = {} -- Character Scale > Camera, actor key -> fields (uuepbs_camera.lua)
     local dllSession = text:match("^UBS1 (%S+)")
     if dllSession ~= seen.session then
         -- New DLL session: take its counters as the baseline.
@@ -2833,6 +2834,10 @@ local function read_dll_state()
             elseif a ~= "" then
                 rememberList[#rememberList + 1] = a
             end
+        elseif kind == "cam" then
+            if a ~= "" then
+                cams[a] = b
+            end
         elseif kind == "keep" then
             if a ~= "" and not keep[a] then
                 keep[a] = b
@@ -2859,6 +2864,9 @@ local function read_dll_state()
         end
     end
     windowOpen = open
+    if late.camera then
+        late.camera.want(cams)
+    end
     if sawMorphs then
         morphWanted = wanted
         morphDirty = true
@@ -3038,6 +3046,45 @@ if Config.SceneCopies ~= false then
     end
 end
 
+-- Camera (uuepbs_camera.lua): Character Scale > Camera moves the controlled character's camera boom
+-- (spring arm), camera or eye height, e.g. up with Height. Kept in `late` (local limit).
+if Config.CameraControl ~= false then
+    local okK, mod = pcall(require, "uuepbs_camera")
+    if okK and type(mod) == "table" then
+        late.camera = mod
+        mod.setup({
+            say = say,
+            chatter = chatter,
+            alive = alive,
+            address_num = address_num,
+            name_of = name_of,
+            each_of = each_of,
+            engine_class = engine_class,
+            pawn = player_pawn,
+            controller = player_controller,
+            key_of = function(pawn)
+                return key_of(pawn, cheap_default())
+            end,
+            -- the character's main mesh origin (its feet on most characters)
+            feet_z = function(pawn, key)
+                for _, r in ipairs(rigs) do
+                    if r.primary and not r.copy and r.actorKey == key and alive(r.comp) then
+                        local okZ, z = pcall(function()
+                            return r.comp:K2_GetComponentLocation().Z
+                        end)
+                        if okZ and type(z) == "number" then
+                            return z
+                        end
+                    end
+                end
+                return nil
+            end,
+        })
+    else
+        say("camera control off: %s", tostring(mod))
+    end
+end
+
 local function tick()
     local ok, err = pcall(function()
         if pendingProfileText then
@@ -3149,6 +3196,16 @@ every(POLL_MS, tick)
 if MORPH_MS > 0 and MORPH_MS < POLL_MS then
     every(math.max(33, MORPH_MS), morph_tick)
 end
+if late.camera then
+    every(math.max(16, tonumber(Config.CameraPollMs) or 50), function()
+        if late.camera.busy() then
+            local okT, errT = pcall(late.camera.tick)
+            if not okT then
+                say("camera: %s", tostring(errT))
+            end
+        end
+    end)
+end
 
 local function world_changed()
     cachedController = nil
@@ -3235,7 +3292,7 @@ local function rest_of(params, first)
     return table.concat(parts, " ")
 end
 
-local usage = "uuepbs (or ubs) ui | status | rescan | copies | list | load <name> | next | prev | save <name> | on | off | compare [on|off] | reset [all] | diag | skin [name] | morph <name> [weight]"
+local usage = "uuepbs (or ubs) ui | status | rescan | copies | camera | list | load <name> | next | prev | save <name> | on | off | compare [on|off] | reset [all] | diag | skin [name] | morph <name> [weight]"
 
 local function console(_, params, out)
     local verb = string.lower(params[1] or "")
@@ -3270,6 +3327,8 @@ local function console(_, params, out)
         else
             reply("scene copies are off (SceneCopies in config.lua)")
         end
+    elseif verb == "camera" then
+        reply(late.camera and late.camera.status() or "camera control is off (CameraControl in config.lua)")
     elseif verb == "load" or verb == "save" or verb == "skin" or verb == "morph" or verb == "reset" or verb == "compare" then
         send_command(verb, rest_of(params, 2), true)
     elseif verb == "list" or verb == "on" or verb == "off" or verb == "diag" or verb == "next" or verb == "prev" then

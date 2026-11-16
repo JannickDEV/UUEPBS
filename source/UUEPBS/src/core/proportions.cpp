@@ -48,7 +48,7 @@ namespace uuepbs
         static const std::vector<ScaleSlider> sliders = {
             {"height", "Overall", "Height",
              "The whole character, scaled from the mesh origin (the feet on most characters), so it stays on the ground.\n"
-             "Every mesh of the character scales with it. Collision and the camera stay as they are.",
+             "Every mesh of the character scales with it. Collision stays as it is; the camera can follow it (Camera section).",
              {}, ScaleAxes::Uniform, Spread::Chain, 0.5, 2.0},
             {"head", "Proportions", "Head size", "The head and everything on it (face, hair bones).", {"Head"}, ScaleAxes::Uniform, Spread::Chain,
              0.5, 2.0},
@@ -88,6 +88,17 @@ namespace uuepbs
              Spread::Keep, 0.5, 2.0, {"Quads", "Hamstrings"}},
             {"calf_girth", "Muscle", "Calf thickness", "Thicker calves, same leg length; the feet keep their size.", {"Calves"}, ScaleAxes::Girth,
              Spread::Keep, 0.5, 2.0, {"Calf muscles"}},
+
+            // Camera: the game's third-person camera (spring arm / camera boom), moved by the Lua script.
+            {"camera_follow", "Camera", "Follow height",
+             "Raise or lower the camera with Height, and move it back as far as the character grew, so a taller "
+             "character is framed like the original one.",
+             {}, ScaleAxes::CameraFollow, Spread::Keep, 0.0, 1.0},
+            {"camera_height", "Camera", "Camera height",
+             "Moves the camera up (+) or down (-), in centimetres, on top of Follow height.", {}, ScaleAxes::CameraLift, Spread::Keep, -200.0,
+             200.0},
+            {"camera_distance", "Camera", "Camera distance", "How far behind the character the camera sits (1 = the game's own distance).", {},
+             ScaleAxes::CameraDistance, Spread::Keep, 0.3, 3.0},
 
             // Body tab "universal morphs": built from anatomy bones when the mesh has no morph for it.
             {"penis_size", "Groin", "Penis size", "The whole shaft and glans, built from the bones (no morph target on this mesh).", {},
@@ -173,7 +184,13 @@ namespace uuepbs
 
     bool is_offset_axes(ScaleAxes axes)
     {
-        return axes == ScaleAxes::Lift || axes == ScaleAxes::Push || axes == ScaleAxes::Together;
+        return axes == ScaleAxes::Lift || axes == ScaleAxes::Push || axes == ScaleAxes::Together || axes == ScaleAxes::CameraFollow ||
+               axes == ScaleAxes::CameraLift;
+    }
+
+    bool is_camera_axes(ScaleAxes axes)
+    {
+        return axes == ScaleAxes::CameraFollow || axes == ScaleAxes::CameraLift || axes == ScaleAxes::CameraDistance;
     }
 
     double scale_value(const EditBook& book, std::string_view id)
@@ -266,6 +283,10 @@ namespace uuepbs
         }
         for (const ScaleSlider& s : scale_sliders())
         {
+            if (is_camera_axes(s.axes))
+            {
+                continue; // the camera is moved by the Lua script (camera.hpp)
+            }
             const double v = scale_value(book, s.id);
             if (std::fabs(v - s.neutral()) < kScaleNeutralEps)
             {

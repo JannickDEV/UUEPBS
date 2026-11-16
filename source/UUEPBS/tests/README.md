@@ -42,6 +42,12 @@ Host-side tests (Linux/macOS/WSL with g++ 13+ or clang 17+). None of them need W
     # discovery, tan/sweat/hair maths, dynamic instances, reset, re-dressing, per-character reports
     lua looks_test.lua ../../../mod/UUEPBS/Scripts
 
+    # Character Scale > Camera: sliders, "cam" lines, presets / share codes (core/camera.*)
+    g++ -std=c++23 -I$S test_camera.cpp $S/core/*.cpp -o test_camera && ./test_camera
+    # the camera moved in the game (Scripts/uuepbs_camera.lua) against a mocked engine: the active camera's spring arm,
+    # Follow height, lift and distance, the game zooming vs easing back, restoring, camera / eye height fallbacks
+    lua camera_test.lua ../../../mod/UUEPBS/Scripts
+
     # names given to characters in the window (_characters/_names.txt) and portrait requests
     g++ -std=c++23 -I$S test_names.cpp $S/core/*.cpp -o test_names && ./test_names
 
