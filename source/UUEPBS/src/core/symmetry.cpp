@@ -1,5 +1,6 @@
 #include "symmetry.hpp"
 
+#include "morph_sort.hpp"
 #include "morphs.hpp"
 
 #include <algorithm>
@@ -80,11 +81,11 @@ namespace uuepbs
         const auto morph_index = index_of(morphs);
         for (const auto& [key, name] : morph_index)
         {
-            if (find_side(name).side != from)
+            if (morph_side(name) != from)
             {
                 continue;
             }
-            const auto partner = morph_index.find(fold_case(mirror_bone_name(name)));
+            const auto partner = morph_index.find(fold_case(mirror_morph_name(name)));
             if (partner == morph_index.end() || partner->first == key)
             {
                 continue;

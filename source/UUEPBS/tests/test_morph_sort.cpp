@@ -278,6 +278,39 @@ int main()
         CHECK(clash.size() == 2 && clash[0].group.title == "Belly" && find(clash, "Belly (Belly)")); // auto title steps aside
     }
 
+    // Other rigs' naming: Daz Genesis, VRoid / VRM, Character Creator ARKit, plain names.
+    {
+        const std::map<std::string, std::pair<std::string, std::string>> rigs = {
+            {"PBMBreastsSize", {"Chest", "Breasts size"}},
+            {"FBMHeavy", {"Body shape", "Heavy"}},
+            {"FBMVoluptuous", {"Body shape", "Voluptuous"}},
+            {"PHMCheekbonesHeight", {"Face", "Cheekbones height"}},
+            {"PHMEyelashesLength", {"Face", "Eyelashes length"}},
+            {"PHMJawlineDefinition", {"Face", "Jawline definition"}},
+            {"eCTRLSmileFullFace", {"Face", "Smile full face"}},
+            {"CTRLBreastsNatural", {"Chest", "Breasts natural"}},
+            {"PBMAreolaePerk", {"Chest", "Areolae perk"}},
+            {"PBMTrapsSize", {"Torso", "Traps size"}},
+            {"pJCMShldrUp_40_L", {"", "Shoulder up 40"}}, // corrective: Advanced only
+            {"Fcl_EYE_Close_L", {"Face", "Eye close"}},
+            {"Fcl_MTH_A", {"Face", "Mouth A"}},
+            {"Fcl_ALL_Joy", {"Face", "Joy"}},
+            {"Fcl_HA_Fung1", {"Face", "Teeth fung 1"}},
+            {"A01_Brow_Inner_Up", {"Face", "Brow inner up"}},
+            {"Nipple_Erect", {"Chest", "Nipple erect"}}, // not Groin
+            {"Sixpack", {"Torso", "Sixpack"}},
+            {"Height", {"Body shape", "Height"}},
+            {"CTRL", {"Other", "CTRL"}}, // a prefix alone stays as it is
+        };
+        for (const auto& [name, w] : rigs)
+        {
+            const MorphSort s = sort_morph(name);
+            CHECK_EQ(name + " -> " + s.category, name + " -> " + w.first);
+            CHECK_EQ(name + " -> " + s.label, name + " -> " + w.second);
+        }
+        CHECK_EQ(words("pJCMShldrUp"), "p jcm shoulder up");
+    }
+
     std::printf(g_fail ? "MORPH SORT TESTS FAILED (%d)\n" : "morph sort tests passed\n", g_fail);
     return g_fail;
 }

@@ -48,7 +48,7 @@ namespace
     namespace fs = std::filesystem;
     using Clock = std::chrono::steady_clock;
 
-    constexpr const char* kVersion = "v2.7.1";
+    constexpr const char* kVersion = "v2.8.0";
 
     fs::path module_folder()
     {

@@ -2170,7 +2170,7 @@ namespace uuepbs::ui
         }
         ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - ImGui::CalcTextSize("Edited only").x - ImGui::GetFrameHeight() -
                                 ImGui::GetStyle().ItemSpacing.x * 2);
-        ImGui::InputTextWithHint("##find", "Search bones...", m_filter, sizeof(m_filter));
+        ImGui::InputTextWithHint("##find", "Search bones or body parts...", m_filter, sizeof(m_filter));
         ImGui::SameLine();
         sk.checkbox("Edited only", &m_only_edited);
 
@@ -2178,6 +2178,7 @@ namespace uuepbs::ui
         const float list_h = std::max(140.0f, ImGui::GetContentRegionAvail().y * 0.42f);
         sk.begin_child("##bonelist", ImVec2(0, list_h), ImGuiChildFlags_Borders);
         const float indent = ImGui::GetFontSize() * 0.75f;
+        size_t listed = 0;
         for (size_t i = 0; i < m_skeleton.names.size(); ++i)
         {
             const std::string& name = m_skeleton.names[i];
@@ -2187,16 +2188,19 @@ namespace uuepbs::ui
             {
                 continue;
             }
-            if (!needle.empty() && fold_case(name).find(needle) == std::string::npos)
+            const auto grp = m_bone_group.find(fold_case(name));
+            // also find a bone by the Body tab part it belongs to ("Thighs", "Breasts" on a rig that calls them lPectoral)
+            if (!needle.empty() && fold_case(name).find(needle) == std::string::npos &&
+                (grp == m_bone_group.end() || !contains_folded(grp->second, needle)))
             {
                 continue;
             }
+            ++listed;
             if (needle.empty() && !m_only_edited)
             {
                 ImGui::SetCursorPosX(ImGui::GetCursorPosX() + indent * static_cast<float>(m_skeleton.depth[i]));
             }
             char label[256];
-            const auto grp = m_bone_group.find(fold_case(name));
             const std::string part = grp != m_bone_group.end() ? "   [" + grp->second + "]" : std::string();
             if (edited)
             {
@@ -2231,6 +2235,10 @@ namespace uuepbs::ui
             {
                 ImGui::PopStyleColor();
             }
+        }
+        if (listed == 0)
+        {
+            ImGui::TextColored(muted(), !needle.empty() ? "No bone matches the search." : "No bone is edited yet.");
         }
         sk.end_child();
 
@@ -2427,7 +2435,7 @@ namespace uuepbs::ui
                 spec.label_w = name_w;
                 float v = static_cast<float>(w.value_or(0.0));
                 const RowResult res = part_row(spec, v);
-                const std::string other = mirror_bone_name(name);
+                const std::string other = mirror_morph_name(name);
                 const bool twin = m_mirror && !other.empty() && has_morph(other);
                 if (res.reset)
                 {
@@ -2450,7 +2458,8 @@ namespace uuepbs::ui
         }
         if (rows.empty())
         {
-            ImGui::TextColored(muted(), m_morph_only_edited ? "No morph is set yet." : "No morph matches the search.");
+            ImGui::TextColored(muted(), !needle.empty() ? "No morph matches the search." : m_morph_names.empty() ? "This mesh has no morph targets."
+                                                                                                                 : "No morph is set yet.");
         }
         sk.end_child();
 

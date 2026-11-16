@@ -17,6 +17,7 @@
 #pragma once
 
 #include "morphs.hpp"
+#include "rig_names.hpp"
 
 #include <string>
 #include <string_view>
@@ -45,6 +46,12 @@ namespace uuepbs
     MorphSort sort_morph(std::string_view name);
     // Readable slider name ("Morph_BreastEnl" -> "Breast enlarge", "Eye_CloseL" -> "Eye close (left)").
     std::string morph_label(std::string_view name);
+
+    // Side of a morph target: "Ear_Down_L", "LeftBrow" (rig_names.hpp) and also a side letter glued to the
+    // last word ("Eye_CloseL", "Exp_BrowUpR"), which bone names never use.
+    Side morph_side(std::string_view name);
+    // The other side's morph name ("Eye_CloseL" -> "Eye_CloseR", "Ear_Down_l" -> "Ear_Down_r"); empty without a side.
+    std::string mirror_morph_name(std::string_view name);
 
     // Body tab order of a category (bone and morph categories alike); unknown names sit between
     // "Body shape" and "Groin", "Other" is always last.
