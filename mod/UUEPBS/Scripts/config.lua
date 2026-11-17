@@ -104,6 +104,12 @@ return {
     -- copies only reuse the body. Careful: NPCs that share the body mesh with the character then match too.
     SceneCopyMatch = "outfit",
 
+    -- Character Scale > Height: how far the slider goes (1 = the game's size). Values in presets and
+    -- saved sessions are kept within this range too, so raise it before loading a taller preset.
+    -- HeightMin 0.05..0.99, HeightMax 1.01..20. Read when the game starts (or the mod is reloaded).
+    HeightMin = 0.5,
+    HeightMax = 2.0,
+
     -- Character Scale > Camera: moves the third-person camera of the character you play (its spring arm /
     -- camera boom, else its camera component, else its eye height) by the Camera sliders, e.g. up with
     -- Height. "ubs camera" shows what was found. false = the game's camera is never touched.

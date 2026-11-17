@@ -2711,6 +2711,9 @@ local function build_state()
         "ground_max=" .. tostring(tonumber(Config.AutoGroundMaxCm) or 40),
         -- the window's Auto Ground switch shows this (either AutoGroundMode)
         "ground_ui=" .. (late.groundWanted and "1" or "0"),
+        -- Character Scale > Height slider range (the DLL keeps it within 0.05..20)
+        "height_min=" .. tostring(tonumber(Config.HeightMin) or 0.5),
+        "height_max=" .. tostring(tonumber(Config.HeightMax) or 2),
         -- Hand Contact (DLL): hands resting on the body follow the edited body
         "hands=" .. (Config.HandContact == false and "0" or "1"),
         "hands_near=" .. tostring(tonumber(Config.HandContactNear) or 0.25),

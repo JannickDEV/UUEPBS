@@ -90,6 +90,18 @@ namespace uuepbs
     const std::vector<ScaleSlider>& scale_sliders();
     const ScaleSlider* find_scale_slider(std::string_view id);
 
+    // The slider's range. Use these instead of `lo` / `hi`: Height's range comes from config.lua
+    // (HeightMin / HeightMax, sent by the script), the others are fixed.
+    double scale_lo(const ScaleSlider& s);
+    double scale_hi(const ScaleSlider& s);
+    // Sets Height's range (config.lua HeightMin / HeightMax). Kept within kHeightRangeMin..kHeightRangeMax,
+    // below 1 for the minimum and above 1 for the maximum; non-numbers fall back to the default 0.5..2.
+    void set_height_range(double lo, double hi);
+    constexpr double kHeightDefaultMin = 0.5;
+    constexpr double kHeightDefaultMax = 2.0;
+    constexpr double kHeightRangeMin = 0.05; // BoneEdit::clamp keeps any scale within 0.02..20
+    constexpr double kHeightRangeMax = 20.0;
+
     // "@scale:<id>" (already case-folded).
     std::string scale_key(std::string_view id);
     // True for a pseudo entry key ("@scale:..."), compared case-insensitively.

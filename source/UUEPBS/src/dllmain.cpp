@@ -20,6 +20,7 @@
 #include "core/morphs.hpp"
 #include "core/preset_cycle.hpp"
 #include "core/presets.hpp"
+#include "core/proportions.hpp"
 #include "core/hand_settings.hpp"
 #include "core/registry.hpp"
 #include "ui/panel_view.hpp"
@@ -1025,6 +1026,21 @@ namespace
             if (m_prev_preset_key.load() == m_next_preset_key.load())
             {
                 m_prev_preset_key.store(0);
+            }
+
+            // Character Scale > Height range (config.lua HeightMin / HeightMax); older scripts send nothing = 0.5..2.
+            // Set before presets and the last session load below, which clamp Height to it.
+            {
+                const double lo = std::strtod(state.setting("height_min", "0.5").c_str(), nullptr);
+                const double hi = std::strtod(state.setting("height_max", "2").c_str(), nullptr);
+                const uuepbs::ScaleSlider* height = uuepbs::find_scale_slider("height");
+                const double old_lo = height ? uuepbs::scale_lo(*height) : 0.0;
+                const double old_hi = height ? uuepbs::scale_hi(*height) : 0.0;
+                uuepbs::set_height_range(lo, hi);
+                if (height && (uuepbs::scale_lo(*height) != old_lo || uuepbs::scale_hi(*height) != old_hi))
+                {
+                    g_log.line("height range: " + std::to_string(uuepbs::scale_lo(*height)) + " .. " + std::to_string(uuepbs::scale_hi(*height)));
+                }
             }
 
             // Auto Ground (config.lua AutoGround / AutoGroundMode = "dll"); older scripts send nothing = off.

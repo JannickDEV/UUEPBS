@@ -1831,8 +1831,8 @@ namespace uuepbs::ui
             spec.tip = std::string(sl->hint) + "\n" +
                        (nb == 1 ? std::string("Drives 1 bone (see Advanced > Bones).") : "Drives " + std::to_string(nb) + " bones (see Advanced > Bones).");
             spec.edited = edited && !reset_all;
-            spec.lo = static_cast<float>(sl->lo);
-            spec.hi = static_cast<float>(sl->hi);
+            spec.lo = static_cast<float>(scale_lo(*sl));
+            spec.hi = static_cast<float>(scale_hi(*sl));
             spec.log = !sl->offset();
             spec.neutral = static_cast<float>(neutral);
             spec.can_reset = edited && !reset_all;
@@ -2388,8 +2388,8 @@ namespace uuepbs::ui
                 spec.title = sl.title;
                 spec.tip = tip;
                 spec.edited = edited && !reset_all;
-                spec.lo = static_cast<float>(sl.lo);
-                spec.hi = static_cast<float>(sl.hi);
+                spec.lo = static_cast<float>(scale_lo(sl));
+                spec.hi = static_cast<float>(scale_hi(sl));
                 spec.log = !sl.offset();
                 spec.neutral = static_cast<float>(neutral);
                 if (sl.axes == ScaleAxes::CameraLift)
