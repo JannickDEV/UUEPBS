@@ -1,5 +1,7 @@
 #include "registry.hpp"
 
+#include "proportions.hpp"
+
 #include <algorithm>
 #include <cstring>
 
@@ -21,6 +23,37 @@ namespace uuepbs
         }
 
         constexpr uint64_t kDisabledBit = 1ull << 63;
+        // Any entry that scales a bone: a bone edit with a scale, or a Character Scale / Body tab
+        // slider that is a factor (Height, Head size, Muscle...). Offset sliders only move bones.
+        bool book_scales(const EditBook& book)
+        {
+            for (const auto& [key, entry] : book)
+            {
+                if (entry.edit.has_scale())
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+
+        Xform read_bone(const RawArray& pose, uint32_t elem_size, int32_t i)
+        {
+            if (elem_size == 96)
+            {
+                return static_cast<const Xform*>(pose.data)[i];
+            }
+            Xform x{};
+            const XformF& f = static_cast<const XformF*>(pose.data)[i];
+            for (int a = 0; a < 4; ++a)
+            {
+                x.rot[a] = f.rot[a];
+                x.pos[a] = f.pos[a];
+                x.scl[a] = f.scl[a];
+            }
+            return x;
+        }
 
         // Frames to wait before measuring mirroring from a live pose (lets the idle animation settle).
         constexpr uint64_t kLiveMirrorFrame = 30;
@@ -380,17 +413,69 @@ namespace uuepbs
             return;
         }
 
-        // Each mesh is sculpted with its own character's edits.
-        const bool on = m_enabled.load(std::memory_order_relaxed);
+        // Each mesh is sculpted with its own character's edits. An extra mesh (head, face, eyes, hair...) that copies
+        // the main mesh's finished pose is told apart inside the sculptor (RigSculptor::decide_copy): the bones it
+        // shares with the main mesh already carry the edits and are left alone, its own bones are still edited.
+        const bool on = applying(); // off, or showing the original for a before/after compare
         const uint64_t wanted = rig->actor->revision | (on ? 0 : kDisabledBit);
+        const EditBook& book = on ? rig->actor->book : m_empty_book;
         rig->sculptor.set_ground(m_ground); // cheap when unchanged; a change forces the re-bind below
+        {
+            // Hand Contact: the main mesh only (meshes copying its pose get the corrected arms with it), and only
+            // while the character plays one of the listed animations when there is a list.
+            HandOptions h = m_hands;
+            h.enabled = h.enabled && hands_wanted_locked(*rig);
+            rig->sculptor.set_hands(h);
+        }
         // Auto Ground: the character's main mesh measures the lift. Its other meshes (head, outfit - even ones on
         // the full skeleton with legs) compare their pose with the main mesh's: a pose copied from the main mesh's
         // grounded pose needs nothing more; one animated on its own is lifted the same way.
         rig->sculptor.set_ground_primary(rig->primary); // (before the bind: other meshes plan a little differently)
-        if (rig->sculptor.bound_revision() != wanted)
+        const bool proportions = has_proportions(book);
+        const uint64_t body_rev = proportions ? BodyMapSource::instance().revision() : 0;
+        if (rig->sculptor.bound_revision() != wanted || rig->bound_body != body_rev)
         {
-            rig->sculptor.bind(on ? rig->actor->book : m_empty_book, wanted);
+            if (proportions)
+            {
+                // Character Scale: fold the proportion sliders into this rig's bone edits.
+                if (rig->body_revision != body_rev)
+                {
+                    BoneDictionary dict;
+                    std::vector<UserGroup> user;
+                    std::string status;
+                    BodyMapSource::instance().get(dict, user, status);
+                    rig->body = resolve_body_groups(rig->sculptor.names(), rig->sculptor.parents(), dict, user);
+                    rig->body_revision = body_rev;
+                    // Which way each bone runs, from this frame's pose (Length / Girth sliders).
+                    std::vector<Xform> live(static_cast<size_t>(pose.num));
+                    for (int32_t i = 0; i < pose.num; ++i)
+                    {
+                        if (m_layout.elem_size == 96)
+                        {
+                            live[i] = static_cast<const Xform*>(pose.data)[i];
+                        }
+                        else
+                        {
+                            const XformF& f = static_cast<const XformF*>(pose.data)[i];
+                            for (int a = 0; a < 4; ++a)
+                            {
+                                live[i].rot[a] = f.rot[a];
+                                live[i].pos[a] = f.pos[a];
+                                live[i].scl[a] = f.scl[a];
+                            }
+                        }
+                    }
+                    measure_long_axes(rig->body, rig->sculptor.names(), rig->sculptor.parents(), live);
+                }
+                double world = 1.0;
+                const EditBook folded = apply_proportions(book, rig->body, world);
+                rig->sculptor.bind(folded, wanted, world);
+            }
+            else
+            {
+                rig->sculptor.bind(book, wanted);
+            }
+            rig->bound_body = body_rev;
         }
         rig->sculptor.set_shared_lift(rig->actor->ground_lift);
         if (!rig->primary)
@@ -562,6 +647,159 @@ namespace uuepbs
         return out;
     }
 
+    void Registry::set_hands(const HandOptions& options, std::vector<std::string> anims)
+    {
+        std::lock_guard guard(m_lock);
+        m_hands = options;
+        m_hand_anims.clear();
+        for (const auto& a : anims)
+        {
+            if (!a.empty())
+            {
+                m_hand_anims.push_back(fold_case(a));
+            }
+        }
+    }
+
+    HandOptions Registry::hands() const
+    {
+        std::lock_guard guard(m_lock);
+        return m_hands;
+    }
+
+    std::vector<std::string> Registry::hand_anims() const
+    {
+        std::lock_guard guard(m_lock);
+        return m_hand_anims;
+    }
+
+    void Registry::set_playing(std::map<std::string, std::string> playing)
+    {
+        std::lock_guard guard(m_lock);
+        m_playing = std::move(playing);
+    }
+
+    bool Registry::hands_wanted_locked(const Rig& rig) const
+    {
+        if (!m_hands.enabled || !rig.primary)
+        {
+            return false;
+        }
+        if (m_hand_anims.empty())
+        {
+            return true;
+        }
+        const auto it = m_playing.find(rig.actor_key);
+        if (it == m_playing.end() || it->second.empty())
+        {
+            return false;
+        }
+        const std::string playing = fold_case(it->second);
+        for (const auto& part : m_hand_anims)
+        {
+            if (playing.find(part) != std::string::npos)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    std::string Registry::hands_report() const
+    {
+        std::lock_guard guard(m_lock);
+        std::string out;
+        for (const auto& rig : m_rigs)
+        {
+            if (rig->stale || !rig->primary || !rig->actor || rig->frames == 0)
+            {
+                continue;
+            }
+            const auto it = m_playing.find(rig->actor_key);
+            const std::string playing = it == m_playing.end() || it->second.empty() ? "(nothing reported)" : it->second;
+            std::string state = rig->sculptor.hands_report();
+            if (m_hands.enabled && !hands_wanted_locked(*rig))
+            {
+                state = "waiting (animation not in HandContactAnims)";
+            }
+            else if (m_hands.enabled && rig->actor->book.empty())
+            {
+                state = "no sliders on this character";
+            }
+            out += "  " + rig->owner + " / " + rig->label + ", playing " + playing + ": " + state + "\n";
+        }
+        return out;
+    }
+
+    std::vector<std::string> Registry::hand_status(const std::string& key) const
+    {
+        std::lock_guard guard(m_lock);
+        std::vector<std::string> out;
+        const auto it = m_playing.find(key);
+        out.push_back("Playing: " + (it == m_playing.end() || it->second.empty() ? std::string("no montage") : it->second));
+        for (const auto& rig : m_rigs)
+        {
+            if (rig->stale || !rig->primary || rig->actor_key != key || rig->frames == 0)
+            {
+                continue;
+            }
+            if (!m_hands.enabled)
+            {
+                break;
+            }
+            if (!hands_wanted_locked(*rig))
+            {
+                out.push_back("Waiting: this animation is not in HandContactAnims (config.lua).");
+                break;
+            }
+            if (rig->actor->book.empty())
+            {
+                out.push_back("No sliders on this character, nothing to correct.");
+                break;
+            }
+            const RigSculptor& sc = rig->sculptor;
+            if (sc.arms().empty())
+            {
+                out.push_back("No arms found on this skeleton (upper arm, forearm, hand by name).");
+                break;
+            }
+            const auto& names = sc.names();
+            for (size_t i = 0; i < sc.arms().size(); ++i)
+            {
+                const HandSample h = i < sc.hand_samples().size() ? sc.hand_samples()[i] : HandSample{};
+                char line[320];
+                if (h.weight <= 0.0)
+                {
+                    std::snprintf(line, sizeof line, "%s: free (nearest body part %s)", names[sc.arms()[i].hand].c_str(),
+                                  h.anchor >= 0 ? names[h.anchor].c_str() : "none close");
+                }
+                else
+                {
+                    std::snprintf(line, sizeof line, "%s: %s %s, %.0f%% corrected, moved %.0f cm%s%s%s", names[sc.arms()[i].hand].c_str(),
+                                  h.elbow ? "elbow on" : "on", h.anchor >= 0 ? names[h.anchor].c_str() : "?", h.weight * 100.0, h.moved,
+                                  h.fingers > 0 ? ", fingers shaped" : "", h.turned > 0.5 || h.stretched > 1.005 ? ", shoulder/arm helping" : "",
+                                  h.shortfall > 0.5 ? ", still out of reach" : "");
+                }
+                out.push_back(line);
+            }
+            for (size_t i = 0; i < sc.legs().size() && i < sc.foot_samples().size(); ++i)
+            {
+                const HandSample h = sc.foot_samples()[i];
+                if (h.weight <= 0.0)
+                {
+                    continue; // feet on the ground are the usual case; only feet resting on the body are listed
+                }
+                char line[320];
+                std::snprintf(line, sizeof line, "%s: on %s, %.0f%% corrected, moved %.0f cm%s", names[sc.legs()[i].foot].c_str(),
+                              h.anchor >= 0 ? names[h.anchor].c_str() : "?", h.weight * 100.0, h.moved,
+                              h.shortfall > 0.5 ? ", still out of reach" : "");
+                out.push_back(line);
+            }
+            break;
+        }
+        return out;
+    }
+
     void Registry::bump_edits(Actor& actor)
     {
         actor.revision = m_edit_revision.fetch_add(1, std::memory_order_acq_rel) + 1;
@@ -591,7 +829,7 @@ namespace uuepbs
         }
     }
 
-    void Registry::set_active_actor(const std::string& key_in, const std::string& label, const std::string& pick_id)
+    void Registry::set_active_actor(const std::string& key_in, const std::string& label, const std::string& pick_id, const std::string& engine)
     {
         const std::string key = key_in.empty() ? std::string(kPlayerActor) : key_in;
         {
@@ -604,6 +842,10 @@ namespace uuepbs
             if (!pick_id.empty())
             {
                 a.pick_id = pick_id;
+            }
+            if (!engine.empty())
+            {
+                a.engine = engine;
             }
             if (m_active == key)
             {
@@ -624,6 +866,54 @@ namespace uuepbs
     {
         std::lock_guard guard(m_lock);
         return m_active;
+    }
+
+    std::vector<std::string> Registry::scaling_actors() const
+    {
+        std::vector<std::string> out;
+        if (!applying())
+        {
+            return out;
+        }
+        std::lock_guard guard(m_lock);
+        for (const auto& [key, a] : m_actors)
+        {
+            if (book_scales(a.book))
+            {
+                out.push_back(key);
+            }
+        }
+        return out;
+    }
+
+    std::vector<std::pair<std::string, CameraWish>> Registry::camera_wishes() const
+    {
+        std::vector<std::pair<std::string, CameraWish>> out;
+        std::lock_guard guard(m_lock);
+        for (const auto& [key, a] : m_actors)
+        {
+            const CameraWish w = camera_wish(a.book);
+            if (w.active())
+            {
+                out.emplace_back(key, w);
+            }
+        }
+        return out;
+    }
+
+    std::vector<std::pair<std::string, double>> Registry::height_wishes() const
+    {
+        std::vector<std::pair<std::string, double>> out;
+        std::lock_guard guard(m_lock);
+        for (const auto& [key, a] : m_actors)
+        {
+            const double h = scale_value(a.book, "height");
+            if (std::fabs(h - 1.0) >= kScaleNeutralEps)
+            {
+                out.emplace_back(key, h);
+            }
+        }
+        return out;
     }
 
     std::vector<ActorSummary> Registry::edited_actors() const
@@ -649,7 +939,7 @@ namespace uuepbs
             {
                 continue;
             }
-            out.push_back({key, a.label, a.pick_id, a.book.size(), morphs, key == m_active, a.identity});
+            out.push_back({key, a.label, a.pick_id, a.book.size(), morphs, key == m_active, a.identity, a.engine});
         }
         // morphs only, character not known to the bone side (should not happen, but keep them)
         for (const auto& [key, n] : morph_counts)
@@ -813,6 +1103,7 @@ namespace uuepbs
 
     void Registry::set_bone(const std::string& bone, const BoneEdit& scale)
     {
+        end_compare_for_edit(); // show what was just changed
         if (bone.empty())
         {
             return;
@@ -829,6 +1120,7 @@ namespace uuepbs
 
     void Registry::clear_bone(const std::string& bone)
     {
+        end_compare_for_edit(); // show what was just changed
         std::lock_guard guard(m_lock);
         Actor& a = active_locked();
         if (a.book.erase(fold_case(bone)) > 0)
@@ -839,6 +1131,7 @@ namespace uuepbs
 
     void Registry::replace_edits(EditBook book)
     {
+        end_compare_for_edit(); // show what was just changed
         std::lock_guard guard(m_lock);
         Actor& a = active_locked();
         a.book = std::move(book);
@@ -847,6 +1140,7 @@ namespace uuepbs
 
     void Registry::clear_edits()
     {
+        end_compare_for_edit(); // show what was just changed
         std::lock_guard guard(m_lock);
         Actor& a = active_locked();
         a.book.clear();
@@ -857,6 +1151,27 @@ namespace uuepbs
     {
         m_enabled.store(on, std::memory_order_relaxed);
         m_morph_revision.fetch_add(1, std::memory_order_acq_rel);
+    }
+
+    void Registry::set_compare(bool show_original)
+    {
+        if (m_compare.set_latched(show_original))
+        {
+            m_morph_revision.fetch_add(1, std::memory_order_acq_rel); // morphs go back to (or leave) the game's values
+        }
+    }
+
+    void Registry::set_compare_held(bool down)
+    {
+        if (m_compare.set_held(down))
+        {
+            m_morph_revision.fetch_add(1, std::memory_order_acq_rel);
+        }
+    }
+
+    void Registry::end_compare_for_edit()
+    {
+        set_compare(false); // the hotkey's hold is left alone: it ends when the key comes up
     }
 
     MorphBook Registry::morphs(uint64_t* revision) const
@@ -872,6 +1187,7 @@ namespace uuepbs
 
     void Registry::set_morph(const std::string& morph, double weight)
     {
+        end_compare_for_edit(); // show what was just changed
         if (morph.empty())
         {
             return;
@@ -885,6 +1201,7 @@ namespace uuepbs
 
     void Registry::clear_morph(const std::string& morph)
     {
+        end_compare_for_edit(); // show what was just changed
         std::lock_guard guard(m_morph_lock);
         auto it = m_morph_books.find(m_morph_active);
         if (it != m_morph_books.end() && it->second.erase(fold_case(morph)) > 0)
@@ -899,6 +1216,7 @@ namespace uuepbs
 
     void Registry::replace_morphs(MorphBook book)
     {
+        end_compare_for_edit(); // show what was just changed
         for (auto& [key, e] : book)
         {
             e.weight = clamp_morph(e.weight);
@@ -917,6 +1235,7 @@ namespace uuepbs
 
     void Registry::clear_morphs()
     {
+        end_compare_for_edit(); // show what was just changed
         std::lock_guard guard(m_morph_lock);
         m_morph_books.erase(m_morph_active);
         m_morph_revision.fetch_add(1, std::memory_order_acq_rel);
@@ -972,7 +1291,7 @@ namespace uuepbs
         for (const auto& rig : m_rigs)
         {
             out.push_back({rig->label, rig->owner, rig->sculptor.bone_count(), rig->frames, rig->stale, rig->primary, rig->actor_key, rig->actor_key == m_active,
-                           static_cast<int32_t>(rig->sculptor.legs().size()), rig->sculptor.took_shared_lift()});
+                           !rig->primary && rig->sculptor.copy_state() == 1, static_cast<int32_t>(rig->sculptor.legs().size()), rig->sculptor.took_shared_lift()});
         }
         return out;
     }

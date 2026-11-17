@@ -93,6 +93,10 @@ namespace uuepbs::ui
         Title,
         Text,
         Window,
+        Track,   // hairline slider track (2.7)
+        Section, // section header bars (2.7)
+        Border,
+        Panel,
         Count
     };
 
@@ -160,7 +164,7 @@ namespace uuepbs::ui
         bool slider_float(const char* label, float* v, float lo, float hi, const char* format, ImGuiSliderFlags flags = 0);
         bool checkbox(const char* label, bool* v);
         bool begin_tab_item(const char* label, std::string_view icon_key, ImGuiTabItemFlags flags);
-        bool begin_child(const char* id, const ImVec2& size, ImGuiChildFlags flags);
+        bool begin_child(const char* id, const ImVec2& size, ImGuiChildFlags flags, ImGuiWindowFlags window_flags = 0);
         void end_child();
 
         // Releases every texture. Call after the renderer backend shut down and before

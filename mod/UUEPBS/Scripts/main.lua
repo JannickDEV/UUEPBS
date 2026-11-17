@@ -13,7 +13,7 @@
 -- those it only checks that the objects it already holds are still valid, and it only
 -- rewrites the bridge file when something actually changed.
 
-local VERSION = "2.7.3"
+local VERSION = "2.8.0"
 local TAG = "[UUEPBS] "
 local Config = require("config")
 
@@ -125,7 +125,7 @@ local profileFileName = profileKey:gsub('[<>:"/\\|?*]', "_") .. ".json"
 local profileFile = profileDir .. "\\" .. profileFileName
 local legacyProfileFile = modsDir .. "\\" .. LEGACY_MOD_FOLDER .. "\\Scripts\\GameProfiles\\" .. profileFileName
 local PROFILE_ORDER = { "Project", "Game", "Target", "TargetClassPath", "TargetPrefer", "PrimaryComponent", "IncludeComponents", "ExcludeComponents",
-    "SameSkeletonOnly", "WorldMeshSearch", "BodyGroups", "MorphGroups", "ExcludeMorphs", "Hook", "_help" }
+    "SameSkeletonOnly", "WorldMeshSearch", "BodyGroups", "MorphGroups", "ExcludeMorphs", "AutoMorphGroups", "Names", "Looks", "Hook", "_help" }
 local PROFILE_HELP = "Target: actor class to edit (empty = the pawn you control). TargetClassPath: optional full path of that class. "
     .. "TargetPrefer: when several actors of the Target class exist, the default is the one with the lowest value of this "
     .. "number property (e.g. a fighting game's PlayerNumber, 0 = player 1). "
@@ -135,6 +135,9 @@ local PROFILE_HELP = "Target: actor class to edit (empty = the pawn you control)
     .. "(real bone names from the Detailed Panel, * wildcards allowed; [] hides a slider; new names add sliders). "
     .. "MorphGroups: Simplified Panel sliders for morph targets, e.g. {\"Breasts\": [\"BreastSize*\"]} (names from Detailed Panel > Morphs). "
     .. "ExcludeMorphs: morph names to hide, e.g. [\"*_corrective*\"]. "
+    .. "AutoMorphGroups: false = only MorphGroups put morphs on the Body tab (by default the rest are sorted into categories by name). "
+    .. "Names: names shown in the window's character list, by engine name, e.g. {\"BP_Rokuv3_C\": \"Roku\", \"00_EVE_*\": \"Eve\"} "
+    .. "(actor, class or mesh asset names; * wildcards allowed, a plain name also matches names that start with it). "
     .. "WorldMeshSearch: true = find meshes by searching every skeletal mesh in the world (slower; only for games where "
     .. "the log says the direct mesh lookup misses meshes)."
 
@@ -459,18 +462,48 @@ local function mesh_asset(comp)
     return alive(mesh) and mesh or nil
 end
 
--- Address of the component's mesh asset from its properties (a plain read, no engine call).
-local function mesh_prop(comp)
-    local mesh
-    pcall(function()
-        mesh = comp.SkeletalMeshAsset -- UE 5.1+
-    end)
-    if mesh == nil then
+-- Address of the component's mesh asset. A plain property read (no engine call) once it has been seen to
+-- agree with GetSkinnedAsset on a few different meshes. Some UE4SS builds cannot read the UE 5.1+ object
+-- pointer property (UE4SS.log: "Failed to expose size of 'class RC::Unreal::FObjectPtrProperty'", seen in
+-- Afterparty, UE 5.7); then the read can hand back the same address for every component, every skeletal
+-- mesh in the level looks like the character's mesh, and scene copies pick up laptops and bicycles.
+local mesh_prop
+do
+    local trust = nil -- nil = not known yet, true = the property read agrees, false = always ask the engine
+    local agreed = {}
+    local agreedCount = 0
+    local function by_property(comp)
+        local mesh
         pcall(function()
-            mesh = comp.SkeletalMesh -- UE4 / UE 5.0
+            mesh = comp.SkeletalMeshAsset -- UE 5.1+
         end)
+        if mesh == nil then
+            pcall(function()
+                mesh = comp.SkeletalMesh -- UE4 / UE 5.0
+            end)
+        end
+        return mesh ~= nil and address_num(mesh) or nil
     end
-    return mesh ~= nil and address_num(mesh) or nil
+    mesh_prop = function(comp)
+        if trust then
+            return by_property(comp)
+        end
+        local m = mesh_asset(comp)
+        local real = m and address_num(m) or nil
+        if trust == nil and real ~= nil then
+            local p = by_property(comp)
+            if p ~= real then
+                trust = false
+                say("mesh asset property reads back wrong here (%s, engine says %s): asking the engine for every mesh instead",
+                    tostring(p), tostring(real))
+            elseif not agreed[real] then
+                agreed[real] = true
+                agreedCount = agreedCount + 1
+                trust = agreedCount >= 3 or nil
+            end
+        end
+        return real
+    end
 end
 
 local function mesh_path(comp)
@@ -811,16 +844,22 @@ function Prefer.value(actor)
     return ok and type(v) == "number" and v or nil
 end
 
+-- Filled in further down (they need helpers defined later).
+local late = {}
+
+-- The name shown in the window, plus the engine's object name (sent separately, for tooltips and the
+-- Status tab). Actor keys and identities never use the shown name.
 local function actor_label(actor, pawn)
-    local label = name_of(actor)
-    if pawn and same_object(actor, pawn) then
+    local engine = name_of(actor)
+    local label = late.display_name and late.display_name(actor) or engine
+    if pawn and same_object(actor, pawn) and label ~= "Player" then
         label = label .. " (player)"
     end
     local v = Prefer.value(actor)
     if v then
         label = string.format("%s [%s %d]", label, Profile.TargetPrefer, v)
     end
-    return label
+    return label, engine
 end
 
 local function full_name(obj)
@@ -882,8 +921,6 @@ local function key_of(actor, default)
     return address_of(actor)
 end
 
--- Filled in further down (they need helpers defined later).
-local late = {}
 -- Characters seen through the new-object notification: the picker lists these while the window
 -- stays open instead of walking the whole object array every few seconds (that walk takes long
 -- enough in big games to be felt). The full search runs when the window opens and on Refresh.
@@ -999,9 +1036,10 @@ local function refresh_candidates(full)
             plain = plain + 1
         end
         if edited or plain <= cap then
-            local label = actor_label(e.actor, pawn)
-        -- show who a character is recognised as when that differs from its object name
-            if late.identity and not (default and same_object(e.actor, default)) then
+            local label, engine = actor_label(e.actor, pawn)
+            -- show who a character is recognised as when that differs from its object name
+            -- (engine names only: with readable names the window has the engine name in a tooltip)
+            if not late.friendly() and late.identity and not (default and same_object(e.actor, default)) then
                 local ok, ident = pcall(late.identity, e.actor)
                 if ok and ident and ident ~= name_of(e.actor) and not ident:find("@", 1, true) then
                     label = label .. "  = " .. ident
@@ -1009,7 +1047,7 @@ local function refresh_candidates(full)
             end
             -- distance from the player, whole metres (only in the list; the label stays a name)
             local dist = (e.d >= 0 and e.d < math.huge) and string.format("   %d m", math.floor(math.sqrt(e.d) / 100 + 0.5)) or ""
-            list[#list + 1] = { id = address_of(e.actor), label = label, actor = e.actor, key = key, dist = dist }
+            list[#list + 1] = { id = address_of(e.actor), label = label, actor = e.actor, key = key, dist = dist, engine = engine }
         end
     end
     candidates = list
@@ -1328,6 +1366,121 @@ end
 
 late.identity, late.location = identity_of, location_of
 
+---------------------------------------------------------------------------
+-- Readable names (labels only; see uuepbs_names.lua)
+---------------------------------------------------------------------------
+-- (a block of its own: the main chunk is near Lua's 200-local limit)
+do
+    local Names = require("uuepbs_names")
+
+    -- FriendlyNames = false in config.lua shows the engine's object names as before.
+    local function friendly()
+        return Config.FriendlyNames ~= false
+    end
+
+    local profileNames = Names.compile(Profile.Names)
+    local displayCache = {} -- actor full name -> { name, how, tries, at }
+    local DISPLAY_RETRY_S, DISPLAY_TRIES = 2, 3 -- a cleaned-up name is looked for again: the game may name it after spawning
+
+    -- Mesh asset names of a character: face / head meshes first (they tell people apart), then the main mesh.
+    local function character_mesh_names(actor)
+        local faces, others = {}, {}
+        local skel = engine_class("/Script/Engine.SkeletalMeshComponent")
+        pcall(function()
+            each_of(skel and actor:K2_GetComponentsByClass(skel) or {}, function(c)
+                local m = alive(c) and mesh_asset(c)
+                local an = m and name_of(m)
+                if an and an ~= "?" then
+                    local n = name_of(c):lower() .. " " .. an:lower()
+                    local list = (n:find("face", 1, true) or n:find("head", 1, true)) and faces or others
+                    list[#list + 1] = an
+                end
+            end)
+        end)
+        pcall(function()
+            local m = alive(actor.Mesh) and mesh_asset(actor.Mesh)
+            if m then
+                table.insert(others, 1, name_of(m))
+            end
+        end)
+        for _, n in ipairs(others) do
+            faces[#faces + 1] = n
+        end
+        return faces
+    end
+
+    local function resolve_display_name(actor)
+        local name, how = Names.from_object(actor, read_prop, alive)
+        if name then
+            return name, "game property " .. how
+        end
+        local raw, cls = name_of(actor), class_name(actor)
+        -- Character Switch Watcher: the player pawn's meshes change with the party member played (the
+        -- window adds " - Lune" for that), so they must not name the pawn itself
+        local swapping = Config.CharacterSwitchWatcher == true and same_object(actor, player_pawn())
+        local meshes = swapping and {} or character_mesh_names(actor)
+        local engineNames = { raw, stem(raw), cls }
+        for _, m in ipairs(meshes) do
+            engineNames[#engineNames + 1] = m
+        end
+        name = Names.lookup(profileNames, engineNames)
+        if name then
+            return name, "profile Names"
+        end
+        -- "BP_NonPlayerCharacter_C_12" says nothing about who it is: the mesh does ("00_EVE_01_Body" -> "Eve")
+        local generic = raw == cls or (raw:sub(1, #cls + 1) == cls .. "_" and raw:sub(#cls + 2):match("^%d+$") ~= nil)
+        if generic then
+            for _, m in ipairs(meshes) do
+                name = Names.clean(m, true)
+                if name then
+                    return name, "clean"
+                end
+            end
+        end
+        local cleaned = Names.clean(raw) or Names.clean(cls)
+        if not cleaned and same_object(actor, player_pawn()) then
+            -- a bare engine pawn ("Pawn_2147444437") says nothing; it is the one you play
+            return "Player", "clean"
+        end
+        return cleaned or raw, "clean"
+    end
+
+    local function display_name(actor)
+        if not friendly() then
+            return name_of(actor)
+        end
+        local full = full_name(actor)
+        local c = full and displayCache[full]
+        local now = os.clock()
+        if c and (c.how ~= "clean" or c.tries >= DISPLAY_TRIES or now - c.at < DISPLAY_RETRY_S) then
+            return c.name
+        end
+        local ok, name, how = pcall(resolve_display_name, actor)
+        if not ok or type(name) ~= "string" or name == "" then
+            name, how = name_of(actor), "clean"
+        end
+        if how ~= "clean" and (not c or c.name ~= name) then
+            chatter("%s is shown as \"%s\" (%s)", name_of(actor), name, how)
+        end
+        if full then
+            displayCache[full] = { name = name, how = how == "clean" and "clean" or "found", tries = c and c.tries + 1 or 1, at = now }
+        end
+        return name
+    end
+
+    -- A mesh's label: its asset cleaned up ("SK_Shirt" -> "Shirt"), else its component name cleaned up
+    -- ("SkeletalMeshComponent_2147482611" says nothing, the asset does).
+    local function mesh_label(comp, compName)
+        if not friendly() then
+            return compName
+        end
+        local m = mesh_asset(comp)
+        return (m and Names.clean(name_of(m))) or Names.clean(compName) or compName
+    end
+
+    late.friendly, late.display_name, late.mesh_label = friendly, display_name, mesh_label
+end
+
 -- NPCs are only sculpted while they are this close to the player (CharacterRange in config.lua).
 -- An NPC already in range only counts as out of it 10% further away, so one standing right at the
 -- edge (or walking around on it) doesn't flip in and out, causing a rescan each time.
@@ -1386,8 +1539,8 @@ local function check_character(actor)
         end
         return
     end
-    local label = actor_label(actor, nil)
-    sighted[key] = { actor = actor, full = full_name(actor), identity = id, label = label }
+    local label, engine = actor_label(actor, nil)
+    sighted[key] = { actor = actor, full = full_name(actor), identity = id, label = label, engine = engine }
     knownActors[key] = knownActors[key] or { actor = actor, full = sighted[key].full, label = label }
     stateDirty = true
     chatter("remembered character %s found (%s)", label, id)
@@ -1507,8 +1660,8 @@ function Switch.check(actor)
     if same >= Switch.MAX_LINKS then
         return
     end
-    local label = actor_label(actor, nil)
-    Switch.links[key] = { actor = actor, full = full, who = who, label = label }
+    local label, engine = actor_label(actor, nil)
+    Switch.links[key] = { actor = actor, full = full, who = who, label = label, engine = engine }
     sighted[key] = nil -- not a remembered NPC of its own: it shares the party member's sliders
     knownActors[key] = knownActors[key] or { actor = actor, full = full, label = label }
     stateDirty = true
@@ -1623,6 +1776,7 @@ do
         local lines = {}
         for _, r in ipairs(rigs) do
             lines[#lines + 1] = "rig\t" .. r.address .. "\t" .. clean(r.label) .. "\t" .. (r.primary and "1" or "0") .. "\t" .. clean(r.ownerLabel) .. "\t" .. r.actorKey
+                .. "\t" .. clean(r.engine or "") .. "\t" .. clean(r.ownerEngine or "")
             lines[#lines + 1] = "bones\t" .. r.hierarchy.names
             lines[#lines + 1] = "parents\t" .. r.hierarchy.parents
             if r.primary and r.hierarchy.reference then
@@ -1847,6 +2001,7 @@ do
         end
         local primarySkeleton = skeleton_path(primary)
         local driven = 0
+        local shownCount = {} -- mesh label shown in the window -> meshes with it
         for _, comp in ipairs(comps) do
             local label = name_of(comp)
             local key = label:lower()
@@ -1866,8 +2021,14 @@ do
                 if ok and h then
                     local okm, morphs = pcall(read_morph_names, comp)
                     morphs = okm and morphs or nil
-                    out[#out + 1] = { comp = comp, address = address_of(comp), label = label, primary = isPrimary, hierarchy = h,
+                    local shown = late.mesh_label(comp, label)
+                    shownCount[shown] = (shownCount[shown] or 0) + 1
+                    if shownCount[shown] > 1 then
+                        shown = shown .. " " .. shownCount[shown] -- two meshes made from the same asset
+                    end
+                    out[#out + 1] = { comp = comp, address = address_of(comp), label = shown, primary = isPrimary, hierarchy = h,
                         morphs = morphs, morphSet = morph_set(morphs), actorKey = e.key, ownerLabel = e.label,
+                        engine = label, ownerEngine = name_of(actor),
                         full = full_name(comp), meshAddr = mesh_prop(comp) }
                     driven = driven + 1
                     if morphs then
@@ -1909,6 +2070,21 @@ do
                 end
             end
         end
+        -- Scene copies (uuepbs_copies.lua): the same character in cutscenes and menu previews,
+        -- sent as extra meshes of that character after every character's own meshes.
+        if late.copies then
+            late.copies.set_sources(rigs, plannedAddr)
+            local used = {}
+            for _, r in ipairs(late.copies.rigs()) do
+                if #rigs >= MAX_MESHES then
+                    break
+                end
+                local k = r.actorKey .. "|" .. r.baseLabel
+                used[k] = (used[k] or 0) + 1
+                r.label = used[k] > 1 and (r.baseLabel .. " " .. used[k]) or r.baseLabel
+                rigs[#rigs + 1] = r
+            end
+        end
         local text = table.concat(leftOut, ", ")
         if text ~= leftOutText then
             leftOutText = text
@@ -1920,6 +2096,7 @@ do
         stateDirty = true
         rigsChanged = true
     end
+    late.assemble = assemble
 
     local function queue_key(key)
         if queued[key] or not planByKey[key] then
@@ -2121,11 +2298,11 @@ do
         local entries = {}
         if actor then
             local key = (pickedId == nil or (default and same_object(actor, default))) and PLAYER_KEY or address_of(actor)
-            local label = actor_label(actor, pawn)
+            local label, engine = actor_label(actor, pawn)
             if key == PLAYER_KEY and switch_on() and Switch.who then
                 label = label .. " - " .. switch_display(Switch.who)
             end
-            targetInfo = { id = pickedId or "auto", label = label, key = key,
+            targetInfo = { id = pickedId or "auto", label = label, key = key, engine = engine,
                 identity = (key ~= PLAYER_KEY and REMEMBER) and (identity_of(actor) or "") or "" }
             if key ~= PLAYER_KEY then
                 knownActors[key] = { actor = actor, full = full_name(actor), label = targetInfo.label }
@@ -2519,6 +2696,9 @@ local function build_state()
         "fps=" .. tostring(Config.WindowFps or 30),
         "key=" .. clean(Config.MenuKey or "F6"),
         "refresh_key=" .. clean(Config.RefreshKey == nil and "F7" or Config.RefreshKey),
+        "next_preset_key=" .. clean(Config.NextPresetKey or ""),
+        "prev_preset_key=" .. clean(Config.PrevPresetKey or ""),
+        "compare_key=" .. clean(Config.CompareKey == nil and "F8" or Config.CompareKey),
         "game=" .. clean(projectName),
         "profile=" .. clean(Profile.name),
         "mkdir=" .. (needProfileFolder and clean(profileDir) or ""),
@@ -2529,22 +2709,41 @@ local function build_state()
         "ground_ik=" .. (Config.AutoGroundLegIK == false and "0" or "1"),
         "ground_extra=" .. string.format("%.3f", late.groundDll.extra),
         "ground_max=" .. tostring(tonumber(Config.AutoGroundMaxCm) or 40),
+        -- the window's Auto Ground switch shows this (either AutoGroundMode)
+        "ground_ui=" .. (late.groundWanted and "1" or "0"),
+        -- Hand Contact (DLL): hands resting on the body follow the edited body
+        "hands=" .. (Config.HandContact == false and "0" or "1"),
+        "hands_near=" .. tostring(tonumber(Config.HandContactNear) or 0.25),
+        "hands_far=" .. tostring(tonumber(Config.HandContactFar) or 0.45),
+        "hands_strength=" .. tostring(tonumber(Config.HandContactStrength) or 1),
+        "hands_shoulder=" .. tostring(tonumber(Config.HandContactShoulderTurn) or 30),
+        "hands_stretch=" .. tostring(tonumber(Config.HandContactArmStretch) or 1.2),
+        "hands_fingers=" .. (Config.HandContactFingers == false and "0" or "1"),
+        "hands_feet=" .. (Config.HandContactFeet == false and "0" or "1"),
+        "hands_anims=" .. clean(Config.HandContactAnims or ""),
+        -- the window's "Collision follows Height" switch shows this ("" = collision handling off in config.lua)
+        "collision_ui=" .. (late.collision and (late.collisionWanted and "1" or "0") or ""),
+        -- the window's "Jiggle physics" choice and what it did (uuepbs_physics.lua)
+        "physics_ui=" .. (late.physics and late.physics.mode() or ""),
+        "physics_info=" .. clean(late.physics and late.physics.summary() or ""),
     }, "\t"))
     add("scan\t" .. scanCount)
-    add("target\t" .. clean(targetInfo.id) .. "\t" .. clean(targetInfo.label) .. "\t" .. clean(targetInfo.key) .. "\t" .. clean(targetInfo.identity or ""))
+    -- engine names go last on each line (older DLLs ignore the extra field)
+    add("target\t" .. clean(targetInfo.id) .. "\t" .. clean(targetInfo.label) .. "\t" .. clean(targetInfo.key) .. "\t" .. clean(targetInfo.identity or "")
+        .. "\t" .. clean(targetInfo.engine or ""))
     for key, e in pairs(sighted) do
-        add("npc\t" .. clean(key) .. "\t" .. clean(e.identity) .. "\t" .. clean(e.label))
+        add("npc\t" .. clean(key) .. "\t" .. clean(e.identity) .. "\t" .. clean(e.label) .. "\t" .. clean(e.engine or ""))
     end
     if switch_on() and Switch.who then
         add("switch\t" .. clean(Switch.who))
     end
     if switch_on() then
         for key, l in pairs(Switch.links) do
-            add("party\t" .. clean(key) .. "\t" .. clean(l.who) .. "\t" .. clean(l.label))
+            add("party\t" .. clean(key) .. "\t" .. clean(l.who) .. "\t" .. clean(l.label) .. "\t" .. clean(l.engine or ""))
         end
     end
     for _, c in ipairs(candidates) do
-        add("cand\t" .. c.id .. "\t" .. clean(c.label .. (c.dist or "")) .. "\t" .. clean(c.key or c.id))
+        add("cand\t" .. c.id .. "\t" .. clean(c.label .. (c.dist or "")) .. "\t" .. clean(c.key or c.id) .. "\t" .. clean(c.engine or ""))
     end
     for key in pairs(goneKeys) do
         add("gone\t" .. clean(key))
@@ -2552,6 +2751,12 @@ local function build_state()
     add(rigsText)
     if animatedText ~= "" then
         add("manim\t" .. animatedText)
+    end
+    if late.looks then
+        add(late.looks.report())
+    end
+    if late.hands then
+        add(late.hands.report())
     end
     for _, c in ipairs(pendingCommands) do
         add("cmd\t" .. c.id .. "\t" .. clean(c.verb) .. "\t" .. clean(c.arg))
@@ -2580,7 +2785,7 @@ local function write_state()
     stateDirty = false
 end
 
-local seen = { rescan = 0, pick = 0, refresh = 0, relist = 0, session = nil }
+local seen = { rescan = 0, pick = 0, refresh = 0, relist = 0, groundui = 0, collui = 0, physicsui = 0, session = nil }
 local hookState, hookText = "waiting", ""
 local windowOpen = false
 local lastDllText = nil
@@ -2606,11 +2811,14 @@ local function read_dll_state()
     local wanted, sawMorphs = {}, false
     local keep, keepList = {}, {}
     local rememberList = {}
+    local scaledNow = {} -- characters whose sliders scale bones ("scaled" lines)
+    local cams = {} -- Character Scale > Camera, actor key -> fields (uuepbs_camera.lua)
+    local heights = {} -- Character Scale > Height (!= 1), actor key -> text (uuepbs_collision.lua)
     local dllSession = text:match("^UBS1 (%S+)")
     if dllSession ~= seen.session then
         -- New DLL session: take its counters as the baseline.
         seen.session = dllSession
-        seen.rescan, seen.pick, seen.refresh, seen.relist = -1, -1, -1, -1
+        seen.rescan, seen.pick, seen.refresh, seen.relist, seen.groundui, seen.collui, seen.physicsui = -1, -1, -1, -1, -1, -1, -1
     end
     local mine = false -- ack/replies are only ours once the DLL has seen this script's session
     local open = false
@@ -2650,6 +2858,27 @@ local function read_dll_state()
                 wantCandidates = true
             end
             seen.refresh = n
+        elseif kind == "groundui" then
+            -- the window's Auto Ground switch (Character Scale tab)
+            local n = tonumber(a) or 0
+            if seen.groundui >= 0 and n ~= seen.groundui and late.set_ground then
+                late.set_ground(b == "1")
+            end
+            seen.groundui = n
+        elseif kind == "collui" then
+            -- the window's "Collision follows Height" switch (Character Scale tab)
+            local n = tonumber(a) or 0
+            if seen.collui >= 0 and n ~= seen.collui and late.set_collision then
+                late.set_collision(b == "1")
+            end
+            seen.collui = n
+        elseif kind == "physicsui" then
+            -- the window's Jiggle physics choice (Character Scale tab)
+            local n = tonumber(a) or 0
+            if seen.physicsui >= 0 and n ~= seen.physicsui and late.set_physics then
+                late.set_physics(b)
+            end
+            seen.physicsui = n
         elseif kind == "relist" then
             local n = tonumber(a) or 0
             if seen.relist >= 0 and n ~= seen.relist then
@@ -2688,6 +2917,18 @@ local function read_dll_state()
             elseif a ~= "" then
                 rememberList[#rememberList + 1] = a
             end
+        elseif kind == "scaled" then
+            if a ~= "" then
+                scaledNow[a] = true
+            end
+        elseif kind == "cam" then
+            if a ~= "" then
+                cams[a] = b
+            end
+        elseif kind == "height" then
+            if a ~= "" then
+                heights[a] = b
+            end
         elseif kind == "keep" then
             if a ~= "" and not keep[a] then
                 keep[a] = b
@@ -2714,6 +2955,16 @@ local function read_dll_state()
         end
     end
     windowOpen = open
+    if late.deformers_scaled then
+        late.deformers_scaled(scaledNow)
+    end
+    late.physicsScaled = scaledNow
+    if late.camera then
+        late.camera.want(cams)
+    end
+    if late.collision then
+        late.collision.want(heights)
+    end
     if sawMorphs then
         morphWanted = wanted
         morphDirty = true
@@ -2770,7 +3021,17 @@ end
 -- AutoGroundMode "dll" (default): the DLL lifts the pose and bends the legs onto the ground itself
 -- (needs a DLL built with Auto Ground). "lua": the older way, moving the player's mesh from here.
 late.groundMode = string.lower(tostring(Config.AutoGroundMode or "dll"))
-late.groundDll = { on = Config.AutoGround ~= false and late.groundMode == "dll", extra = tonumber(Config.AutoGroundExtraCm) or 0 }
+-- The window's switch and "ubs ground on|off" are remembered in the presets folder and win over config.lua.
+late.groundFile = presetFolder .. "\\_auto_ground.txt"
+late.groundWanted = Config.AutoGround ~= false
+do
+    local saved = read_text(late.groundFile)
+    saved = saved and saved:match("^%s*(%a+)")
+    if saved == "on" or saved == "off" then
+        late.groundWanted = saved == "on"
+    end
+end
+late.groundDll = { on = late.groundWanted and late.groundMode == "dll", extra = tonumber(Config.AutoGroundExtraCm) or 0 }
 late.ground = require("uuepbs_ground").new({
     json = json,
     read_text = read_text,
@@ -2786,12 +3047,31 @@ late.ground = require("uuepbs_ground").new({
     end,
     sessionFile = presetFolder .. "\\_last_session.json",
     playerKey = PLAYER_KEY,
-    enabled = Config.AutoGround ~= false and late.groundMode == "lua",
+    enabled = late.groundWanted and late.groundMode == "lua",
     extraCm = Config.AutoGroundExtraCm,
     maxCm = Config.AutoGroundMaxCm,
     followPose = Config.AutoGroundFollowPose ~= false,
     smoothing = Config.AutoGroundSmoothing,
 })
+
+-- Auto Ground on / off for every character (window switch, "ubs ground on|off"), remembered across sessions.
+function late.set_ground(on)
+    late.groundWanted = on
+    if late.groundMode == "dll" then
+        late.groundDll.on = on -- sent with the next bridge write
+    else
+        ExecuteInGameThread(function()
+            late.ground.set_enabled(on)
+        end)
+    end
+    stateDirty = true
+    local f = io.open(late.groundFile, "wb")
+    if f then
+        f:write(on and "on\n" or "off\n")
+        f:close()
+    end
+    say("auto ground %s", on and "on" or "off")
+end
 
 local scanDue = 0 -- when the plan is next worked out (see make_plan)
 local scanFull = false -- ... and everyone collected again
@@ -2805,6 +3085,328 @@ local function schedule_scan(delayMs, full)
         scanDue = due
     end
     scanFull = scanFull or full == true
+end
+
+-- Portraits for the window (uuepbs_portraits.lua): taken on request, one at a time.
+-- Kept in `late` (main.lua is at Lua's limit of 200 locals).
+-- The same module takes preset thumbnails (PresetThumbnails in config.lua).
+if Config.AutoPortraits ~= false or Config.PresetThumbnails ~= false then
+    local okP, mod = pcall(require, "uuepbs_portraits")
+    if okP and type(mod) == "table" then
+        late.portraits = mod
+        mod.setup({
+            say = say,
+            chatter = chatter,
+            portraits = Config.AutoPortraits ~= false,
+            folder = presetFolder .. "\\_portraits",
+            request_file = nativeDir .. "\\portrait_requests.txt",
+            thumb_folder = Config.PresetThumbnails ~= false and (presetFolder .. "\\_library") or nil,
+            thumb_request_file = nativeDir .. "\\thumbnail_requests.txt",
+            profile = function()
+                return Profile
+            end,
+            find_actor = function(id)
+                if id == "auto" or id == PLAYER_KEY then
+                    local d = cheap_default()
+                    return (d and alive(d)) and d or nil
+                end
+                for _, c in ipairs(candidates) do
+                    if c.id == id and alive(c.actor) then
+                        return c.actor
+                    end
+                end
+                if target and alive(target) and address_of(target) == id then
+                    return target
+                end
+                return nil
+            end,
+        })
+    else
+        say("portraits off: %s", tostring(mod))
+    end
+end
+
+-- Looks (uuepbs_looks.lua): skin and hair recoloured through the outfit's own material parameters.
+-- The DLL sends them with the morph weights as "look:<id>" names. Kept in `late` (local limit).
+late.apply_looks = function() end
+if Config.Looks ~= false then
+    local okL, mod = pcall(require, "uuepbs_looks")
+    if okL and type(mod) == "table" then
+        late.looks = mod
+        mod.setup({
+            say = say,
+            chatter = chatter,
+            profile = function()
+                return Profile
+            end,
+        })
+        late.apply_looks = function()
+            local okA, changed = pcall(mod.apply, rigs, morphWanted)
+            if not okA then
+                say("looks: %s", tostring(changed))
+            elseif changed then
+                stateDirty = true
+            end
+        end
+    else
+        say("looks off: %s", tostring(mod))
+    end
+end
+
+-- Mesh deformers (uuepbs_deformers.lua): a dual quaternion skinning deformer cannot show scaled
+-- bones, so it is switched off on a character's meshes while its sliders scale bones.
+late.apply_deformers = function() end
+do
+    local mode = tostring(Config.MeshDeformers or "auto"):lower()
+    local okD, mod = pcall(require, "uuepbs_deformers")
+    if okD and type(mod) == "table" then
+        late.deformers = mod
+        mod.setup({ say = say })
+        local scaled, dirty = {}, true
+        late.deformers_scaled = function(now)
+            for k in pairs(now) do
+                if not scaled[k] then
+                    dirty = true
+                end
+            end
+            for k in pairs(scaled) do
+                if not now[k] then
+                    dirty = true
+                end
+            end
+            scaled = now
+        end
+        local lastRigs = nil
+        late.apply_deformers = function()
+            if not dirty and lastRigs == rigs and not rigsChanged then
+                return
+            end
+            dirty, lastRigs = false, rigs
+            local okA, err = pcall(mod.apply, rigs, scaled, mode)
+            if not okA then
+                say("mesh deformers: %s", tostring(err))
+            end
+        end
+    else
+        say("mesh deformer handling off: %s", tostring(mod))
+    end
+end
+
+-- Hand Contact (uuepbs_hands.lua): which animation each character plays, for the DLL's Hand Contact
+-- (config.lua HandContactAnims) and "ubs hands".
+if Config.HandContact ~= false then
+    local okH, mod = pcall(require, "uuepbs_hands")
+    if okH and type(mod) == "table" then
+        late.hands = mod
+    else
+        say("hand contact animation names off: %s", tostring(mod))
+    end
+end
+
+-- Jiggle physics (uuepbs_physics.lua): physics nodes of a character whose sliders scale bones follow
+-- the new sizes ("follow"), are switched off ("off") or are left to the game ("keep"). The window's
+-- choice and "ubs physics" are remembered in the presets folder and win over config.lua PhysicsMode.
+late.apply_physics = function() end
+late.physicsScaled = {}
+do
+    local okP, mod = pcall(require, "uuepbs_physics")
+    if okP and type(mod) == "table" then
+        late.physics = mod
+        mod.setup({ say = say, fname = function(name)
+            return FName(name)
+        end })
+        local file = presetFolder .. "\\_physics.txt"
+        mod.set_mode(tostring(Config.PhysicsMode or "follow"))
+        local saved = read_text(file)
+        saved = saved and saved:match("^%s*(%a+)")
+        if saved then
+            mod.set_mode(saved)
+        end
+        late.set_physics = function(m)
+            if not mod.set_mode(m) then
+                return false
+            end
+            stateDirty = true
+            local f = io.open(file, "wb")
+            if f then
+                f:write(mod.mode() .. "\n")
+                f:close()
+            end
+            say("jiggle physics: %s", mod.mode())
+            return true
+        end
+        local lastInfo = nil
+        late.apply_physics = function()
+            local okA, err = pcall(mod.apply, rigs, late.physicsScaled, now_ms())
+            if not okA then
+                say("physics: %s", tostring(err))
+            end
+            local info = mod.summary()
+            if info ~= lastInfo then
+                lastInfo = info
+                stateDirty = true -- the window shows it
+            end
+        end
+    else
+        say("physics handling off: %s", tostring(mod))
+    end
+end
+
+-- Scene copies (uuepbs_copies.lua): the edited character as cutscenes and menu previews show it
+-- (their own actors with the same mesh assets) gets the same sliders. Kept in `late` (local limit).
+if Config.SceneCopies ~= false then
+    local okC, mod = pcall(require, "uuepbs_copies")
+    if okC and type(mod) == "table" then
+        late.copies = mod
+        mod.setup({
+            say = say,
+            chatter = chatter,
+            match = Config.SceneCopyMatch,
+            alive = alive,
+            address_num = address_num,
+            mesh_prop = mesh_prop,
+            mesh_asset_addr = function(comp)
+                local m = mesh_asset(comp)
+                return m and address_num(m) or nil
+            end,
+            name_of = name_of,
+            full_name = full_name,
+            is_default_object = is_default_object,
+            still = still,
+            each_of = each_of,
+            now_ms = now_ms,
+            skel_class = function()
+                return engine_class("/Script/Engine.SkeletalMeshComponent")
+            end,
+            controller = function()
+                return (cachedController and alive(cachedController)) and cachedController or nil
+            end,
+            find_all = function()
+                return FindAllOf("SkeletalMeshComponent")
+            end,
+            -- A copy's mesh as a rig of the character it copies (never its main mesh).
+            build = function(comp, src)
+                local ok, h = pcall(read_hierarchy, comp, false)
+                if not ok or not h then
+                    return nil
+                end
+                local okm, morphs = pcall(read_morph_names, comp)
+                morphs = okm and morphs or nil
+                local engine = name_of(comp)
+                local base = late.mesh_label(comp, engine) .. " (scene copy)"
+                return { comp = comp, address = address_of(comp), label = base, baseLabel = base, primary = false, hierarchy = h,
+                    morphs = morphs, morphSet = morph_set(morphs), actorKey = src.key, ownerLabel = src.ownerLabel,
+                    engine = engine, ownerEngine = src.ownerEngine, full = full_name(comp), meshAddr = mesh_prop(comp), copy = true }
+            end,
+        })
+    else
+        say("scene copies off: %s", tostring(mod))
+    end
+end
+
+-- Camera (uuepbs_camera.lua): Character Scale > Camera moves the controlled character's camera boom
+-- (spring arm), camera or eye height, e.g. up with Height. Kept in `late` (local limit).
+if Config.CameraControl ~= false then
+    local okK, mod = pcall(require, "uuepbs_camera")
+    if okK and type(mod) == "table" then
+        late.camera = mod
+        mod.setup({
+            say = say,
+            chatter = chatter,
+            alive = alive,
+            address_num = address_num,
+            name_of = name_of,
+            each_of = each_of,
+            engine_class = engine_class,
+            pawn = player_pawn,
+            controller = player_controller,
+            key_of = function(pawn)
+                return key_of(pawn, cheap_default())
+            end,
+            -- how far "Collision follows Height" moved the pawn's capsule up (a camera boom hangs on it)
+            raised = function(pawn)
+                return late.collision and late.collision.raised(pawn) or 0
+            end,
+            -- the character's main mesh origin (its feet on most characters)
+            feet_z = function(pawn, key)
+                for _, r in ipairs(rigs) do
+                    if r.primary and not r.copy and r.actorKey == key and alive(r.comp) then
+                        local okZ, z = pcall(function()
+                            return r.comp:K2_GetComponentLocation().Z
+                        end)
+                        if okZ and type(z) == "number" then
+                            return z
+                        end
+                    end
+                end
+                return nil
+            end,
+        })
+    else
+        say("camera control off: %s", tostring(mod))
+    end
+end
+
+-- Collision (uuepbs_collision.lua): the collision capsule of every character follows its Height
+-- (window switch "Collision follows Height", "ubs collision on|off", remembered in the presets folder).
+if Config.CollisionFollow ~= "never" then
+    local okL, mod = pcall(require, "uuepbs_collision")
+    if okL and type(mod) == "table" then
+        late.collision = mod
+        late.collisionFile = presetFolder .. "\\_collision.txt"
+        late.collisionWanted = Config.CollisionFollow ~= false
+        local saved = read_text(late.collisionFile)
+        saved = saved and saved:match("^%s*(%a+)")
+        if saved == "on" or saved == "off" then
+            late.collisionWanted = saved == "on"
+        end
+        mod.set_enabled(late.collisionWanted)
+        mod.setup({
+            chatter = chatter,
+            alive = alive,
+            address_num = address_num,
+            name_of = name_of,
+            scale_radius = Config.CollisionRadius ~= false,
+            scale_step = Config.CollisionStepHeight ~= false,
+            -- the character of an actor key: the owner of its main mesh
+            actor_of = function(key)
+                for _, r in ipairs(rigs) do
+                    if r.primary and not r.copy and r.actorKey == key and alive(r.comp) then
+                        local okO, owner = pcall(function()
+                            return r.comp:GetOwner()
+                        end)
+                        if okO and alive(owner) then
+                            return owner, r.comp
+                        end
+                    end
+                end
+                if key == PLAYER_KEY then
+                    local d = cheap_default()
+                    return d and alive(d) and d or nil, nil
+                end
+                return nil
+            end,
+            -- Lua-mode Auto Ground's base height of a mesh it lifts
+            mesh_base_z = function(comp)
+                return late.ground and late.ground.base_z and late.ground.base_z(comp) or nil
+            end,
+        })
+        function late.set_collision(on)
+            late.collisionWanted = on
+            ExecuteInGameThread(function()
+                mod.set_enabled(on)
+            end)
+            stateDirty = true
+            local f = io.open(late.collisionFile, "wb")
+            if f then
+                f:write(on and "on\n" or "off\n")
+                f:close()
+            end
+            say("collision follows height %s", on and "on" or "off")
+        end
+    else
+        say("collision handling off: %s", tostring(mod))
+    end
 end
 
 local function tick()
@@ -2857,17 +3459,35 @@ local function tick()
         if process_queue() then
             schedule_scan(0)
         end
+        if late.copies and late.copies.tick(t) then
+            late.assemble() -- a cutscene / menu copy of an edited character came or went
+        end
         if rigsChanged then
             rigsChanged = false
             morphDirty = true -- new or re-found meshes get the morph weights too
         end
         if morphDirty then
             apply_morphs()
+            late.apply_looks()
         elseif next(morphApplied) ~= nil then
             watch_morphs()
         end
+        if late.looks and late.looks.active() and late.looks.watch() then
+            late.apply_looks() -- the game re-dressed a recoloured slot
+        end
+        late.apply_deformers()
+        late.apply_physics()
         late.ground.tick(rigs)
+        if late.hands then
+            local okH, changed = pcall(late.hands.poll, rigs)
+            if okH and changed then
+                stateDirty = true
+            end
+        end
         write_state()
+        if late.portraits and windowOpen then
+            late.portraits.tick(now_ms())
+        end
     end)
     if not ok then
         say("tick error: %s", tostring(err))
@@ -2886,6 +3506,7 @@ local function morph_tick()
         read_dll_state()
         if morphDirty then
             apply_morphs()
+            late.apply_looks()
         end
     end)
     if not ok then
@@ -2916,6 +3537,27 @@ if Config.AutoGround ~= false and late.groundMode == "lua" and Config.AutoGround
 end
 if MORPH_MS > 0 and MORPH_MS < POLL_MS then
     every(math.max(33, MORPH_MS), morph_tick)
+end
+if late.camera then
+    every(math.max(16, tonumber(Config.CameraPollMs) or 50), function()
+        if late.camera.busy() then
+            local okT, errT = pcall(late.camera.tick)
+            if not okT then
+                say("camera: %s", tostring(errT))
+            end
+        end
+    end)
+end
+
+if late.collision then
+    every(math.max(16, tonumber(Config.CollisionPollMs) or 50), function()
+        if late.collision.busy() then
+            local okT, errT = pcall(late.collision.tick)
+            if not okT then
+                say("collision: %s", tostring(errT))
+            end
+        end
+    end)
 end
 
 local function world_changed()
@@ -2962,6 +3604,36 @@ pcall(function()
     end)
 end)
 
+-- Scene copies: new skeletal meshes are looked at once their mesh is set (a few property reads);
+-- blueprints that put a mesh on a component, and scene captures (3D menu previews), start a short search.
+if late.copies then
+    pcall(function()
+        NotifyOnNewObject("/Script/Engine.SkeletalMeshComponent", function(obj)
+            late.copies.offer(obj)
+            return false
+        end)
+    end)
+    pcall(function()
+        NotifyOnNewObject("/Script/Engine.SceneCaptureComponent2D", function()
+            late.copies.poke("scene capture created")
+            return false
+        end)
+    end)
+    pcall(function() -- a function of its own: main.lua's main chunk is at Lua's limit of 200 locals
+        for _, fn in ipairs({ "/Script/Engine.SkeletalMeshComponent:SetSkeletalMesh", "/Script/Engine.SkeletalMeshComponent:SetSkeletalMeshAsset",
+            "/Script/Engine.SkinnedMeshComponent:SetSkinnedMeshAsset", "/Script/Engine.SkinnedMeshComponent:SetSkeletalMesh" }) do
+            pcall(RegisterHook, fn, function(self)
+                local okG, c = pcall(function()
+                    return self:get()
+                end)
+                if okG then
+                    late.copies.offer(c)
+                end
+            end)
+        end
+    end)
+end
+
 ---------------------------------------------------------------------------
 -- Console: uuepbs <command>  (ubs for short)
 ---------------------------------------------------------------------------
@@ -2973,7 +3645,7 @@ local function rest_of(params, first)
     return table.concat(parts, " ")
 end
 
-local usage = "uuepbs (or ubs) ui | status | rescan | list | load <name> | save <name> | on | off | reset [all] | diag | skin [name] | morph <name> [weight] | ground [on|off|<extra cm>]"
+local usage = "uuepbs (or ubs) ui | status | rescan | copies | camera | collision [on|off] | hands | list | load <name> | next | prev | save <name> | on | off | compare [on|off] | reset [all] | diag | skin [name] | morph <name> [weight] | ground [on|off|<extra cm>] | physics [follow|off|keep]"
 
 local function console(_, params, out)
     local verb = string.lower(params[1] or "")
@@ -2994,8 +3666,53 @@ local function console(_, params, out)
         reply(string.format("script v%s, game '%s', profile '%s', character '%s', %d other edited character(s), %d mesh(es), hook %s", VERSION,
             projectName, Profile.name, targetInfo.label, math.max(0, #keptOrder - (keptSet[targetInfo.key] and 1 or 0)), #rigs, hookState))
         reply(scan_status())
+        if late.copies then
+            reply(late.copies.status())
+        end
+        if late.deformers then
+            reply(late.deformers.status())
+        end
+        if late.physics then
+            reply(late.physics.status())
+        end
         send_command("status", "", true)
-    elseif verb == "load" or verb == "save" or verb == "skin" or verb == "morph" or verb == "reset" then
+    elseif verb == "copies" then
+        if late.copies then
+            late.copies.search_now()
+            if late.copies.tick(now_ms()) then
+                late.assemble()
+            end
+            reply(late.copies.status())
+        else
+            reply("scene copies are off (SceneCopies in config.lua)")
+        end
+    elseif verb == "hands" then
+        reply(late.hands and late.hands.status() or "hand contact is off (HandContact in config.lua)")
+        send_command("hands", "", true)
+    elseif verb == "physics" then
+        -- ubs physics [follow | off | keep]
+        local arg = string.lower(params[2] or "")
+        if not late.physics then
+            reply("physics handling is not loaded")
+        elseif arg ~= "" and not late.set_physics(arg) then
+            reply("ubs physics follow | off | keep")
+        else
+            reply(late.physics.status())
+        end
+    elseif verb == "camera" then
+        reply(late.camera and late.camera.status() or "camera control is off (CameraControl in config.lua)")
+    elseif verb == "collision" then
+        -- ubs collision [on | off]
+        local arg = string.lower(params[2] or "")
+        if not late.collision then
+            reply("collision handling is off (CollisionFollow = \"never\" in config.lua)")
+            return true
+        end
+        if arg == "on" or arg == "off" then
+            late.set_collision(arg == "on")
+        end
+        reply(string.format("collision follows height: %s\n%s", late.collisionWanted and "on" or "off", late.collision.status()))
+    elseif verb == "load" or verb == "save" or verb == "skin" or verb == "morph" or verb == "reset" or verb == "compare" then
         send_command(verb, rest_of(params, 2), true)
     elseif verb == "ground" then
         -- ubs ground [on | off | <extra cm>]
@@ -3003,7 +3720,7 @@ local function console(_, params, out)
         if late.groundMode == "dll" then
             -- done by the DLL: change its settings (sent with the next bridge write)
             if arg == "on" or arg == "off" then
-                late.groundDll.on = arg == "on"
+                late.set_ground(arg == "on")
             elseif tonumber(arg) then
                 late.groundDll.extra = tonumber(arg)
             end
@@ -3013,14 +3730,12 @@ local function console(_, params, out)
             return true
         end
         if arg == "on" or arg == "off" then
-            ExecuteInGameThread(function()
-                late.ground.set_enabled(arg == "on")
-            end)
+            late.set_ground(arg == "on")
         elseif tonumber(arg) then
             late.ground.set_extra(tonumber(arg))
         end
         reply(late.ground.status())
-    elseif verb == "list" or verb == "on" or verb == "off" or verb == "diag" then
+    elseif verb == "list" or verb == "on" or verb == "off" or verb == "diag" or verb == "next" or verb == "prev" then
         send_command(verb, "", true)
     else
         reply(usage)

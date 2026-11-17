@@ -9,9 +9,13 @@
 //       "head":    { "length": 1, "width": 1, "depth": 1, "rotate": [0, 0, 10], "move": [0, 0, 1.5],
 //                    "children": "scale_too" }
 //     },
-//     "morphs": { "BreastSize": 0.8, "Belly": 0 }
+//     "morphs": { "BreastSize": 0.8, "Belly": 0 },
+//     "proportions": { "height": 1.05, "leg_length": 1.1 }
 //   }
 //
+// "proportions" (optional) holds the Character Scale sliders (proportions.hpp), 1 = unchanged.
+// They are kept in the EditBook as "@scale:<id>" entries and never written under "bones".
+// Older builds ignore the key; a preset without it resets the Character Scale sliders.
 // "morphs" (optional, version 3) holds morph target weights; a morph listed there overrides
 // the game's own value, even at 0. Presets without it clear all morph edits when loaded.
 // "bones" may be empty or missing when "morphs" is there.

@@ -1,8 +1,11 @@
 #include "presets.hpp"
+#include "looks.hpp"
 
 #include "json.hpp"
+#include "proportions.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -230,7 +233,9 @@ namespace uuepbs
 
     std::string PresetShelf::serialize(const EditBook& book, const MorphBook* morphs)
     {
-        const bool with_morphs = morphs && !morphs->empty();
+        // Looks ("look:skin.tone" entries, looks.hpp) get their own object; the rest are morph targets.
+        const size_t look_count = morphs ? looks::count(*morphs) : 0;
+        const bool with_morphs = morphs && morphs->size() > look_count;
         std::string out;
         out += "{\n";
         out += "  \"format\": \"UUEPBS preset\",\n";
@@ -241,7 +246,7 @@ namespace uuepbs
         bool first = true;
         for (const auto& [key, entry] : book)
         {
-            if (entry.edit.is_neutral())
+            if (entry.edit.is_neutral() || is_scale_key(key))
             {
                 continue;
             }
@@ -264,15 +269,53 @@ namespace uuepbs
             out += ", \"children\": \"" + std::string(children_word(e.spread)) + "\" }";
         }
         out += first ? "}" : "\n  }";
+        if (has_proportions(book))
+        {
+            // Character Scale sliders (1 = unchanged). Older builds ignore this key.
+            out += ",\n  \"proportions\": {";
+            bool first_scale = true;
+            for (const ScaleSlider& sl : scale_sliders())
+            {
+                const double value = scale_value(book, sl.id);
+                if (book.count(scale_key(sl.id)) == 0 || std::fabs(value - sl.neutral()) < kScaleNeutralEps)
+                {
+                    continue;
+                }
+                out += first_scale ? "\n" : ",\n";
+                first_scale = false;
+                out += "    " + json_escape(sl.id) + ": " + json_number(value);
+            }
+            out += first_scale ? "}" : "\n  }";
+        }
         if (with_morphs)
         {
             out += ",\n  \"morphs\": {";
             bool first_morph = true;
             for (const auto& [key, m] : *morphs)
             {
+                if (looks::is_look(key))
+                {
+                    continue;
+                }
                 out += first_morph ? "\n" : ",\n";
                 first_morph = false;
                 out += "    " + json_escape(m.name) + ": " + json_number(m.weight);
+            }
+            out += "\n  }";
+        }
+        if (look_count > 0)
+        {
+            out += ",\n  \"looks\": {";
+            bool first_look = true;
+            for (const auto& [key, m] : *morphs)
+            {
+                if (!looks::is_look(key))
+                {
+                    continue;
+                }
+                out += first_look ? "\n" : ",\n";
+                first_look = false;
+                out += "    " + json_escape(looks::id_of(key)) + ": " + json_number(m.weight);
             }
             out += "\n  }";
         }
@@ -313,8 +356,12 @@ namespace uuepbs
         }
         const JsonValue* bones = root.find("bones");
         const JsonValue* morph_section = root.find("morphs");
+        const JsonValue* look_section = root.find("looks");
+        const bool has_looks = look_section && look_section->kind == JsonValue::Kind::Object;
         const bool has_morphs = morph_section && morph_section->kind == JsonValue::Kind::Object;
-        if ((!bones || bones->kind != JsonValue::Kind::Object) && !has_morphs)
+        const JsonValue* scale_section = root.find("proportions");
+        const bool has_scale = scale_section && scale_section->kind == JsonValue::Kind::Object;
+        if ((!bones || bones->kind != JsonValue::Kind::Object) && !has_morphs && !has_scale && !has_looks)
         {
             message = "missing the \"bones\": { ... } section";
             return false;
@@ -341,6 +388,25 @@ namespace uuepbs
                 if (morphs)
                 {
                     (*morphs)[fold_case(name)] = MorphEntry{name, clamp_morph(v.number)};
+                }
+            }
+        }
+        size_t look_count = 0;
+        if (has_looks)
+        {
+            // { "skin.tone": -2, ... }: kept as "look:<id>" entries. Unknown ids are kept too (a newer build's looks).
+            for (const auto& [id, v] : look_section->members)
+            {
+                if (id.empty() || v.kind != JsonValue::Kind::Number || !std::isfinite(v.number))
+                {
+                    ++skipped;
+                    continue;
+                }
+                ++look_count;
+                if (morphs)
+                {
+                    const std::string key = looks::key_of(id);
+                    (*morphs)[key] = MorphEntry{key, clamp_morph(v.number)};
                 }
             }
         }
@@ -441,13 +507,41 @@ namespace uuepbs
                 ++skipped;
                 continue;
             }
+            if (is_scale_key(bone))
+            {
+                ++skipped; // Character Scale values belong under "proportions"
+                continue;
+            }
             entry.edit.clamp();
             out[fold_case(bone)] = entry;
         }
-        message = std::to_string(out.size()) + " bone(s)";
+        const size_t bone_count = out.size();
+        size_t scale_count = 0;
+        if (has_scale)
+        {
+            for (const auto& [id, v] : scale_section->members)
+            {
+                if (v.kind != JsonValue::Kind::Number || !find_scale_slider(id))
+                {
+                    ++skipped;
+                    continue;
+                }
+                set_scale_value(out, id, v.number);
+                ++scale_count;
+            }
+        }
+        message = std::to_string(bone_count) + " bone(s)";
+        if (scale_count > 0)
+        {
+            message += ", " + std::to_string(scale_count) + " scale slider(s)";
+        }
         if (morph_count > 0)
         {
             message += ", " + std::to_string(morph_count) + " morph(s)";
+        }
+        if (look_count > 0)
+        {
+            message += ", " + std::to_string(look_count) + " look(s)";
         }
         if (skipped > 0)
         {

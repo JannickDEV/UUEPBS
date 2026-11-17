@@ -9,6 +9,9 @@
 // while they have some (Lua is told which through edited_actors()).
 #pragma once
 
+#include "camera.hpp"
+#include "body_groups.hpp"
+#include "compare.hpp"
 #include "mirror.hpp"
 #include "morphs.hpp"
 #include "sculpt.hpp"
@@ -76,6 +79,7 @@ namespace uuepbs
         bool primary{};
         std::string actor; // actor key
         bool active{};     // belongs to the character picked in the window
+        bool follows{};    // an extra mesh that copies the main mesh's edited pose: shared bones left alone (sculpt.hpp)
         int32_t legs{};    // legs found for Auto Ground
         bool lifted{};     // Auto Ground, mesh without legs: took the body's lift (false = follows the body already)
     };
@@ -90,6 +94,7 @@ namespace uuepbs
         size_t morphs{};
         bool active{};
         std::string identity; // who the NPC is across reloads ("Anca"); empty = not remembered
+        std::string engine;   // engine object name of the character (BP_Guard_C_3); empty when not known
     };
 
     // An NPC's sliders as they should be remembered (one file per identity).
@@ -132,10 +137,15 @@ namespace uuepbs
 
         // ---- characters --------------------------------------------------------
         // The character the window edits. Rebuilds the skeleton view when it changes.
-        void set_active_actor(const std::string& key, const std::string& label, const std::string& pick_id);
+        // engine: the character's engine object name, kept next to the (readable) label when not empty.
+        void set_active_actor(const std::string& key, const std::string& label, const std::string& pick_id, const std::string& engine = {});
         std::string active_actor() const;
         // Characters with any bone or morph edits (the active one included), active first.
         std::vector<ActorSummary> edited_actors() const;
+        // Character Scale > Camera of every character that wants the game's camera moved.
+        std::vector<std::pair<std::string, CameraWish>> camera_wishes() const;
+        // Character Scale > Height of every character whose Height is not 1 (Lua sizes its collision capsule).
+        std::vector<std::pair<std::string, double>> height_wishes() const;
         // Drops a character's edits (its meshes are released once Lua hears of it).
         // forget_memory: also forget the remembered identity (Release / reset all). A character that
         // merely despawned keeps its memory, so its sliders come back when it appears again.
@@ -153,6 +163,10 @@ namespace uuepbs
         void replace_edits_of(const std::string& key, EditBook book);
         MorphBook morphs_of(const std::string& key) const;
         void replace_morphs_of(const std::string& key, MorphBook book);
+        // Characters whose sliders scale bones right now (on, not showing the original). Lua switches
+        // off mesh deformers on their meshes while so: a dual quaternion skinning deformer (Afterparty's
+        // Daz characters) ignores bone scale and tears the mesh apart (Scripts/main.lua, "Mesh deformers").
+        std::vector<std::string> scaling_actors() const;
         // Every character's morph weights (what Lua applies), keyed by actor key.
         std::map<std::string, MorphBook> all_morphs(uint64_t* revision = nullptr) const;
 
@@ -173,8 +187,29 @@ namespace uuepbs
         // One line per tracked mesh of edited characters with what Auto Ground saw and did (diagnostics).
         std::string ground_report() const;
 
+        // Hand Contact (see HandOptions in sculpt.hpp), for every character's main mesh. `anims`: when not empty,
+        // only while the character plays an animation whose name contains one of these (case-insensitive).
+        void set_hands(const HandOptions& options, std::vector<std::string> anims);
+        HandOptions hands() const;
+        std::vector<std::string> hand_anims() const;
+        // What each character plays right now (reported by Lua: montage, else the single-node animation), by actor key.
+        void set_playing(std::map<std::string, std::string> playing);
+        // One line per edited character's main mesh: what it plays and where each hand rests (diagnostics).
+        std::string hands_report() const;
+        // The window's live readout for one character: what it plays, then one line per hand.
+        std::vector<std::string> hand_status(const std::string& key) const;
+
         bool enabled() const { return m_enabled.load(std::memory_order_relaxed); }
         void set_enabled(bool on); // also bumps the morph revision (morphs are sent to Lua only while enabled)
+
+        // ---- before/after compare (core/compare.hpp) ------------------------------
+        // While it shows the original, every mesh gets the game's own pose and morphs; no edit is lost.
+        bool comparing() const { return m_compare.showing_original(); }
+        const CompareSwitch& compare() const { return m_compare; }
+        void set_compare(bool show_original); // the window's Before / After switch (latched)
+        void set_compare_held(bool down);     // the hold-to-compare hotkey
+        // Sliders reach the game: switched on and not comparing. The pose hook and the morphs sent to Lua use this.
+        bool applying() const { return enabled() && !comparing(); }
 
         // ---- morph targets (weights applied by the Lua script) ------------------
         MorphBook morphs(uint64_t* revision = nullptr) const;
@@ -208,6 +243,7 @@ namespace uuepbs
             std::string label;
             std::string pick_id;
             std::string identity;
+            std::string engine; // engine object name (empty when not known)
             EditBook book;
             uint64_t revision{}; // value of m_edit_revision at its last change (unique across actors)
             double ground_lift{}; // Auto Ground: lift the character's leg mesh measured last (shared with its other meshes)
@@ -239,6 +275,10 @@ namespace uuepbs
             uint64_t frames{};
             std::vector<Xform> reference; // parent-relative reference pose, when Lua could read it
             RigSculptor sculptor;
+            // Body groups of this rig's own skeleton, for the Character Scale sliders (resolved on demand).
+            BodyMap body;
+            uint64_t body_revision{0};  // BodyMapSource revision `body` was resolved from (0 = never)
+            uint64_t bound_body{0};     // BodyMapSource revision the sculptor was last bound with
             std::vector<Xform> scratch; // float poses are converted here
             std::vector<int32_t> inputs; // bones converted for the current frame
             std::string probe_name;      // Auto Ground: actor hip bone name looked up last, and its index here
@@ -258,6 +298,7 @@ namespace uuepbs
         Actor& actor_locked(const std::string& key);
         Actor& active_locked() { return actor_locked(m_active); }
         void prune_actors_locked();
+        void end_compare_for_edit(); // a slider moved from the window: switch back to "After"
 
         mutable std::mutex m_lock;
         std::vector<std::unique_ptr<Rig>> m_rigs;
@@ -271,7 +312,12 @@ namespace uuepbs
         EditBook m_empty_book;
         std::atomic<uint64_t> m_edit_revision{1};
         std::atomic<bool> m_enabled{true};
+        CompareSwitch m_compare;
         GroundOptions m_ground{}; // guarded by m_lock
+        HandOptions m_hands{};    // guarded by m_lock
+        std::vector<std::string> m_hand_anims;          // folded name parts, guarded by m_lock
+        std::map<std::string, std::string> m_playing;   // actor key -> animation playing, guarded by m_lock
+        bool hands_wanted_locked(const Rig& rig) const;
 
         SkeletonView m_view;
         std::atomic<uint64_t> m_skeleton_revision{0};

@@ -532,6 +532,96 @@ namespace uuepbs
                 map.groups.push_back(std::move(r));
             }
         }
+        // 4b) No nipple bones by name (Daz Genesis with a custom breast rig: Breast-Root > lBreastOuter > lBreastInner >
+        //     lBreastCenter): the bones at the very end of the breast chains are the tips. A tip is a bone with no
+        //     children at least two bones below a Breasts bone, and there must be one per side.
+        const auto titled = [&](std::string_view title) {
+            return std::find_if(map.groups.begin(), map.groups.end(), [&](const GroupBones& gb) { return fold_case(gb.group.title) == fold_case(title); });
+        };
+        const auto breasts = titled("Breasts");
+        const auto nipple_def = std::find_if(groups.begin(), groups.end(), [](const BodyGroup& g) { return fold_case(g.title) == "nipples"; });
+        const bool nipples_by_user = std::find(user_titles.begin(), user_titles.end(), "nipples") != user_titles.end(); // incl. [] = hidden
+        if (have_parents && breasts != map.groups.end() && titled("Nipples") == map.groups.end() && nipple_def != groups.end() && !nipples_by_user)
+        {
+            std::vector<uint8_t> has_child(n, 0);
+            for (size_t i = 0; i < n; ++i)
+            {
+                if (parents[i] >= 0 && static_cast<size_t>(parents[i]) < n)
+                {
+                    has_child[static_cast<size_t>(parents[i])] = 1;
+                }
+            }
+            std::vector<size_t> tips;
+            for (size_t i = 0; i < n; ++i)
+            {
+                if (has_child[i] || taken[i])
+                {
+                    continue;
+                }
+                // how far below the nearest Breasts bone (0 = not below one)
+                int depth = 0;
+                bool below = false;
+                for (int32_t p = parents[i]; p >= 0 && static_cast<size_t>(p) < n && !below; p = parents[static_cast<size_t>(p)])
+                {
+                    ++depth;
+                    below = std::find(breasts->bones.begin(), breasts->bones.end(), names[static_cast<size_t>(p)]) != breasts->bones.end();
+                }
+                if (below && depth >= 2)
+                {
+                    tips.push_back(i);
+                }
+            }
+            if (tips.size() == 2)
+            {
+                GroupBones nip;
+                nip.group = *nipple_def;
+                for (size_t i : tips)
+                {
+                    taken[i] = 1;
+                    nip.bones.push_back(names[i]);
+                }
+                map.groups.insert(std::next(breasts), std::move(nip));
+            }
+        }
+
+        // 5) Anatomy parts (genitals...) among the bones no group took.
+        map.parts = resolve_bone_parts(names, &dict.rules, &taken);
+
+        // 5b) A penis chain without a glans bone by name (Afterparty: shaftRoot > shaft1 ... shaft7): its last bone,
+        //     the one at the tip with nothing below it, is the glans.
+        const auto part = [&](std::string_view id) {
+            return std::find_if(map.parts.begin(), map.parts.end(), [&](const PartBones& pb) { return pb.id == id; });
+        };
+        const auto penis = part("penis");
+        if (have_parents && penis != map.parts.end() && part("glans") == map.parts.end() && penis->bones.size() >= 3)
+        {
+            std::vector<int32_t> index;
+            for (const std::string& b : penis->bones)
+            {
+                const auto it = std::find(names.begin(), names.end(), b);
+                index.push_back(it == names.end() ? -1 : static_cast<int32_t>(it - names.begin()));
+            }
+            std::vector<size_t> ends; // penis bones nothing hangs from
+            for (size_t k = 0; k < index.size(); ++k)
+            {
+                const int32_t i = index[k];
+                const bool leaf = i >= 0 && std::none_of(parents.begin(), parents.end(), [&](int32_t p) { return p == i; });
+                // and a chain: its parent is a penis bone too
+                const bool chained = i >= 0 && std::find(index.begin(), index.end(), parents[static_cast<size_t>(i)]) != index.end();
+                if (leaf && chained)
+                {
+                    ends.push_back(k);
+                }
+            }
+            if (ends.size() == 1)
+            {
+                PartBones glans;
+                glans.id = "glans";
+                glans.bones.push_back(penis->bones[ends.front()]);
+                penis->bones.erase(penis->bones.begin() + static_cast<std::ptrdiff_t>(ends.front()));
+                map.parts.insert(map.parts.begin(), std::move(glans));
+            }
+        }
         return map;
     }
 

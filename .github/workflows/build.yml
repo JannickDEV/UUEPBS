@@ -1,0 +1,106 @@
+name: Build
+
+# Builds the real UUEPBS.dll (MSVC, Release, same settings as a local
+# Visual Studio build) and packages it with the Lua scripts as a ready-to-drop
+# mod folder. The host-side tests run next to it on Linux.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  IMGUI_TAG: v1.92.1
+
+jobs:
+  dll:
+    name: UUEPBS.dll (MSVC x64 Release)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Get Dear ImGui ${{ env.IMGUI_TAG }}
+        shell: bash
+        run: git clone --depth 1 --branch "$IMGUI_TAG" https://github.com/ocornut/imgui.git "$RUNNER_TEMP/imgui"
+
+      - name: Configure
+        shell: bash
+        run: cmake -S source/UUEPBS -B build -A x64 -DIMGUI_DIR="$RUNNER_TEMP/imgui"
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
+
+      - name: Assemble mod folder
+        shell: bash
+        run: |
+          set -euo pipefail
+          # On a PR the checkout is GitHub's test merge; name the build after the PR's own commit.
+          sha="${{ github.event.pull_request.head.sha || github.sha }}"
+          short=${sha:0:7}
+          echo "SHORT_SHA=$short" >> "$GITHUB_ENV"
+          mkdir -p dist
+          cp -r mod/UUEPBS dist/UUEPBS
+          mkdir -p dist/UUEPBS/native
+          cp build/Release/UUEPBS.dll dist/UUEPBS/native/UUEPBS.dll
+          cat > dist/UUEPBS/BUILD.txt <<TXT
+          UUEPBS build ${short}
+          Commit: ${sha}
+          Ref: ${GITHUB_REF}
+          Built: $(date -u +%Y-%m-%dT%H:%M:%SZ) by GitHub Actions (MSVC x64 Release, Dear ImGui ${IMGUI_TAG})
+
+          Install: copy the UUEPBS folder into <Game>\<Project>\Binaries\Win64\ue4ss\Mods
+          TXT
+          ls -la dist/UUEPBS dist/UUEPBS/native
+
+      - name: Upload mod (UUEPBS folder with native/UUEPBS.dll)
+        uses: actions/upload-artifact@v4
+        with:
+          name: UUEPBS-mod-${{ env.SHORT_SHA }}
+          path: dist/
+          if-no-files-found: error
+
+      - name: Upload bare DLL
+        uses: actions/upload-artifact@v4
+        with:
+          name: UUEPBS-dll-${{ env.SHORT_SHA }}
+          path: build/Release/UUEPBS.dll
+          if-no-files-found: error
+
+  host-tests:
+    name: Host tests, Lua harness, ui_preview
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq g++ lua5.4 fonts-liberation
+          sudo update-alternatives --install /usr/bin/lua lua /usr/bin/lua5.4 100 || true
+          g++ --version | head -1
+          lua -v
+
+      - name: Get Dear ImGui ${{ env.IMGUI_TAG }}
+        run: git clone --depth 1 --branch "$IMGUI_TAG" https://github.com/ocornut/imgui.git "$RUNNER_TEMP/imgui"
+
+      - name: Run host tests
+        env:
+          IMGUI: ${{ runner.temp }}/imgui
+          OUT: ${{ runner.temp }}/out
+        run: .github/scripts/host-tests.sh
+
+      - name: Upload UI previews
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-preview
+          path: ${{ runner.temp }}/out/preview/*.ppm
+          if-no-files-found: ignore
+          retention-days: 14

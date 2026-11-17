@@ -1,4 +1,5 @@
 #include "bridge.hpp"
+#include "camera.hpp"
 
 #include "sculpt.hpp"
 
@@ -116,19 +117,22 @@ namespace uuepbs::bridge
             else if (kind == "target" && f.size() >= 3)
             {
                 state.target = {std::string(f[1]), std::string(f[2]), f.size() >= 4 && !f[3].empty() ? std::string(f[3]) : std::string("player"),
-                                f.size() >= 5 ? std::string(f[4]) : std::string()};
+                                f.size() >= 5 ? std::string(f[4]) : std::string(), f.size() >= 6 ? std::string(f[5]) : std::string()};
             }
             else if (kind == "cand" && f.size() >= 3)
             {
-                state.candidates.push_back({std::string(f[1]), std::string(f[2]), f.size() >= 4 && !f[3].empty() ? std::string(f[3]) : std::string(f[1]), {}});
+                state.candidates.push_back({std::string(f[1]), std::string(f[2]), f.size() >= 4 && !f[3].empty() ? std::string(f[3]) : std::string(f[1]), {},
+                                            f.size() >= 5 ? std::string(f[4]) : std::string()});
             }
             else if (kind == "npc" && f.size() >= 3 && !f[1].empty() && !f[2].empty())
             {
-                state.npcs.push_back({std::string(f[1]), std::string(f[2]), f.size() >= 4 ? std::string(f[3]) : std::string(f[2])});
+                state.npcs.push_back({std::string(f[1]), std::string(f[2]), f.size() >= 4 ? std::string(f[3]) : std::string(f[2]),
+                                      f.size() >= 5 ? std::string(f[4]) : std::string()});
             }
             else if (kind == "party" && f.size() >= 3 && !f[1].empty() && !f[2].empty())
             {
-                state.party.push_back({std::string(f[1]), std::string(f[2]), f.size() >= 4 ? std::string(f[3]) : std::string(f[1])});
+                state.party.push_back({std::string(f[1]), std::string(f[2]), f.size() >= 4 ? std::string(f[3]) : std::string(f[1]),
+                                       f.size() >= 5 ? std::string(f[4]) : std::string()});
             }
             else if (kind == "switch" && f.size() >= 2 && !f[1].empty())
             {
@@ -146,6 +150,8 @@ namespace uuepbs::bridge
                 r.primary = f[3] == "1";
                 r.owner = f.size() >= 5 ? std::string(f[4]) : std::string();
                 r.actor = f.size() >= 6 && !f[5].empty() ? std::string(f[5]) : std::string("player");
+                r.engine = f.size() >= 7 ? std::string(f[6]) : std::string();
+                r.owner_engine = f.size() >= 8 ? std::string(f[7]) : std::string();
                 state.rigs.push_back(std::move(r));
                 rig = &state.rigs.back();
             }
@@ -219,6 +225,14 @@ namespace uuepbs::bridge
                     }
                 }
             }
+            else if (kind == "play" && f.size() >= 3 && !f[1].empty())
+            {
+                state.playing[std::string(f[1])] = std::string(f[2]);
+            }
+            else if (kind == "looks" && f.size() >= 3 && !f[1].empty())
+            {
+                state.looks[std::string(f[1])] = std::string(f[2]);
+            }
             else if (kind == "cmd" && f.size() >= 3)
             {
                 Command c;
@@ -284,6 +298,9 @@ namespace uuepbs::bridge
         out += "pick\t" + std::to_string(s.pick) + "\t" + clean_field(s.pick_id) + "\n";
         out += "refresh\t" + std::to_string(s.refresh) + "\n";
         out += "relist\t" + std::to_string(s.relist) + "\n";
+        out += "groundui\t" + std::to_string(s.ground) + "\t" + (s.ground_on ? "1" : "0") + "\n";
+        out += "collui\t" + std::to_string(s.collision) + "\t" + (s.collision_on ? "1" : "0") + "\n";
+        out += "physicsui\t" + std::to_string(s.physics) + "\t" + clean_field(s.physics_mode) + "\n";
         out += "hook\t" + clean_field(s.hook_state) + "\t" + clean_field(s.hook_text) + "\n";
         out += std::string("ui\t") + (s.window_open ? "1" : "0") + "\n";
         for (const Reply& r : s.replies)
@@ -294,9 +311,23 @@ namespace uuepbs::bridge
         {
             out += "keep\t" + clean_field(key) + "\t" + clean_field(label) + "\n";
         }
+        for (const std::string& key : s.scaled)
+        {
+            out += "scaled\t" + clean_field(key) + "\n";
+        }
         for (const std::string& id : s.remembered)
         {
             out += "remember\t" + clean_field(id) + "\n";
+        }
+        for (const auto& [key, wish] : s.cameras)
+        {
+            out += "cam\t" + clean_field(key) + "\t" + format_camera_fields(wish) + "\n";
+        }
+        for (const auto& [key, height] : s.heights)
+        {
+            char buf[32];
+            std::snprintf(buf, sizeof(buf), "%.4f", height);
+            out += "height\t" + clean_field(key) + "\t" + buf + "\n";
         }
         out += "morph\t" + std::to_string(s.morph_revision) + "\n";
         for (const DllState::Morph& m : s.morphs)

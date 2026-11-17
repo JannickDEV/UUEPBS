@@ -8,10 +8,12 @@
 // names. See the "help" text inside BoneDictionary.json for the pattern rules.
 #pragma once
 
+#include "bone_parts.hpp"
 #include "rig_names.hpp"
 #include "sculpt.hpp"
 
 #include <cstdint>
+#include <map>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -73,10 +75,25 @@ namespace uuepbs
         bool custom{false};             // came from the game profile
     };
 
+    // Which signed local axis of a bone points up / forward / outward (measure_long_axes).
+    struct BoneFrame
+    {
+        int8_t up{0};
+        int8_t forward{0};
+        int8_t out{0};
+    };
+
     struct BodyMap
     {
         std::vector<GroupBones> groups;
         std::string style; // detected rig style, empty = generic
+        // Anatomy bones no group claimed, for the Body tab's bone-built sliders (bone_parts.hpp).
+        std::vector<PartBones> parts;
+        // Folded bone name -> local axis (0 X, 1 Y, 2 Z) that runs along the bone, measured from a
+        // pose by measure_long_axes() (proportions.hpp). Bones not listed use X.
+        std::map<std::string, uint8_t> long_axis;
+        std::map<std::string, BoneFrame> frames; // folded bone name -> directions
+        double height{0.0};                       // measured character height (0 = not measured)
     };
 
     // Matches the groups against a skeleton; groups with no bones are left out.

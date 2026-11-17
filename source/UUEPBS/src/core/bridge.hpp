@@ -8,16 +8,21 @@
 //   bridge_in.txt   written by Lua, read by the DLL
 //     UBS1 <session> <seq>
 //     setup <tab> key=value <tab> key=value ...
-//     target <tab> <id> <tab> <label> <tab> <actor key> <tab> <identity>
-//     cand <tab> <id> <tab> <label> <tab> <actor key>  (one per pickable character)
-//     rig <tab> <address hex> <tab> <label> <tab> <primary 0/1> <tab> <owner> <tab> <actor key>
+//     target <tab> <id> <tab> <label> <tab> <actor key> <tab> <identity> <tab> <engine name>
+//     cand <tab> <id> <tab> <label> <tab> <actor key> <tab> <engine name>  (one per pickable character)
+//     rig <tab> <address hex> <tab> <label> <tab> <primary 0/1> <tab> <owner> <tab> <actor key> <tab> <engine name> <tab> <owner engine name>
 //     gone <tab> <actor key>                            (a kept character no longer exists)
-//     npc <tab> <actor key> <tab> <identity> <tab> <label>  (a remembered character is loaded)
+//     npc <tab> <actor key> <tab> <identity> <tab> <label> <tab> <engine name>  (a remembered character is loaded)
+//     party <tab> <actor key> <tab> <face mesh> <tab> <label> <tab> <engine name>
+//   Labels are what the window shows (readable names since 2.8: "Eve (player)"); engine names are the
+//   object names (BP_Eve_C_0, SkeletalMeshComponent_2147482611). Scripts before 2.8 send no engine name.
 //     bones <tab> <name> <tab> <name> ...
 //     parents <tab> <index> <tab> <index> ...
 //     ref <tab> <10 numbers per bone, space separated>   (optional: qx qy qz qw tx ty tz sx sy sz)
 //     morphs <tab> <name> <tab> <name> ...             (optional: the rig's morph targets)
 //     manim <tab> <name> <tab> <name> ...              (optional: morphs something else keeps setting)
+//     looks <tab> <actor key> <tab> <text>             (optional: what the Looks tab changed on that character)
+//     play <tab> <actor key> <tab> <animation name>    (optional: the montage, else the single animation, it plays)
 //     cmd <tab> <id> <tab> <verb> <tab> <argument>
 //     #end <seq>
 //
@@ -32,9 +37,14 @@
 //     ui <tab> <1 while the slider window is open, else 0>
 //     reply <tab> <command id> <tab> <text, newlines as \n>
 //     keep <tab> <actor key> <tab> <label>              (characters with edits: Lua keeps their meshes)
+//     scaled <tab> <actor key>                          (its sliders scale bones: Lua turns its mesh deformers off)
 //     remember <tab> <identity>                         (NPCs with saved sliders: Lua looks out for them)
 //     morph <tab> <revision>                            (then one mw line per morph to override)
 //     mw <tab> <name> <tab> <weight> <tab> <actor key>
+//     cam <tab> <actor key> <tab> <lift cm> <tab> <distance> <tab> <follow 0/1> <tab> <height>
+//                                                       (Character Scale > Camera; none = the game's own camera)
+//     collui <tab> <counter> <tab> <on 0/1>             (the window's "Collision follows Height" switch was clicked)
+//     height <tab> <actor key> <tab> <height>           (Character Scale > Height, != 1; Lua sizes its collision capsule)
 //
 // Actor keys: "player" for the default character (the controlled pawn or the profile's Target),
 // otherwise the actor's address in hex. "primary" is the main mesh of that character.
@@ -44,6 +54,7 @@
 // DLL only accepts it when the header and the trailer carry the same sequence number.
 #pragma once
 
+#include "camera.hpp"
 #include "xform.hpp"
 
 #include <cstdint>
@@ -58,9 +69,11 @@ namespace uuepbs::bridge
     struct RigInfo
     {
         uintptr_t address{};
-        std::string label;
-        std::string owner;
+        std::string label;           // shown in the window (readable name)
+        std::string owner;           // the character's label
         std::string actor{"player"}; // key of the character this mesh belongs to
+        std::string engine;          // the component's engine name (empty from older scripts)
+        std::string owner_engine;    // the character's engine name (empty from older scripts)
         bool primary{};
         std::vector<std::string> names;
         std::vector<int32_t> parents;
@@ -74,6 +87,7 @@ namespace uuepbs::bridge
         std::string label;
         std::string key{"player"}; // actor key
         std::string identity;      // NPC identity across reloads (target line only)
+        std::string engine;        // engine object name (empty from older scripts)
     };
 
     struct NpcSighting
@@ -81,6 +95,7 @@ namespace uuepbs::bridge
         std::string key;
         std::string identity;
         std::string label;
+        std::string engine; // engine object name (empty from older scripts)
     };
 
     struct Command
@@ -104,6 +119,8 @@ namespace uuepbs::bridge
         std::vector<NpcSighting> npcs;            // remembered characters Lua found
         std::string switch_who;                   // Character Switch Watcher: who the player character is (its face mesh)
         std::vector<NpcSighting> party;           // ... and NPCs that are a party member (key, who = face mesh, label)
+        std::map<std::string, std::string> looks; // actor key -> what Looks changed there (looks.hpp)
+        std::map<std::string, std::string> playing; // actor key -> animation it plays (Hand Contact)
 
         std::string setting(const std::string& key, const std::string& fallback = {}) const
         {
@@ -131,6 +148,12 @@ namespace uuepbs::bridge
         std::string pick_id;
         uint64_t refresh{};
         uint64_t relist{}; // re-sort the character list from what Lua already knows (no object search)
+        uint64_t ground{};     // Auto Ground switch in the window: bumped on each click ...
+        bool ground_on{};      // ... with the wished state
+        uint64_t collision{};  // "Collision follows Height" switch in the window: bumped on each click ...
+        bool collision_on{};   // ... with the wished state
+        uint64_t physics{};       // Jiggle physics choice in the window: bumped on each click ...
+        std::string physics_mode; // ... with the wished mode (follow / off / keep)
         std::string hook_state{"waiting"};
         std::string hook_text;
         bool window_open{};
@@ -145,6 +168,9 @@ namespace uuepbs::bridge
         std::vector<Morph> morphs; // weights Lua should apply (absent = game's own value)
         std::vector<std::pair<std::string, std::string>> keeps; // characters with edits: key, label
         std::vector<std::string> remembered;                    // identities with saved sliders
+        std::vector<std::string> scaled;                        // characters whose sliders scale bones right now
+        std::vector<std::pair<std::string, CameraWish>> cameras; // Character Scale > Camera, per actor key
+        std::vector<std::pair<std::string, double>> heights;    // Character Scale > Height (!= 1), per actor key
     };
 
     std::string format_dll_state(const DllState& state);

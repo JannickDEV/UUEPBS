@@ -1,0 +1,15 @@
+{
+  "Project": "AfterpartyGame",
+  "Game": "Afterparty",
+  "Target": "",
+  "TargetClassPath": "",
+  "PrimaryComponent": "",
+  "IncludeComponents": [],
+  "ExcludeComponents": [],
+  "SameSkeletonOnly": true,
+  "BodyGroups": {},
+  "MorphGroups": {},
+  "ExcludeMorphs": [],
+  "Hook": { "Slot": 374, "Buffers": "0x600", "ReadIndex": "0x648" },
+  "_help": "Target: actor class to edit (empty = the pawn you control). PrimaryComponent: mesh whose bones are listed (empty = the Character's Mesh). Include/ExcludeComponents: mesh names. SameSkeletonOnly: also edit other meshes on the actor that share the primary mesh's skeleton. BodyGroups: remap Body tab sliders to this game's bones (names from Advanced > Bones, * wildcards allowed; [] hides a slider). MorphGroups: Body tab sliders for morph targets, e.g. {\"Breasts\": [\"PBMBreasts*\"]}. ExcludeMorphs: morph names to hide. Hook: pose hook values for this game's exe (UE 5.7, GOG build, found by the hook finder); delete the line if a game update breaks it."
+}

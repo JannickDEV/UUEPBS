@@ -1,10 +1,11 @@
 // Stand-in for the DLL's side of the file bridge, built from the real protocol code.
-//   bridge_peer <dir> <rescan> <pick> <pick_id> <refresh> [dll_session] [window open 0/1] [morphs "A=0.5,B=1@key" or -] [keep "key,key" or -] [remember "id,id" or -] [relist]
+//   bridge_peer <dir> <rescan> <pick> <pick_id> <refresh> [dll_session] [window open 0/1] [morphs "A=0.5,B=1@key" or -] [keep "key,key" or -] [remember "id,id" or -] [relist] [ground "clicks:0|1"]
 // Reads <dir>/bridge_in.txt, prints what it understood, answers every command and
 // writes <dir>/bridge_out.txt.
 #include "core/bridge.hpp"
 #include <algorithm>
 #include <cstdio>
+#include <cstdlib>
 #include <fstream>
 #include <sstream>
 using namespace uuepbs::bridge;
@@ -19,6 +20,8 @@ int main(int argc, char** argv)
     if (!st) { std::printf("invalid %s\n", why.c_str()); return 1; }
     std::printf("session %s seq %lld\n", st->session.c_str(), (long long)st->seq);
     std::printf("presets %s\nkey %s\ngame %s\nengine %s\n", st->setting("presets").c_str(), st->setting("key").c_str(), st->setting("game").c_str(), st->setting("engine").c_str());
+    std::printf("ground %s ui %s\n", st->setting("ground").c_str(), st->setting("ground_ui").c_str());
+    std::printf("physics %s [%s]\n", st->setting("physics_ui").c_str(), st->setting("physics_info").c_str());
     std::printf("target %s %s key=%s\n", st->target.id.c_str(), st->target.label.c_str(), st->target.key.c_str());
     std::printf("candidates %zu\n", st->candidates.size());
     for (auto& c : st->candidates) std::printf("cand %s key=%s\n", c.label.c_str(), c.key.c_str());
@@ -35,6 +38,15 @@ int main(int argc, char** argv)
             std::printf("\n");
         }
     }
+    // engine names (2.8) on lines of their own, only when asked for (older checks match whole lines)
+    if (std::getenv("UUEPBS_PEER_ENGINE"))
+    {
+        std::printf("target_engine %s\n", st->target.engine.c_str());
+        for (auto& c : st->candidates) std::printf("cand_engine %s %s\n", c.key.c_str(), c.engine.c_str());
+        for (auto& n : st->npcs) std::printf("npc_engine %s %s\n", n.key.c_str(), n.engine.c_str());
+        for (auto& p : st->party) std::printf("party_engine %s %s\n", p.key.c_str(), p.engine.c_str());
+        for (auto& r : st->rigs) std::printf("rig_engine %s | %s | %s | %s\n", r.label.c_str(), r.engine.c_str(), r.owner.c_str(), r.owner_engine.c_str());
+    }
     if (!st->switch_who.empty()) std::printf("switch %s\n", st->switch_who.c_str());
     for (auto& p : st->party) std::printf("party %s %s %s\n", p.key.c_str(), p.identity.c_str(), p.label.c_str());
     if (!st->animated_morphs.empty())
@@ -49,6 +61,18 @@ int main(int argc, char** argv)
     out.rescan = std::stoull(argv[2]); out.pick = std::stoull(argv[3]); out.pick_id = argv[4]; out.refresh = std::stoull(argv[5]);
     out.window_open = argc > 7 && std::string(argv[7]) == "1";
     out.relist = argc > 11 ? std::stoull(argv[11]) : 0;
+    if (argc > 12) // Auto Ground switch "<clicks>:<0|1>"
+    {
+        const std::string g = argv[12];
+        out.ground = std::stoull(g.substr(0, g.find(':')));
+        out.ground_on = g.size() > 2 && g.back() == '1';
+    }
+    if (const char* p = std::getenv("UUEPBS_PEER_PHYSICS")) // Jiggle physics choice "<clicks>:<mode>"
+    {
+        const std::string g = p;
+        out.physics = std::stoull(g.substr(0, g.find(':')));
+        out.physics_mode = g.substr(g.find(':') + 1);
+    }
     out.hook_state = "live"; out.hook_text = "pose hook live on vtable 0x77ED320 slot 374";
     if (argc > 8 && std::string(argv[8]) != "-")
     {

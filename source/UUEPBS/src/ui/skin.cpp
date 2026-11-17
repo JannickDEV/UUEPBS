@@ -58,42 +58,49 @@ namespace uuepbs::ui
         };
 
         // The built-in look. Keep in step with the README in the skins folder.
+        // Built-in look (2.7): flat slate-navy, one blue accent. Skins override any of these.
         const ColorSlot kColorSlots[] = {
-            {"accent", -1, {0.91f, 0.44f, 0.66f, 1.0f}, nullptr, false},
-            {"accent_dim", -1, {0.60f, 0.28f, 0.44f, 1.0f}, nullptr, false},
-            {"good", -1, {0.45f, 0.85f, 0.55f, 1.0f}, nullptr, false},
-            {"warn", -1, {0.98f, 0.72f, 0.30f, 1.0f}, nullptr, false},
-            {"muted", -1, {0.62f, 0.62f, 0.68f, 1.0f}, nullptr, false},
-            {"title", -1, {}, "accent", false},
-            {"text", ImGuiCol_Text, {1.0f, 1.0f, 1.0f, 1.0f}, nullptr, false},
-            {"text_disabled", ImGuiCol_TextDisabled, {0.50f, 0.50f, 0.50f, 1.0f}, nullptr, false},
-            {"window", ImGuiCol_WindowBg, {0.085f, 0.085f, 0.105f, 1.0f}, nullptr, false},
-            {"panel", ImGuiCol_ChildBg, {0.105f, 0.105f, 0.130f, 1.0f}, nullptr, false},
-            {"popup", ImGuiCol_PopupBg, {0.110f, 0.110f, 0.140f, 0.98f}, nullptr, false},
-            {"border", ImGuiCol_Border, {0.22f, 0.22f, 0.28f, 1.0f}, nullptr, false},
-            {"frame", ImGuiCol_FrameBg, {0.160f, 0.160f, 0.200f, 1.0f}, nullptr, false},
-            {"frame_hover", ImGuiCol_FrameBgHovered, {0.210f, 0.200f, 0.260f, 1.0f}, nullptr, false},
-            {"frame_active", ImGuiCol_FrameBgActive, {0.250f, 0.220f, 0.300f, 1.0f}, nullptr, false},
+            {"accent", -1, {0.306f, 0.639f, 0.812f, 1.00f}, nullptr, false},
+            {"accent_dim", -1, {0.122f, 0.373f, 0.510f, 1.00f}, nullptr, false},
+            {"good", -1, {0.435f, 0.812f, 0.592f, 1.00f}, nullptr, false},
+            {"warn", -1, {0.878f, 0.690f, 0.376f, 1.00f}, nullptr, false},
+            {"muted", -1, {0.498f, 0.596f, 0.671f, 1.00f}, nullptr, false},
+            {"title", -1, {0.624f, 0.824f, 0.918f, 1.00f}, nullptr, false},
+            {"text", ImGuiCol_Text, {0.902f, 0.933f, 0.957f, 1.00f}, nullptr, false},
+            {"text_disabled", ImGuiCol_TextDisabled, {0.337f, 0.439f, 0.498f, 1.00f}, nullptr, false},
+            {"window", ImGuiCol_WindowBg, {0.043f, 0.086f, 0.122f, 1.00f}, nullptr, false},
+            {"panel", ImGuiCol_ChildBg, {0.063f, 0.125f, 0.173f, 1.00f}, nullptr, false},
+            {"popup", ImGuiCol_PopupBg, {0.055f, 0.110f, 0.153f, 0.99f}, nullptr, false},
+            {"border", ImGuiCol_Border, {0.141f, 0.235f, 0.310f, 1.00f}, nullptr, false},
+            {"frame", ImGuiCol_FrameBg, {0.039f, 0.082f, 0.125f, 1.00f}, nullptr, false},
+            {"frame_hover", ImGuiCol_FrameBgHovered, {0.071f, 0.149f, 0.204f, 1.00f}, nullptr, false},
+            {"frame_active", ImGuiCol_FrameBgActive, {0.086f, 0.188f, 0.275f, 1.00f}, nullptr, false},
             {"title_bg", ImGuiCol_TitleBg, {}, "window", false},
             {"title_bg_active", ImGuiCol_TitleBgActive, {}, "window", false},
-            {"slider_grab", ImGuiCol_SliderGrab, {}, "accent", false},
-            {"slider_grab_active", ImGuiCol_SliderGrabActive, {1.0f, 0.60f, 0.78f, 1.0f}, nullptr, false},
+            {"slider_grab", ImGuiCol_SliderGrab, {0.847f, 0.902f, 0.941f, 1.00f}, nullptr, false},
+            {"slider_grab_active", ImGuiCol_SliderGrabActive, {1.000f, 1.000f, 1.000f, 1.00f}, nullptr, false},
+            {"track", -1, {0.165f, 0.267f, 0.341f, 1.00f}, nullptr, false},
+            {"section", ImGuiCol_TableHeaderBg, {0.090f, 0.169f, 0.227f, 1.00f}, nullptr, false},
             {"check", ImGuiCol_CheckMark, {}, "accent", false},
-            {"button", ImGuiCol_Button, {0.20f, 0.19f, 0.25f, 1.0f}, nullptr, false},
-            {"button_hover", ImGuiCol_ButtonHovered, {}, "accent_dim", false},
-            {"button_active", ImGuiCol_ButtonActive, {}, "accent", false},
-            {"header", ImGuiCol_Header, {0.26f, 0.18f, 0.25f, 1.0f}, nullptr, false},
-            {"header_hover", ImGuiCol_HeaderHovered, {0.36f, 0.22f, 0.32f, 1.0f}, nullptr, false},
+            {"button", ImGuiCol_Button, {0.082f, 0.188f, 0.247f, 1.00f}, nullptr, false},
+            {"button_hover", ImGuiCol_ButtonHovered, {0.114f, 0.290f, 0.388f, 1.00f}, nullptr, false},
+            {"button_active", ImGuiCol_ButtonActive, {}, "accent_dim", false},
+            {"header", ImGuiCol_Header, {}, "accent_dim", false},
+            {"header_hover", ImGuiCol_HeaderHovered, {0.086f, 0.204f, 0.278f, 1.00f}, nullptr, false},
             {"header_active", ImGuiCol_HeaderActive, {}, "accent_dim", false},
-            {"tab", ImGuiCol_Tab, {0.14f, 0.14f, 0.18f, 1.0f}, nullptr, false},
-            {"tab_hover", ImGuiCol_TabHovered, {}, "accent_dim", false},
-            {"tab_active", ImGuiCol_TabSelected, {0.34f, 0.20f, 0.30f, 1.0f}, nullptr, false},
-            {"separator", ImGuiCol_Separator, {0.24f, 0.24f, 0.30f, 1.0f}, nullptr, false},
-            {"text_selected", ImGuiCol_TextSelectedBg, {0.60f, 0.28f, 0.44f, 0.45f}, nullptr, false},
-            {"scrollbar_bg", ImGuiCol_ScrollbarBg, {}, nullptr, true},
-            {"scrollbar_grab", ImGuiCol_ScrollbarGrab, {}, nullptr, true},
-            {"scrollbar_grab_hover", ImGuiCol_ScrollbarGrabHovered, {}, nullptr, true},
-            {"scrollbar_grab_active", ImGuiCol_ScrollbarGrabActive, {}, nullptr, true},
+            {"tab", ImGuiCol_Tab, {0.043f, 0.086f, 0.122f, 0.00f}, nullptr, false},
+            {"tab_hover", ImGuiCol_TabHovered, {0.086f, 0.204f, 0.278f, 1.00f}, nullptr, false},
+            {"tab_active", ImGuiCol_TabSelected, {}, "accent_dim", false},
+            {"tab_overline", ImGuiCol_TabSelectedOverline, {}, "accent", false},
+            {"tab_dimmed", ImGuiCol_TabDimmedSelected, {}, "tab_active", false},
+            {"tab_overline_dimmed", ImGuiCol_TabDimmedSelectedOverline, {}, "tab_overline", false},
+            {"separator", ImGuiCol_Separator, {}, "border", false},
+            {"text_selected", ImGuiCol_TextSelectedBg, {0.122f, 0.373f, 0.510f, 0.70f}, nullptr, false},
+            {"modal_dim", ImGuiCol_ModalWindowDimBg, {0.012f, 0.031f, 0.047f, 0.72f}, nullptr, false},
+            {"scrollbar_bg", ImGuiCol_ScrollbarBg, {0.043f, 0.086f, 0.122f, 0.00f}, nullptr, false},
+            {"scrollbar_grab", ImGuiCol_ScrollbarGrab, {}, "border", false},
+            {"scrollbar_grab_hover", ImGuiCol_ScrollbarGrabHovered, {}, "accent_dim", false},
+            {"scrollbar_grab_active", ImGuiCol_ScrollbarGrabActive, {}, "accent", false},
         };
 
         // ---------------------------------------------------------------- sizes
@@ -106,24 +113,25 @@ namespace uuepbs::ui
             bool keep; // default: leave Dear ImGui's value alone
         };
 
+        // Built-in look: sharp corners everywhere, 1px borders, roomy padding.
         const StyleSlot kStyleSlots[] = {
             {"window_rounding", &ImGuiStyle::WindowRounding, nullptr, {0.0f, 0.0f}, false},
-            {"child_rounding", &ImGuiStyle::ChildRounding, nullptr, {6.0f, 6.0f}, false},
-            {"frame_rounding", &ImGuiStyle::FrameRounding, nullptr, {5.0f, 5.0f}, false},
-            {"popup_rounding", &ImGuiStyle::PopupRounding, nullptr, {6.0f, 6.0f}, false},
-            {"grab_rounding", &ImGuiStyle::GrabRounding, nullptr, {3.0f, 3.0f}, false},
-            {"tab_rounding", &ImGuiStyle::TabRounding, nullptr, {5.0f, 5.0f}, false},
-            {"scrollbar_rounding", &ImGuiStyle::ScrollbarRounding, nullptr, {8.0f, 8.0f}, false},
-            {"scrollbar_size", &ImGuiStyle::ScrollbarSize, nullptr, {}, true},
-            {"grab_min_size", &ImGuiStyle::GrabMinSize, nullptr, {10.0f, 10.0f}, false},
+            {"child_rounding", &ImGuiStyle::ChildRounding, nullptr, {0.0f, 0.0f}, false},
+            {"frame_rounding", &ImGuiStyle::FrameRounding, nullptr, {0.0f, 0.0f}, false},
+            {"popup_rounding", &ImGuiStyle::PopupRounding, nullptr, {0.0f, 0.0f}, false},
+            {"grab_rounding", &ImGuiStyle::GrabRounding, nullptr, {0.0f, 0.0f}, false},
+            {"tab_rounding", &ImGuiStyle::TabRounding, nullptr, {0.0f, 0.0f}, false},
+            {"scrollbar_rounding", &ImGuiStyle::ScrollbarRounding, nullptr, {0.0f, 0.0f}, false},
+            {"scrollbar_size", &ImGuiStyle::ScrollbarSize, nullptr, {10.0f, 10.0f}, false},
+            {"grab_min_size", &ImGuiStyle::GrabMinSize, nullptr, {6.0f, 6.0f}, false},
             {"window_border", &ImGuiStyle::WindowBorderSize, nullptr, {0.0f, 0.0f}, false},
             {"child_border", &ImGuiStyle::ChildBorderSize, nullptr, {1.0f, 1.0f}, false},
-            {"frame_border", &ImGuiStyle::FrameBorderSize, nullptr, {0.0f, 0.0f}, false},
-            {"popup_border", &ImGuiStyle::PopupBorderSize, nullptr, {}, true},
-            {"tab_border", &ImGuiStyle::TabBorderSize, nullptr, {}, true},
-            {"window_padding", nullptr, &ImGuiStyle::WindowPadding, {14.0f, 12.0f}, false},
-            {"frame_padding", nullptr, &ImGuiStyle::FramePadding, {9.0f, 6.0f}, false},
-            {"item_spacing", nullptr, &ImGuiStyle::ItemSpacing, {9.0f, 7.0f}, false},
+            {"frame_border", &ImGuiStyle::FrameBorderSize, nullptr, {1.0f, 1.0f}, false},
+            {"popup_border", &ImGuiStyle::PopupBorderSize, nullptr, {1.0f, 1.0f}, false},
+            {"tab_border", &ImGuiStyle::TabBorderSize, nullptr, {0.0f, 0.0f}, false},
+            {"window_padding", nullptr, &ImGuiStyle::WindowPadding, {18.0f, 16.0f}, false},
+            {"frame_padding", nullptr, &ImGuiStyle::FramePadding, {10.0f, 6.0f}, false},
+            {"item_spacing", nullptr, &ImGuiStyle::ItemSpacing, {10.0f, 8.0f}, false},
             {"item_inner_spacing", nullptr, &ImGuiStyle::ItemInnerSpacing, {}, true},
         };
 
@@ -360,21 +368,24 @@ skin.json
   "author": "me",
 
   "colors": {                // "#RGB", "#RGBA", "#RRGGBB", "#RRGGBBAA" or [r, g, b, a]
-    "accent": "#E870A8",     // highlights, edited sliders, title
-    "accent_dim": "#99476F", // hovered buttons and tabs
-    "good": "#73D98C", "warn": "#FAB84D", "muted": "#9E9EAD",
-    "title": "#E870A8",      // the UUEPBS title (defaults to accent)
-    "text": "#FFFFFF", "text_disabled": "#808080",
-    "window": "#16161B",     // window background (also the clear colour)
-    "panel": "#1B1B21",      // lists and editor areas
-    "popup": "#1C1C24FA", "border": "#383847", "separator": "#3D3D4D",
-    "frame": "#292933", "frame_hover": "#363342", "frame_active": "#40384D",
-    "button": "#333040", "button_hover": "=accent_dim", "button_active": "=accent",
-    "slider_grab": "=accent", "slider_grab_active": "#FF99C7", "check": "=accent",
-    "header": "#422E40", "header_hover": "#5C3852", "header_active": "=accent_dim",
-    "tab": "#24242E", "tab_hover": "=accent_dim", "tab_active": "#57334D",
-    "text_selected": "#99477073",
-    "scrollbar_bg": "...", "scrollbar_grab": "...", "scrollbar_grab_hover": "...", "scrollbar_grab_active": "..."
+    "accent": "#4EA3CF",     // highlights, edited parts, selected outlines, check marks
+    "accent_dim": "#1F5F82", // selected tab, selected category, selected rows
+    "good": "#6FCF97", "warn": "#E0B060", "muted": "#7F98AB",
+    "title": "#9FD2EA",      // the UUEPBS title and monograms
+    "text": "#E6EEF4", "text_disabled": "#56707F",
+    "window": "#0B161F",     // window background (also the clear colour)
+    "panel": "#10202C",      // banner, lists, slider groups
+    "popup": "#0E1C27FC", "border": "#243C4F", "separator": "=border",
+    "frame": "#0A1520", "frame_hover": "#122634", "frame_active": "#163046",
+    "button": "#15303F", "button_hover": "#1D4A63", "button_active": "=accent_dim",
+    "slider_grab": "#D8E6F0", "slider_grab_active": "#FFFFFF", "check": "=accent",
+    "track": "#2A4457",      // hairline slider track
+    "section": "#172B3A",    // section header bars, character tiles
+    "header": "=accent_dim", "header_hover": "#163447", "header_active": "=accent_dim",
+    "tab": "#0B161F00", "tab_hover": "#163447", "tab_active": "=accent_dim",
+    "tab_overline": "=accent", "tab_dimmed": "=tab_active", "tab_overline_dimmed": "=tab_overline",
+    "text_selected": "#1F5F82B3", "modal_dim": "#03080CB8",
+    "scrollbar_bg": "#0B161F00", "scrollbar_grab": "=border", "scrollbar_grab_hover": "=accent_dim", "scrollbar_grab_active": "=accent"
   },
   ("=name" values above only show what each colour copies when a skin leaves it out;
    write real colours in your skin.)
@@ -382,11 +393,11 @@ skin.json
   "imgui": { "ResizeGrip": "#00000000" },   // any Dear ImGui colour by name (advanced)
 
   "style": {                 // sizes in pixels at 100% scaling; one number or [x, y]
-    "frame_rounding": 5, "child_rounding": 6, "popup_rounding": 6, "grab_rounding": 3,
-    "tab_rounding": 5, "scrollbar_rounding": 8, "window_rounding": 0,
-    "scrollbar_size": 14, "grab_min_size": 10,
-    "window_border": 0, "child_border": 1, "frame_border": 0, "popup_border": 1, "tab_border": 0,
-    "window_padding": [14, 12], "frame_padding": [9, 6], "item_spacing": [9, 7], "item_inner_spacing": [4, 4],
+    "frame_rounding": 0, "child_rounding": 0, "popup_rounding": 0, "grab_rounding": 0,
+    "tab_rounding": 0, "scrollbar_rounding": 0, "window_rounding": 0,
+    "scrollbar_size": 10, "grab_min_size": 6,
+    "window_border": 0, "child_border": 1, "frame_border": 1, "popup_border": 1, "tab_border": 0,
+    "window_padding": [18, 16], "frame_padding": [10, 6], "item_spacing": [10, 8], "item_inner_spacing": [4, 4],
     "font_scale": 1.0,       // multiplies config.lua FontSize
     "logo_height": 1.6       // logo height in text lines
   },
@@ -413,13 +424,14 @@ skin.json
   },
 
   "icons": {                 // square-ish images, drawn at text height
-    "simplified": "icons/body.png", "detailed": "icons/bones.png",
-    "presets": "icons/presets.png", "status": "icons/status.png",
-    "bones": "...", "morphs": "...",
-    "reset": "...", "xyz": "...", "refresh": "...", "save": "...", "load": "...",
-    "delete": "...", "folder": "...",
-    "group.Thighs": "icons/thighs.png"   // any Simplified Panel slider, by its title
+    "bones": "...", "morphs": "...",     // Advanced sub-tabs
+    "reset": "...", "xyz": "...", "save": "...", "load": "...",
+    "delete": "...", "folder": "...", "undo": "...", "redo": "...", // with an icon, Reset and XYZ on slider rows become icon-only
+    "section.Hips & Legs": "icons/legs.png"   // any Body tab category, by its name
   }
+  (Since 2.7 the main tabs are text only, and slider rows use a square bullet instead of
+   "group.<title>" icons; skins that still list "simplified", "detailed", "presets",
+   "status", "refresh" or "group.*" icons load fine, those icons are just not drawn.)
 }
 
 Image modes
@@ -1085,6 +1097,10 @@ Start from the example skin next to this file and change what you like.
         m_roles[static_cast<size_t>(Role::Title)] = resolved["title"];
         m_roles[static_cast<size_t>(Role::Text)] = resolved["text"];
         m_roles[static_cast<size_t>(Role::Window)] = resolved["window"];
+        m_roles[static_cast<size_t>(Role::Track)] = resolved["track"];
+        m_roles[static_cast<size_t>(Role::Section)] = resolved["section"];
+        m_roles[static_cast<size_t>(Role::Border)] = resolved["border"];
+        m_roles[static_cast<size_t>(Role::Panel)] = resolved["panel"];
     }
 
     void Skin::apply_style(float dpi)
@@ -1571,12 +1587,17 @@ Start from the example skin next to this file and change what you like.
             // An image grab can be bigger and brighter than Dear ImGui's thin bar, and the value is
             // printed in the middle of the slider: where they overlap, the text gets a dark outline
             // (drawn here, above the grab and below the widget's own text).
+            // No outline when the caller prints the value elsewhere (empty format: nothing in the slider).
             char text[64];
-            std::snprintf(text, sizeof(text), format && *format ? format : "%.3f", static_cast<double>(*v));
+            std::snprintf(text, sizeof(text), "%s", "");
+            if (format && *format)
+            {
+                std::snprintf(text, sizeof(text), format, static_cast<double>(*v));
+            }
             const ImVec2 ts = ImGui::CalcTextSize(text);
             const float cx = (a.x + b.x) * 0.5f, cy = (a.y + b.y) * 0.5f;
             const ImVec2 tp(std::floor(cx - ts.x * 0.5f), std::floor(cy - ts.y * 0.5f)); // same spot as RenderTextClipped centres it
-            if (gx0 < tp.x + ts.x && gx0 + gw > tp.x)
+            if (text[0] && gx0 < tp.x + ts.x && gx0 + gw > tp.x)
             {
                 const ImU32 dark = IM_COL32(0, 0, 0, static_cast<int>(200 * style.Alpha));
                 const float o = std::max(1.0f, std::floor(m_dpi + 0.25f));
@@ -1690,15 +1711,15 @@ Start from the example skin next to this file and change what you like.
         return open;
     }
 
-    bool Skin::begin_child(const char* id, const ImVec2& size, ImGuiChildFlags flags)
+    bool Skin::begin_child(const char* id, const ImVec2& size, ImGuiChildFlags flags, ImGuiWindowFlags window_flags)
     {
         const Image* panel = find("panel");
         if (!panel)
         {
-            return ImGui::BeginChild(id, size, flags);
+            return ImGui::BeginChild(id, size, flags, window_flags);
         }
         ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0, 0, 0, 0));
-        const bool open = ImGui::BeginChild(id, size, flags);
+        const bool open = ImGui::BeginChild(id, size, flags, window_flags);
         ImGui::PopStyleColor();
         const ImVec2 p = ImGui::GetWindowPos(), s = ImGui::GetWindowSize();
         draw(ImGui::GetWindowDrawList(), *panel, p, ImVec2(p.x + s.x, p.y + s.y), 1.0f);

@@ -12,6 +12,65 @@ local function check(cond, msg)
     end
 end
 
+-- Readable names (Scripts/uuepbs_names.lua): cleanup rules, the profile "Names" table, the game's own
+-- name properties. Plain functions, checked in every mode.
+do
+    local N = dofile(scripts .. "/uuepbs_names.lua")
+    local function FText(s) return { ToString = function() return s end } end
+    for _, c in ipairs({
+        { "BP_Rokuv3_C_0", "Rokuv3" }, -- blueprint prefix, class suffix, instance number
+        { "BP_Guard_C_3", "Guard" },
+        { "00_EVE_01_Body", "Eve Body" }, -- sort number in front, variant number, all-capital name
+        { "SK_Shirt", "Shirt" },
+        { "SKM_Hero_Female", "Hero Female" },
+        { "Gatekeeper_church2_2147465868", "Gatekeeper church2" }, -- run-time number
+        { "Anca_243", "Anca" }, -- placed-in-level number
+        { "Appearance.EAppearanceSlot::Legs_C", "Legs" },
+        { "/Game/Chars/Eve/SK_Eve_Body.SK_Eve_Body", "Eve Body" }, -- a whole asset path
+        { "Default__BP_Guard_C", "Guard" },
+        { "BP_NPC_Merchant_C_2147482611", "NPC Merchant" }, -- acronyms stay capitals
+        { "PolarisCharacterActor_2147470001", "PolarisCharacterActor" },
+        { "lune_v2", "Lune v2" },
+        { "SkeletalMeshComponent_2147482611", nil }, -- engine names that say nothing
+        { "CharacterMesh0", nil },
+        { "BP_C_0", nil },
+        { "12345", nil },
+        { "", nil },
+    }) do
+        check(N.clean(c[1]) == c[2], string.format("clean(%q) = %s, expected %s", c[1], tostring(N.clean(c[1])), tostring(c[2])))
+    end
+    -- a mesh asset standing for a whole character drops the part words
+    check(N.clean("00_EVE_01_Body", true) == "Eve", "character from a body mesh: " .. tostring(N.clean("00_EVE_01_Body", true)))
+    check(N.clean("Maelle_v2_FaceMesh", true) == "Maelle v2", "character from a face mesh")
+    check(N.clean("SK_Body", true) == "Body", "a part word alone stays")
+    -- property values: FText / FString / FName come as objects with ToString
+    check(N.text_of(FText("  Eve \n")) == "Eve" and N.text_of("Lune") == "Lune", "text values trimmed")
+    check(N.text_of(FText("None")) == nil and N.text_of(FText("")) == nil and N.text_of(42) == nil and N.text_of(nil) == nil, "empty values ignored")
+    check(N.text_of(string.rep("x", 49)) == nil, "too long to be a name")
+    check(N.text_of({ ToString = function() error("invalid object") end }) == nil, "a value that fails to read is ignored")
+    -- the profile's Names table: exact names, then wildcards, then the longest plain prefix; not case-sensitive
+    local T = N.compile({ BP_Eve_C = "Eve", ["00_EVE_*"] = "Eve (casual)", BP_Guard = "Guard", BP_Guard_Captain = "Captain",
+        ["00_EVE_01_Body"] = "Eve exactly", Bad = "", _comment = "ignored" })
+    check(N.lookup(T, { "BP_Eve_C_0", "BP_Eve_C" }) == "Eve", "exact class name")
+    check(N.lookup(T, { "BP_X_C_0", "BP_X_C", "00_EVE_02_Face" }) == "Eve (casual)", "wildcard on a mesh name")
+    check(N.lookup(T, { "00_EVE_01_Body" }) == "Eve exactly", "an exact name beats a wildcard")
+    check(N.lookup(T, { "BP_Guard_Captain_C_4" }) == "Captain", "longest prefix wins")
+    check(N.lookup(T, { "bp_guard_c_1" }) == "Guard", "prefix, not case-sensitive")
+    check(N.lookup(T, { "Stranger" }) == nil and N.lookup(T, { "Bad" }) == nil and N.lookup(T, { "_comment" }) == nil, "no match")
+    check(N.compile({}) == nil and N.compile({ Bad = "" }) == nil and N.compile("x") == nil and N.lookup(nil, { "a" }) == nil, "empty table")
+    -- the game's own name: on the actor, else on its character data
+    local function read(h, p) return h[p] end
+    local function alive(o) return type(o) == "table" and o.IsValid ~= nil and o:IsValid() end
+    local valid = function() return true end
+    local n, how = N.from_object({ DisplayName = FText(""), CharacterData = { IsValid = valid, CharacterName = FText("Lune") } }, read, alive)
+    check(n == "Lune" and how == "CharacterData.CharacterName", "name from the character data: " .. tostring(n) .. " " .. tostring(how))
+    n, how = N.from_object({ CharacterName = "Verso", CharacterData = { IsValid = valid, CharacterName = FText("Lune") } }, read, alive)
+    check(n == "Verso" and how == "CharacterName", "the actor's own name first")
+    check(N.from_object({ DisplayName = FText("None"), CharacterData = { IsValid = function() return false end, DisplayName = "x" } }, read, alive) == nil,
+        "nothing usable: no name")
+    check(N.from_object({ DisplayName = FText("Character") }, read, alive) == nil, "an engine word is not a name")
+end
+
 -- skeleton + reference pose from roku_ref.txt
 local boneNames, boneParents, boneRef = {}, {}, {}
 for line in io.lines("roku_ref.txt") do
@@ -78,12 +137,15 @@ local cdo = obj("BP_Guard_C /Game/Chars/BP_Guard.Default__BP_Guard_C")
 
 local refCalls, scanCalls, searches, morphReads, morphWrites = 0, 0, 0, 0, 0
 local charSearches = 0 -- FindAllOf("Character")
+-- UUEPBS_OBJPTR=1: a UE4SS build that cannot read the UE 5.1+ object pointer property (Afterparty, UE 5.7):
+-- SkeletalMeshAsset reads back as the same object on every component; only GetSkinnedAsset tells the truth.
+local bogusMeshProp = os.getenv("UUEPBS_OBJPTR") and obj("Object /Script/CoreUObject.FObjectPtrProperty_unreadable") or nil
 local function comp(name, outer, mesh, names, parents, withRef)
     local c = obj("SkeletalMeshComponent /Game/Maps/Lvl.Lvl:PersistentLevel." .. name)
     c.GetFName = function() return FNameObj(name) end
     c.GetOuter = function() return outer end
     c.GetSkinnedAsset = function() return mesh end
-    c.SkeletalMeshAsset = mesh -- the property UE 5.1+ components have
+    c.SkeletalMeshAsset = bogusMeshProp or mesh -- the property UE 5.1+ components have
     c.GetNumBones = function() return #names end
     c._names = 0
     c.GetBoneName = function(_, i) c._names = c._names + 1; return FNameObj(names[i + 1]) end
@@ -153,13 +215,21 @@ local fakeNow = 0
 os.clock = function() return fakeNow end
 local pollMs
 local fastMs
+local camMs, camLoop
+local colMs, colLoop
 function LoopInGameThreadWithDelay(ms, fn)
     if not loop then
         pollMs = ms
         loop = function() fakeNow = fakeNow + ms / 1000; fn() end
-    else
+    elseif not fast then
         fastMs = ms -- the morph loop (runs only while the window is open)
         fast = function() fakeNow = fakeNow + ms / 1000; fn() end
+    elseif not camLoop then
+        camMs = ms -- the camera loop (does nothing until a character has Camera sliders)
+        camLoop = fn
+    else
+        colMs = ms -- the collision loop (does nothing until a character's Height is not 1)
+        colLoop = fn
     end
     return 1
 end
@@ -204,6 +274,9 @@ local legacyPrefix = project .. "\\Binaries\\Win64\\ue4ss\\Mods\\XTGBodySlider\\
 local realOpen, realRemove = io.open, os.remove
 local outReads = 0
 local function map(p)
+    -- the remembered Auto Ground switch (presets folder) lands in the work dir
+    if p:find("\\_auto_ground.txt", 1, true) then return work .. "/_auto_ground.txt" end
+    if p:find("\\_physics.txt", 1, true) then return work .. "/_physics.txt" end
     if p:sub(1, #modPrefix) == modPrefix then return work .. "/" .. p:sub(#modPrefix + 1):gsub("\\", "/") end
     if p:sub(1, #legacyPrefix) == legacyPrefix then return work .. "/legacy/" .. p:sub(#legacyPrefix + 1):gsub("\\", "/") end
     return p
@@ -213,7 +286,7 @@ io.open = function(p, m)
     return realOpen(map(p), m)
 end
 os.remove = function(p) return realRemove(map(p)) end
-os.execute("rm -rf " .. work .. "/native " .. work .. "/Scripts " .. work .. "/legacy && mkdir -p " .. work .. "/native")
+os.execute("rm -rf " .. work .. "/native " .. work .. "/Scripts " .. work .. "/legacy " .. work .. "/_auto_ground.txt " .. work .. "/_physics.txt && mkdir -p " .. work .. "/native")
 local legacyText = '{\n  // my notes survive the move\n  "Project": "SomeGame",\n  "PrimaryComponent": "CharacterMesh0",\n  "WorldMeshSearch": true,\n  "Hook": { "Slot": 303, "Buffers": "0x5A8", "ReadIndex": "0x674" },\n}\n'
 if mode == "legacy" then
     os.execute("mkdir -p " .. work .. "/legacy/Scripts/GameProfiles " .. work .. "/legacy/native")
@@ -243,6 +316,10 @@ end
 local handJson = '{\n  "Project": "Polaris",\n  "Game": "TEKKEN 8",\n  "Target": "PolarisCharacterActor",\n'
     .. '  "TargetClassPath": "/Script/Polaris.PolarisCharacterActor",\n  "PrimaryComponent": "",\n  "IncludeComponents": [],\n'
     .. '  "ExcludeComponents": [],\n  "SameSkeletonOnly": true,\n  "BodyGroups": {},\n  "MorphGroups": {},\n  "ExcludeMorphs": []\n}\n'
+-- names: readable names in the labels (FriendlyNames on); the profile names the player pawn's class
+if mode == "names" then
+    realOpen(work .. "/Scripts/GameProfiles/SomeGame.json", "wb"):write('{\n  "Project": "SomeGame",\n  "Names": { "BP_Guard_C": "Captain Vey", "BP_Nobody*": "Nobody" }\n}\n'):close()
+end
 if mode == "tekkenjson" then
     realOpen(work .. "/Scripts/GameProfiles/Polaris.json", "wb"):write(handJson):close()
 end
@@ -266,9 +343,13 @@ local printed = {}
 local realPrint = print
 print = function(s) printed[#printed + 1] = s end
 
-local function run_peer(rescan, pick, pickId, refresh, session, ui, morphs, keep, remember, relist)
+local peerGround = "0:0" -- the window's Auto Ground switch keeps its last click count between calls
+local peerPhysics = nil -- the window's Jiggle physics choice "<clicks>:<mode>" (UUEPBS_PEER_PHYSICS)
+local function run_peer(rescan, pick, pickId, refresh, session, ui, morphs, keep, remember, relist, ground)
+    ground = ground or peerGround
+    peerGround = ground
     local report = work .. "/peer_report.txt"
-    os.execute(string.format('%s %s/native %d %d %s %d %s %d "%s" "%s" "%s" %d > %s', peer, work, rescan, pick, pickId, refresh, session or "dll1", ui or 0, morphs or "-", keep or "-", remember or "-", relist or 0, report))
+    os.execute(string.format((peerPhysics and ("UUEPBS_PEER_PHYSICS=" .. peerPhysics .. " ") or "") .. (mode == "names" and "UUEPBS_PEER_ENGINE=1 " or "") .. '%s %s/native %d %d %s %d %s %d "%s" "%s" "%s" %d %s > %s', peer, work, rescan, pick, pickId, refresh, session or "dll1", ui or 0, morphs or "-", keep or "-", remember or "-", relist or 0, ground, report))
     local h = realOpen(report, "rb")
     local out = h:read("a")
     h:close()
@@ -277,6 +358,11 @@ end
 
 -- GON runs with the smallest mesh budget (8) so a crowd overflows it
 local cfg = dofile(scripts .. "/config.lua")
+-- the timings below are written for a 400 ms poll and a 3 s watch (config.lua ships 600 / 5000)
+cfg.PollIntervalMs = 400
+cfg.WatchIntervalMs = 3000
+-- engine names in the labels everywhere except the "names" mode, which checks the readable ones
+cfg.FriendlyNames = mode == "names"
 if mode == "gon" then cfg.MaxTrackedMeshes = 8 end
 -- legacy: a config.lua from before 2.7, without the CharacterSwitchWatcher line (watcher stays off)
 if mode == "legacy" then cfg.CharacterSwitchWatcher = nil end
@@ -309,6 +395,11 @@ check(loaded and loaded[1] == project .. "\\Binaries\\Win64\\ue4ss\\Mods\\UUEPBS
 check(loop and console.uuepbs and console.ubs and not console.xbs, "registrations")
 check(pollMs == 400, "poll interval " .. tostring(pollMs))
 check(fast and fastMs == 100, "morph loop registered at 100 ms: " .. tostring(fastMs))
+check(camLoop and camMs == 50, "camera loop registered at 50 ms: " .. tostring(camMs))
+check(colLoop and colMs == 50, "collision loop registered at 50 ms: " .. tostring(colMs))
+for _ = 1, 3 do
+    camLoop() -- idle: no cam lines from the DLL
+end
 
 -- TEKKEN 8 (polaris): the pawn you control is only a controller / camera; the fighters are
 -- PolarisCharacterActor (an Actor, not a Character). The profile v2.7.1 wrote on its first run (defaults,
@@ -399,6 +490,70 @@ if mode == "tekkenedit" or mode == "nobody" then
         local _, again = next_pawn(4):gsub(HINT, "")
         check(again == 1, "said once")
     end
+    realPrint("lua harness OK (" .. mode .. ")")
+    os.exit(0)
+end
+
+-- names: the window gets readable labels, the engine names as a field of their own, and the same
+-- actor keys and identities as before (saved sliders and presets still match)
+if mode == "names" then
+    local function FText(t) return { ToString = function() return t end } end
+    local function esc(t) return (t:gsub("%p", "%%%0")) end
+    -- Roku: the game's own name, on its character data asset
+    actor.CharacterData = obj("PrimaryDataAsset /Game/Data/DA_Roku.DA_Roku", { DisplayName = FText("Roku") })
+    -- Eve: spawned with an engine-made name; only her mesh says who she is
+    local eve = obj("BP_NPC_C /Game/Maps/Lvl.Lvl:PersistentLevel.BP_NPC_C_2147482611")
+    local eveMesh = obj("SkeletalMesh /Game/Chars/Eve/00_EVE_01_Body.00_EVE_01_Body", { Skeleton = skeleton })
+    local eveBody = comp("SkeletalMeshComponent_2147482612", eve, eveMesh, boneNames, boneParents, false)
+    eve.Mesh = eveBody
+    eve._loc = { X = 1200, Y = 0, Z = 0 }
+    -- Anca: placed in the level (her object name is a name); the game names her a moment after loading
+    local anca = obj("BP_Villager_C /Game/Maps/Lvl.Lvl:PersistentLevel.Anca_243")
+    anca._loc = { X = 2000, Y = 0, Z = 0 }
+    allComps[#allComps + 1] = eveBody
+    extraChars = { eve, anca }
+    local eveId, ancaId = string.format("%X", eve._addr), string.format("%X", anca._addr)
+
+    loop()
+    local s = run_peer(0, 0, "none", 1)
+    loop()
+    s = run_peer(0, 0, "none", 1)
+    check(s:find("target auto Captain Vey (player) key=player\n", 1, true), "player pawn named by the profile's Names table:\n" .. s)
+    check(s:find("\ntarget_engine BP_Guard_C_3\n", 1, true), "engine name sent beside the label:\n" .. s)
+    check(s:find("\ncand Captain Vey (player) key=player\n", 1, true) and s:find("\ncand_engine player BP_Guard_C_3\n", 1, true), "player listed:\n" .. s)
+    check(s:find("\ncand Roku   0 m key=", 1, true), "the game's own name:\n" .. s)
+    check(s:find("\ncand Eve   12 m key=" .. eveId .. "\n", 1, true) and s:find("\ncand_engine " .. eveId .. " BP_NPC_C_2147482611\n", 1, true),
+        "engine-made name: named after her mesh:\n" .. s)
+    check(s:find("\ncand Anca   20 m key=" .. ancaId .. "\n", 1, true), "placed name cleaned up:\n" .. s)
+    check(not s:find(" = ", 1, true), "no identity suffix next to readable names:\n" .. s)
+    check(s:find("\nrig %x+ Roku v3 primary=1 owner=Captain Vey %(player%) [^\n]*actor=player\n"), "mesh labelled by its asset:\n" .. s)
+    check(s:find("\nrig_engine Roku v3 | CharacterMesh0 | Captain Vey (player) | BP_Guard_C_3\n", 1, true), "mesh engine names:\n" .. s)
+
+    -- picking Eve: her key and identity are the engine's, as before
+    run_peer(0, 1, eveId, 1)
+    loop()
+    s = run_peer(0, 1, eveId, 1)
+    check(s:find("target " .. eveId .. " Eve key=" .. eveId .. "\n", 1, true) and s:find("\ntarget_engine BP_NPC_C_2147482611\n", 1, true), "picked Eve:\n" .. s)
+    check(s:find("target identity [BP_NPC_C@00_EVE_01_Body]", 1, true), "identity unchanged (engine names):\n" .. s)
+    for _ = 1, 3 do loop() end
+    s = run_peer(0, 1, eveId, 1)
+    check(s:find("\nrig_engine Eve Body | SkeletalMeshComponent_2147482612 | Eve | BP_NPC_C_2147482611\n", 1, true), "engine-made mesh name replaced:\n" .. s)
+
+    -- Anca gets her name from the game after a moment: a cleaned-up name is looked at again (a few times)
+    anca.DisplayName = FText("Anca the Smith")
+    for _ = 1, 6 do loop() end -- 2.4 s
+    run_peer(0, 1, eveId, 2)
+    loop()
+    s = run_peer(0, 1, eveId, 2)
+    check(s:find("\ncand Anca the Smith   20 m key=" .. ancaId .. "\n", 1, true), "name set by the game later is picked up:\n" .. s)
+
+    -- FriendlyNames = false: engine names, as before 2.8 (read live, no restart needed)
+    cfg.FriendlyNames = false
+    run_peer(0, 1, eveId, 3)
+    loop()
+    s = run_peer(0, 1, eveId, 3)
+    check(s:find("\ncand BP_Guard_C_3 (player) key=player\n", 1, true) and s:find("\ncand Anca_243   20 m key=", 1, true), "engine names when off:\n" .. s)
+    check(s:find("\ncand BP_NPC_C_2147482611   12 m key=" .. eveId .. "\n", 1, true), "Eve by engine name:\n" .. s)
     realPrint("lua harness OK (" .. mode .. ")")
     os.exit(0)
 end
@@ -539,6 +694,29 @@ run_peer(0, 0, "none", 0, "dll1", 1, "-", "-", "-", 1)
 loop()
 s = run_peer(0, 0, "none", 0, "dll1", 1, "-", "-", "-", 1)
 check(s:find("cand " .. otherName .. "   20 m key=", 1, true) and searches == searchesBefore, "list re-sorted when opened, no search:\n" .. s)
+-- the window's Auto Ground switch (Character Scale tab): the script takes it, tells the DLL, remembers it
+check(s:find("ground 1 ui 1\n", 1, true), "Auto Ground on by default, shown in the window:\n" .. s)
+run_peer(0, 0, "none", 0, "dll1", 1, "-", "-", "-", 1, "1:0")
+loop()
+s = run_peer(0, 0, "none", 0, "dll1", 1, "-", "-", "-", 1, "1:0")
+check(s:find("ground 0 ui 0\n", 1, true), "Auto Ground switched off from the window:\n" .. s)
+check((read(work .. "/_auto_ground.txt") or ""):match("^off"), "the switch is remembered")
+run_peer(0, 0, "none", 0, "dll1", 1, "-", "-", "-", 1, "2:1")
+loop()
+s = run_peer(0, 0, "none", 0, "dll1", 1, "-", "-", "-", 1, "2:1")
+check(s:find("ground 1 ui 1\n", 1, true) and (read(work .. "/_auto_ground.txt") or ""):match("^on"), "and back on:\n" .. s)
+-- the window's Jiggle physics choice: follow by default, "off" taken, shown and remembered
+check(s:find("physics follow [", 1, true), "physics follows by default, shown in the window:\n" .. s)
+peerPhysics = "1:off"
+run_peer(0, 0, "none", 0, "dll1", 1, "-", "-", "-", 1)
+loop()
+s = run_peer(0, 0, "none", 0, "dll1", 1, "-", "-", "-", 1)
+check(s:find("physics off [", 1, true) and (read(work .. "/_physics.txt") or ""):match("^off"), "physics off from the window:\n" .. s)
+peerPhysics = "2:follow"
+run_peer(0, 0, "none", 0, "dll1", 1, "-", "-", "-", 1)
+loop()
+s = run_peer(0, 0, "none", 0, "dll1", 1, "-", "-", "-", 1)
+check(s:find("physics follow [", 1, true) and (read(work .. "/_physics.txt") or ""):match("^follow"), "and back to follow:\n" .. s)
 other._loc = { X = 0, Y = 0, Z = 0 }
 settle()
 run_peer(0, 0, "none", 0, "dll1", 0)
@@ -1324,6 +1502,126 @@ if mode == "gon" then
     s = run_peer(5, 4, "auto", 5, "dll1", 0, "-", "-", "player@Lune_FaceMesh,player@Maelle_v2_FaceMesh")
     check(s:find("owner=BP_Rokuv3_C_1 (player)", 1, true), "reloaded player picked up:\n" .. s)
     check(charSearches == cs, "no character sweeps for party-member files: " .. (charSearches - cs))
+end
+
+-- Scene copies (Scripts/uuepbs_copies.lua): cutscenes and menu previews show the character through
+-- actors of their own with the same mesh assets; those meshes get the character's sliders too.
+if mode == "gon" then
+    local SKEL = "/Script/Engine.SkeletalMeshComponent"
+    check(notifies[SKEL] ~= nil and notifies["/Script/Engine.SceneCaptureComponent2D"] ~= nil, "new meshes and scene captures watched")
+    local remember = "player@Lune_FaceMesh,player@Maelle_v2_FaceMesh"
+    -- the player has one mesh: a preview actor with just that body is a copy, an AI-controlled NPC sharing it is not
+    local aiNpc = obj("BP_Guard_C /Game/Maps/Lvl.Lvl:PersistentLevel.BP_Guard_C_8", { Controller = obj("AIController /Game/Maps/Lvl.Lvl:PersistentLevel.AIController_8") })
+    local aiBody = comp("CharacterMesh0", aiNpc, bodyMesh, boneNames, boneParents, false)
+    local doll = obj("BP_InventoryDoll_C /Game/UI/Inv.Inv:PersistentLevel.BP_InventoryDoll_C_0")
+    local dollBody = comp("PreviewBody", doll, bodyMesh, boneNames, boneParents, false)
+    for _, c in ipairs({ aiBody, dollBody }) do
+        allComps[#allComps + 1] = c
+        notifies[SKEL](c)
+    end
+    for _ = 1, 3 do loop() end
+    s = run_peer(5, 4, "auto", 5, "dll1", 0, "-", "-", remember)
+    check(s:find("rig %x+ PreviewBody %(scene copy%) primary=0 owner=BP_Rokuv3_C_1 %(player%)") and not s:find("rig %x+ CharacterMesh0 %(scene copy%)"),
+        "one-mesh character: the preview is a copy, the AI NPC is not:\n" .. s)
+    aiNpc._valid, aiBody._valid, doll._valid, dollBody._valid = false, false, false, false
+    for _ = 1, 2 do loop() end
+    -- the player wears a shirt again: body + shirt are its sculpted mesh assets
+    local shirt2 = comp("C_shirt1", actor, shirtMesh, boneNames, boneParents, false)
+    allComps[#allComps + 1] = shirt2
+    run_peer(6, 4, "auto", 5, "dll1", 0, "-", "-", remember)
+    for _ = 1, 4 do loop() end
+    s = run_peer(6, 4, "auto", 5, "dll1", 0, "-", "-", remember)
+    check(s:find("rig %x+ C_shirt1 primary=0 owner=BP_Rokuv3_C_1 %(player%)") and not s:find("scene copy", 1, true), "player with body and shirt, no copies yet:\n" .. s)
+    local scans0 = scanCalls
+    -- a cutscene actor appears: its body and shirt are copies; its hair (not sculpted on the player) is not
+    local cine = obj("BP_Cine_Roku_C /Game/Cine/Seq.Seq:PersistentLevel.BP_Cine_Roku_C_2147480001")
+    local cineBody = comp("SkeletalMeshComponent_7", cine, bodyMesh, boneNames, boneParents, false)
+    local cineShirt = comp("Shirt", cine, shirtMesh, boneNames, boneParents, false)
+    local cineHair = comp("Hair", cine, hairMesh, { "root", "fringe_01" }, { -1, 0 }, false)
+    -- an NPC that shares only the body mesh, controlled by an AI, and one nobody controls
+    local guard2 = obj("BP_Guard_C /Game/Maps/Lvl.Lvl:PersistentLevel.BP_Guard_C_9", { Controller = obj("AIController /Game/Maps/Lvl.Lvl:PersistentLevel.AIController_9") })
+    local guard2Body = comp("CharacterMesh0", guard2, bodyMesh, boneNames, boneParents, false)
+    local statue = obj("BP_Statue_C /Game/Maps/Lvl.Lvl:PersistentLevel.BP_Statue_C_1")
+    local statueBody = comp("Body", statue, bodyMesh, boneNames, boneParents, false)
+    -- an AI-controlled actor wearing the whole outfit (a cutscene character possessed by an AI) is a copy
+    local cine2 = obj("BP_Cine_Roku_C /Game/Cine/Seq.Seq:PersistentLevel.BP_Cine_Roku_C_2147480002", { Controller = obj("AIController /Game/Cine/Seq.Seq:PersistentLevel.AIController_2") })
+    local cine2Body = comp("CharacterMesh0", cine2, bodyMesh, boneNames, boneParents, false)
+    local cine2Shirt = comp("Shirt", cine2, shirtMesh, boneNames, boneParents, false)
+    -- and the player's own pawn while someone else... is the player: never a copy (it is sculpted already)
+    for _, c in ipairs({ cineBody, cineShirt, cineHair, guard2Body, statueBody, cine2Body, cine2Shirt }) do
+        allComps[#allComps + 1] = c
+        notifies[SKEL](c) -- constructed: the mesh is looked at a moment later
+    end
+    notifies[SKEL](body) -- an already sculpted mesh offered again is ignored
+    run_peer(6, 4, "auto", 5, "dll1", 0, "BreastSize=0.7", "-", remember)
+    for _ = 1, 3 do loop() end
+    s = run_peer(6, 4, "auto", 5, "dll1", 0, "BreastSize=0.7", "-", remember)
+    local _, copiesSent = s:gsub("\nrig [^\n]*%(scene copy%)", "")
+    check(copiesSent == 4, "two copies with body and shirt each:\n" .. s)
+    check(s:find("rig %x+ SkeletalMeshComponent_7 %(scene copy%) primary=0 owner=BP_Rokuv3_C_1 %(player%)"), "copy sent as the player's mesh:\n" .. s)
+    check(s:find("rig %x+ Shirt %(scene copy%) 2 primary=0"), "same label twice: numbered:\n" .. s)
+    check(not s:find("Hair", 1, true) and not s:find("BP_Guard_C_9", 1, true) and not s:find("\n[^\n]*Body %(scene copy%)"), "hair, AI NPC and statue left alone:\n" .. s)
+    check(cineBody._morphs.BreastSize == 0.7 and body._morphs.BreastSize == 0.7, "morphs reach the copy: " .. tostring(cineBody._morphs.BreastSize))
+    check(guard2Body._morphs.BreastSize == nil and statueBody._morphs.BreastSize == nil, "not the NPCs sharing a mesh")
+    check(scanCalls == scans0, "new meshes found without a world search: " .. (scanCalls - scans0))
+    check(table.concat(printed, ""):find("scene copy of BP_Rokuv3_C_1 (player) found: 2 mesh(es) on BP_Cine_Roku_C_2147480001", 1, true), "found logged")
+    check((table.concat(printed, ""):find("mesh asset property reads back wrong", 1, true) ~= nil) == (bogusMeshProp ~= nil),
+        "an unreadable mesh property is noticed (and only then)")
+    -- the cutscene ends: its actor goes, its copies are dropped and their morphs left alone
+    cine._valid, cineBody._valid, cineShirt._valid, cineHair._valid = false, false, false, false
+    cine2._valid, cine2Body._valid, cine2Shirt._valid = false, false, false
+    for _ = 1, 2 do loop() end
+    s = run_peer(6, 4, "auto", 5, "dll1", 0, "BreastSize=0.7", "-", remember)
+    check(not s:find("scene copy", 1, true), "copies gone with their actor:\n" .. s)
+    -- a menu preview that existed before (only its mesh was set by native code): found by the search that
+    -- starts when the camera moves to another actor, and the one while the character is out of view
+    local preview = obj("BP_MenuPreview_C /Game/UI/Menu.Menu:PersistentLevel.BP_MenuPreview_C_0")
+    local previewBody = comp("Mesh", preview, bodyMesh, boneNames, boneParents, false)
+    local previewShirt = comp("Outfit", preview, shirtMesh, boneNames, boneParents, false)
+    allComps[#allComps + 1] = previewBody
+    allComps[#allComps + 1] = previewShirt
+    local view = actor
+    pc.GetViewTarget = function() return view end
+    local rendered = true
+    body.WasRecentlyRendered = function() return rendered end
+    for _ = 1, 80 do loop() end -- 32 s: the calls that failed before (not mocked yet) are tried again
+    check(scanCalls == scans0, "no search while the camera stays on the character: " .. (scanCalls - scans0))
+    view = obj("CineCameraActor /Game/Cine/Seq.Seq:PersistentLevel.CineCameraActor_1")
+    for _ = 1, 15 do loop() end
+    s = run_peer(6, 4, "auto", 5, "dll1", 0, "BreastSize=0.7", "-", remember)
+    local _, previewSent = s:gsub("\nrig [^\n]*%(scene copy%)", "")
+    check(previewSent == 2 and s:find("rig %x+ Mesh %(scene copy%)"), "menu preview found by the camera search:\n" .. s)
+    check(scanCalls - scans0 >= 1 and scanCalls - scans0 <= 3, "a short burst of searches: " .. (scanCalls - scans0))
+    check(previewBody._morphs.BreastSize == 0.7, "morphs reach the preview")
+    local burstEnd = scanCalls
+    for _ = 1, 30 do loop() end
+    check(scanCalls == burstEnd, "no more searches once the burst is over: " .. (scanCalls - burstEnd))
+    -- the character out of view (menu, loading screen): a burst, then a search every few seconds, a limited number of times
+    rendered = false
+    for _ = 1, 150 do loop() end -- 60 s
+    local awaySearches = scanCalls - burstEnd
+    check(awaySearches >= 4 and awaySearches <= 3 + 10, "searches while out of view are limited: " .. awaySearches)
+    rendered = true
+    view = actor
+    for _ = 1, 15 do loop() end
+    local back = scanCalls
+    for _ = 1, 30 do loop() end
+    check(scanCalls == back, "idle again once back in view: " .. (scanCalls - back))
+    -- the preview's mesh is swapped for another character's: dropped
+    previewBody.SkeletalMeshAsset, previewBody.GetSkinnedAsset = hairMesh, function() return hairMesh end
+    loop()
+    s = run_peer(6, 4, "auto", 5, "dll1", 0, "BreastSize=0.7", "-", remember)
+    check(not s:find("rig %x+ Mesh %(scene copy%)") and s:find("Outfit (scene copy)", 1, true), "copy with another mesh dropped:\n" .. s)
+    -- console: ubs copies searches now and reports
+    printed = {}
+    console.ubs("ubs copies", { "copies" }, { Log = function() end })
+    check(table.concat(printed, ""):find("scene copies: 1 mesh(es) now", 1, true), "ubs copies:\n" .. table.concat(printed, ""))
+    -- clean up for the checks below
+    preview._valid, previewBody._valid, previewShirt._valid = false, false, false
+    guard2._valid, guard2Body._valid, statue._valid, statueBody._valid = false, false, false, false
+    pc.GetViewTarget, body.WasRecentlyRendered = nil, nil
+    run_peer(6, 4, "auto", 5, "dll1", 0, "-", "-", remember)
+    for _ = 1, 15 do loop() end
 end
 
 -- DLL restarted (new session) must not replay old counters
