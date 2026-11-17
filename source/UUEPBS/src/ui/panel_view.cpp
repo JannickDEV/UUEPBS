@@ -1562,7 +1562,7 @@ namespace uuepbs::ui
                 {"neck", "Neck size"},       {"rib cage", "Rib cage size"}, {"waist", "Waist size"},     {"belly", "Belly size"},
                 {"hips", "Hip size"},        {"shoulders", "Shoulder size"}, {"breasts", "Breast size"}, {"nipples", "Nipple size"},
                 {"butt", "Butt size"},       {"thighs", "Thigh size"},     {"calves", "Calf size"},      {"feet", "Foot size"},
-                {"upper arms", "Upper arm size"}, {"forearms", "Forearm size"}, {"hands", "Hand size"},
+                {"upper arms", "Upper arm size"}, {"forearms", "Forearm size"}, {"hands", "Hand size"}, {"tail", "Tail size"},
             };
             const auto it = names.find(fold_case(title));
             return it != names.end() ? std::string(it->second) : title;
@@ -2145,10 +2145,17 @@ namespace uuepbs::ui
         ImGui::BeginDisabled(!o.enabled);
         row("hand_strength", "Strength", "How much of the correction is used. 100% puts the hand exactly where the edited body has that spot.",
             o.strength, 0.0f, 1.0f, def.strength, "%.0f%%", 100.0f);
+        const double fade_before = o.fade_out;
         row("hand_far", "Contact distance",
             "How close to the body (in the game's own animation) a hand has to be to count as touching it, as a share of the arm's "
             "length. Larger catches hands hovering near the body too; smaller only hands right on it.",
             o.fade_out, 0.1f, 1.5f, def.fade_out, "%.0f%%", 100.0f);
+        if (o.fade_out != fade_before)
+        {
+            // "fully corrected within" has no slider of its own: it keeps the default share of the contact distance, so
+            // dragging the distance down and back up brings it back (it used to stay at the smallest value it was pushed to)
+            o.full_within = std::clamp(o.fade_out * (def.full_within / def.fade_out), 0.05, std::max(0.05, o.fade_out - 0.05));
+        }
         row("hand_shoulder", "Shoulder help",
             "When the edited body puts the spot out of the arm's reach (a longer torso, a bigger body part), the shoulder may turn "
             "toward it by up to this much.",
@@ -2175,10 +2182,6 @@ namespace uuepbs::ui
         ImGui::EndDisabled();
         sk.end_child();
         ImGui::PopStyleVar();
-        if (o.fade_out < o.full_within + 0.05)
-        {
-            o.full_within = std::max(0.05, o.fade_out * 0.55);
-        }
         if (changed)
         {
             m_targets->set_hand_contact(o);

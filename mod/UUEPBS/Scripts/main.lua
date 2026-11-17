@@ -3287,6 +3287,19 @@ if Config.SceneCopies ~= false then
             find_all = function()
                 return FindAllOf("SkeletalMeshComponent")
             end,
+            -- NPCs built from the character's body: a pawn is only a copy when its body morphs match
+            is_pawn = function(actor)
+                local cls = engine_class("/Script/Engine.Pawn")
+                local ok, yes = pcall(function()
+                    return cls ~= nil and actor:IsA(cls)
+                end)
+                return ok and yes == true
+            end,
+            morph_value = get_morph,
+            morph_overridden = function(comp, name)
+                local a = address_num(comp)
+                return a ~= nil and morphApplied[string.format("%X", a) .. "|" .. string.lower(name)] ~= nil
+            end,
             -- A copy's mesh as a rig of the character it copies (never its main mesh).
             build = function(comp, src)
                 local ok, h = pcall(read_hierarchy, comp, false)

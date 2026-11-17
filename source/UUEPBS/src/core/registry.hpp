@@ -194,6 +194,9 @@ namespace uuepbs
         std::vector<std::string> hand_anims() const;
         // What each character plays right now (reported by Lua: montage, else the single-node animation), by actor key.
         void set_playing(std::map<std::string, std::string> playing);
+        // "hand contact (<source>): on, strength 1.00, contact 0.25-0.45 x arm, shoulder 30 deg, stretch 1.20x, ...";
+        // source null = "hand contact: on, ...". `only` = the HandContactAnims list as written ("" = every animation).
+        static std::string hands_summary(const HandOptions& h, const char* source, const std::string& only);
         // One line per edited character's main mesh: what it plays and where each hand rests (diagnostics).
         std::string hands_report() const;
         // The window's live readout for one character: what it plays, then one line per hand.

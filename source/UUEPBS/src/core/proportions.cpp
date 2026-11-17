@@ -20,7 +20,7 @@ namespace uuepbs
             {"eyes", {"eye", "eyeball"}}, {"rib cage", {"ribcage", "rib"}}, {"waist", {"waist"}},     {"belly", {"belly", "stomach", "tummy"}},
             {"hips", {"hip", "pelvis"}},  {"shoulders", {"shoulder"}},  {"breasts", kBreast},          {"nipples", {"nipple", "areola"}},
             {"butt", kButt},              {"thighs", {"thigh"}},        {"calves", {"calf", "calve"}}, {"feet", {"foot", "feet"}},
-            {"upper arms", {"upperarm"}}, {"forearms", {"forearm"}},    {"hands", {"hand"}},
+            {"upper arms", {"upperarm"}}, {"forearms", {"forearm"}},    {"hands", {"hand"}},           {"tail", {"tail"}},
         };
         static const std::vector<const char*> none;
         const std::string want = fold_case(group_title);

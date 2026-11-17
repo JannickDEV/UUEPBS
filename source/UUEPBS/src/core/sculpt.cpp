@@ -1363,18 +1363,30 @@ namespace uuepbs
             v[k] = hk[k] - along * u[k];
         }
         double vl = vlen(v);
-        if (vl < 0.01 * a && leg.ball >= 0)
+        const double fade = 0.1 * a;
+        if (vl < fade && leg.ball >= 0)
         {
-            // (nearly) straight leg pointing at the target - which way it bends is noise: the knee goes the way the
-            // toes point
+            // (nearly) straight leg pointing at the target - which way it bends is noise: the knee leans the way the
+            // toes point, more the straighter the leg (a hard switch let the knee jump as the leg swayed across it)
             const double* B = m_fresh[leg.ball].pos;
             const double toes[3] = {B[0] - F[0], B[1] - F[1], B[2] - F[2]};
             const double t_along = vdot(toes, u);
+            double tv[3];
             for (int k = 0; k < 3; ++k)
             {
-                v[k] = toes[k] - t_along * u[k];
+                tv[k] = toes[k] - t_along * u[k];
             }
-            vl = vlen(v);
+            const double tl = vlen(tv);
+            if (tl > 1.0e-4)
+            {
+                const double t = 1.0 - vl / fade;
+                const double lean = 0.01 * a * t * t / tl;
+                for (int k = 0; k < 3; ++k)
+                {
+                    v[k] += lean * tv[k];
+                }
+                vl = vlen(v);
+            }
         }
         if (vl < 1.0e-4)
         {
@@ -1576,32 +1588,44 @@ namespace uuepbs
                 }
                 elbow_pole = pole_at;
             }
-            if (weight < 1.0e-4)
+            // Where the edit (and Auto Ground) put the hand. When the elbow touches the body, the whole arm first turns
+            // about the shoulder so the elbow goes where the body wants it: the hand starts from there, so the hand's own
+            // contact fading in or out never jumps between the two.
+            const Xform hand_now = m_fresh[arm.hand];
+            double palm_now[3];
+            palm_of(arm, hand_now, arm.palm >= 0 ? &m_fresh[arm.palm] : nullptr, palm_now);
+            Xform hand_base = hand_now;
+            double palm_base[3] = {palm_now[0], palm_now[1], palm_now[2]};
+            bool elbow_turned = false;
+            if (elbow_pole)
             {
-                if (!elbow_pole)
-                {
-                    continue;
-                }
-                // only the elbow touches: the whole arm turns about the shoulder so the elbow goes where the body wants it
                 const double* H = m_fresh[arm.upper].pos;
                 const double* K = m_fresh[arm.lower].pos;
                 const double hk[3] = {K[0] - H[0], K[1] - H[1], K[2] - H[2]};
                 const double hp[3] = {pole_at[0] - H[0], pole_at[1] - H[1], pole_at[2] - H[2]};
                 double q[4];
-                if (!arc(hk, hp, q))
+                if (arc(hk, hp, q))
+                {
+                    const double Hc[3] = {H[0], H[1], H[2]};
+                    turn_about(q, Hc, hand_base.pos);
+                    turn_about(q, Hc, palm_base);
+                    double r[4];
+                    xf::qmul(q, hand_now.rot, r);
+                    qnormalize(r);
+                    std::memcpy(hand_base.rot, r, sizeof r);
+                    elbow_turned = true;
+                }
+            }
+            if (weight < 1.0e-4)
+            {
+                if (!elbow_turned)
                 {
                     continue;
                 }
-                const Xform hand_now = m_fresh[arm.hand];
-                double target[3] = {hand_now.pos[0], hand_now.pos[1], hand_now.pos[2]};
-                const double Hc[3] = {H[0], H[1], H[2]};
-                turn_about(q, Hc, target);
-                double rot[4];
-                xf::qmul(q, hand_now.rot, rot);
-                qnormalize(rot);
+                // only the elbow touches: the whole arm turns about the shoulder
                 sample.anchor = elbow_bone;
                 sample.distance = elbow_d;
-                reach_limb(arm_limb(ai), sample, target, rot, elbow_pole);
+                reach_limb(arm_limb(ai), sample, hand_base.pos, hand_base.rot, elbow_pole);
                 const double moved[3] = {m_fresh[arm.hand].pos[0] - hand_now.pos[0], m_fresh[arm.hand].pos[1] - hand_now.pos[1],
                                          m_fresh[arm.hand].pos[2] - hand_now.pos[2]};
                 sample.weight = elbow_w;
@@ -1610,24 +1634,21 @@ namespace uuepbs
                 continue;
             }
 
-            // where the edit (and Auto Ground) put the hand, and where the body wants it
-            const Xform hand_now = m_fresh[arm.hand];
-            double palm_now[3];
-            palm_of(arm, hand_now, arm.palm >= 0 ? &m_fresh[arm.palm] : nullptr, palm_now);
+            // and where the body wants it
             double wanted_rot[4], rot[4];
             xf::qmul(turn, sh.rot, wanted_rot);
-            nlerp(hand_now.rot, wanted_rot, weight, rot);
+            nlerp(hand_base.rot, wanted_rot, weight, rot);
             double spin[4], inv[4];
-            xf::qconj(hand_now.rot, inv);
+            xf::qconj(hand_base.rot, inv);
             xf::qmul(rot, inv, spin);
-            const double v[3] = {palm_now[0] - hand_now.pos[0], palm_now[1] - hand_now.pos[1], palm_now[2] - hand_now.pos[2]};
+            const double v[3] = {palm_base[0] - hand_base.pos[0], palm_base[1] - hand_base.pos[1], palm_base[2] - hand_base.pos[2]};
             double v2[3];
             xf::qrotate(spin, v, v2);
-            double target[3];
+            double palm_goal[3], target[3];
             for (int c = 0; c < 3; ++c)
             {
-                const double palm_goal = palm_now[c] + weight * (goal[c] - palm_now[c]);
-                target[c] = palm_goal - v2[c];
+                palm_goal[c] = palm_base[c] + weight * (goal[c] - palm_base[c]);
+                target[c] = palm_goal[c] - v2[c];
             }
             reach_limb(arm_limb(ai), sample, target, rot, elbow_pole);
             const double* moved_to = m_fresh[arm.hand].pos;
@@ -1645,7 +1666,7 @@ namespace uuepbs
                 double miss[3];
                 for (int c = 0; c < 3; ++c)
                 {
-                    miss[c] = palm_after[c] - (palm_now[c] + weight * (goal[c] - palm_now[c]));
+                    miss[c] = palm_after[c] - palm_goal[c];
                 }
                 sample.fingers = shape_fingers(pose, arm, ai, full_cm, fade_cm, miss);
             }
@@ -1942,7 +1963,9 @@ namespace uuepbs
     void RigSculptor::reach_limb(const Limb& arm, HandSample& sample, const double target[3], const double rot[4], const double* pole)
     {
         const int8_t ai = arm.index;
-        // Out of reach: first turn the collar bone toward the spot (the shoulder comes along).
+        // Out of reach: first turn the collar bone toward the spot (the shoulder comes along), only as far as it takes
+        // to bring the spot within the arm's reach. (Turning by the whole limit the moment the spot is a hair out of
+        // reach made the shoulder snap back and forth between frames while an animation held the arm almost straight.)
         {
             const double* h0 = m_fresh[arm.upper].pos;
             const double* k0 = m_fresh[arm.lower].pos;
@@ -1950,8 +1973,8 @@ namespace uuepbs
             const double hk0[3] = {k0[0] - h0[0], k0[1] - h0[1], k0[2] - h0[2]};
             const double kf0[3] = {f0[0] - k0[0], f0[1] - k0[1], f0[2] - k0[2]};
             const double ht0[3] = {target[0] - h0[0], target[1] - h0[1], target[2] - h0[2]};
-            const double reach0 = vlen(hk0) + vlen(kf0);
-            if (arm.collar >= 0 && m_in_plan[arm.collar] && m_hands.shoulder_turn > 0.0 && vlen(ht0) > reach0 * 0.999)
+            const double reach = (vlen(hk0) + vlen(kf0)) * 0.999;
+            if (arm.collar >= 0 && m_in_plan[arm.collar] && m_hands.shoulder_turn > 0.0 && vlen(ht0) > reach)
             {
                 const double* C = m_fresh[arm.collar].pos;
                 const double Cc[3] = {C[0], C[1], C[2]};
@@ -1962,7 +1985,20 @@ namespace uuepbs
                 const double al = vlen(axis);
                 const double full = std::atan2(al, vdot(ch, ct));
                 const double limit = std::min(180.0, m_hands.shoulder_turn) * 3.14159265358979323846 / 180.0;
-                const double angle = std::min(full, limit);
+                // The shoulder swings on a circle about the collar (radius r) in the plane of collar, shoulder and spot
+                // (s from the collar): turned by x toward the spot it is sqrt(r^2 + s^2 - 2 r s cos(full - x)) away from
+                // it. The smallest x that makes that `reach` grows from 0 as the spot leaves the reach, without a jump.
+                const double r = vlen(ch), s = vlen(ct);
+                double need = full;
+                if (r > 1.0e-6 && s > 1.0e-6)
+                {
+                    const double c = (r * r + s * s - reach * reach) / (2.0 * r * s);
+                    if (c < 1.0)
+                    {
+                        need = full - std::acos(std::max(-1.0, c));
+                    }
+                }
+                const double angle = std::min(std::max(0.0, need), limit);
                 if (al > 1.0e-9 && angle > 1.0e-6)
                 {
                     const double sh = std::sin(angle * 0.5);
@@ -2035,16 +2071,28 @@ namespace uuepbs
                 vl = pl;
             }
         }
-        if (vl < 0.01 * a)
+        const double fade = 0.1 * a;
+        if (vl < fade)
         {
-            // (nearly) straight arm pointing at the target: the elbow keeps to the side it bends to in the
-            // forearm's current direction, else about the upper arm's own Z axis
+            // (nearly) straight arm pointing at the target: the elbow's side is barely defined, so lean it toward
+            // the side it bends to about the upper arm's own Z axis. The lean fades in as the bend fades out: a
+            // hard switch made the elbow flip sides whenever a hanging arm swayed across the threshold.
             const double z[3] = {0.0, 0.0, 1.0};
-            double w[3];
+            double w[3], f[3];
             xf::qrotate(m_fresh[arm.upper].rot, z, w);
-            vcross(w, u, v);
-            vl = vlen(v);
-            if (vl < 1.0e-4)
+            vcross(w, u, f);
+            const double fl = vlen(f);
+            if (fl > 1.0e-4)
+            {
+                const double t = 1.0 - vl / fade;
+                const double lean = 0.01 * a * t * t / fl;
+                for (int k = 0; k < 3; ++k)
+                {
+                    v[k] += lean * f[k];
+                }
+                vl = vlen(v);
+            }
+            if (vl < 1.0e-6 * a)
             {
                 return;
             }
