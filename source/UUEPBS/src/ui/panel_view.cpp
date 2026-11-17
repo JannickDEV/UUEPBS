@@ -2351,6 +2351,7 @@ namespace uuepbs::ui
             }
             ImGui::SameLine();
             const float right = ImGui::GetContentRegionAvail().x;
+            const float right_edge = ImGui::GetCursorScreenPos().x + right; // (no GetWindowContentRegionMax: obsolete in the DLL build)
             std::string meta = r.now ? (r.meta.empty() ? std::string("now") : "now: " + r.meta) : r.meta;
             if (!on && r.name != anim_picks::kNormal)
             {
@@ -2382,7 +2383,8 @@ namespace uuepbs::ui
             }
             if (!meta.empty())
             {
-                ImGui::SameLine(ImGui::GetWindowContentRegionMax().x - meta_w);
+                ImGui::SameLine();
+                ImGui::SetCursorScreenPos(ImVec2(right_edge - meta_w, ImGui::GetCursorScreenPos().y));
                 ImGui::TextColored(muted(), "%s", meta.c_str());
             }
             ImGui::PopID();
