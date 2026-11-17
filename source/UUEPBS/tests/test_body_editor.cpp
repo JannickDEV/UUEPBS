@@ -186,6 +186,32 @@ int main()
         CHECK(!covered("muscle")); // Character Scale sliders never hide
     }
 
+    // ---- Height range from config.lua (HeightMin / HeightMax) ------------------------------
+    {
+        const ScaleSlider* h = find_scale_slider("height");
+        CHECK(h && scale_lo(*h) == 0.5 && scale_hi(*h) == 2.0); // default
+        EditBook book;
+        set_scale_value(book, "height", 3.5);
+        CHECK(std::fabs(scale_value(book, "height") - 2.0) < 1e-9); // clamped to the default max
+        set_height_range(0.2, 5.0);
+        CHECK(scale_lo(*h) == 0.2 && scale_hi(*h) == 5.0);
+        set_scale_value(book, "height", 3.5);
+        CHECK(std::fabs(scale_value(book, "height") - 3.5) < 1e-9);
+        double world = 0.0;
+        apply_proportions(book, BodyMap{}, world);
+        CHECK(std::fabs(world - 3.5) < 1e-9);
+        set_scale_value(book, "height", 0.1);
+        CHECK(std::fabs(scale_value(book, "height") - 0.2) < 1e-9);
+        const ScaleSlider* head = find_scale_slider("head");
+        CHECK(head && scale_lo(*head) == 0.5 && scale_hi(*head) == 2.0); // other sliders keep their range
+        set_height_range(0.0, 100.0); // kept within 0.05..20
+        CHECK(scale_lo(*h) == kHeightRangeMin && scale_hi(*h) == kHeightRangeMax);
+        set_height_range(1.5, 0.5); // min above 1 / max below 1: kept on their side of 1
+        CHECK(scale_lo(*h) < 1.0 && scale_hi(*h) > 1.0);
+        set_height_range(std::nan(""), std::nan("")); // garbage = default
+        CHECK(scale_lo(*h) == 0.5 && scale_hi(*h) == 2.0);
+    }
+
     // ---- slider table -------------------------------------------------------------------
     {
         size_t body = 0, muscle = 0;

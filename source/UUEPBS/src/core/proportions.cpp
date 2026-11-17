@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cmath>
 
 namespace uuepbs
@@ -50,7 +51,7 @@ namespace uuepbs
              "The whole character, scaled from the mesh origin (the feet on most characters), so it stays on the ground.\n"
              "Every mesh of the character scales with it, and so does its collision capsule (switch below). The camera can follow it "
              "(Camera section).",
-             {}, ScaleAxes::Uniform, Spread::Chain, 0.5, 2.0},
+             {}, ScaleAxes::Uniform, Spread::Chain, kHeightDefaultMin, kHeightDefaultMax},
             {"head", "Proportions", "Head size", "The head and everything on it (face, hair bones).", {"Head"}, ScaleAxes::Uniform, Spread::Chain,
              0.5, 2.0},
             {"neck", "Proportions", "Neck length", "Longer or shorter neck; the head keeps its size.", {"Neck"}, ScaleAxes::Length, Spread::Keep,
@@ -154,6 +155,36 @@ namespace uuepbs
         return sliders;
     }
 
+    namespace
+    {
+        // Height's range from config.lua. Written by the bridge thread, read by the window and the pose hook.
+        std::atomic<double> g_height_lo{kHeightDefaultMin};
+        std::atomic<double> g_height_hi{kHeightDefaultMax};
+
+        bool is_height(const ScaleSlider& s)
+        {
+            return std::string_view(s.id) == "height";
+        }
+    } // namespace
+
+    double scale_lo(const ScaleSlider& s)
+    {
+        return is_height(s) ? g_height_lo.load(std::memory_order_relaxed) : s.lo;
+    }
+
+    double scale_hi(const ScaleSlider& s)
+    {
+        return is_height(s) ? g_height_hi.load(std::memory_order_relaxed) : s.hi;
+    }
+
+    void set_height_range(double lo, double hi)
+    {
+        lo = std::isfinite(lo) ? std::clamp(lo, kHeightRangeMin, 0.99) : kHeightDefaultMin;
+        hi = std::isfinite(hi) ? std::clamp(hi, 1.01, kHeightRangeMax) : kHeightDefaultMax;
+        g_height_lo.store(lo, std::memory_order_relaxed);
+        g_height_hi.store(hi, std::memory_order_relaxed);
+    }
+
     const ScaleSlider* find_scale_slider(std::string_view id)
     {
         const std::string folded = fold_case(id);
@@ -223,7 +254,7 @@ namespace uuepbs
         }
         if (s)
         {
-            value = std::clamp(value, s->lo, s->hi);
+            value = std::clamp(value, scale_lo(*s), scale_hi(*s));
         }
         EditEntry e;
         e.bone = scale_key(id);
@@ -296,7 +327,7 @@ namespace uuepbs
             const double height = map.height > 1.0 ? map.height : 170.0;
             if (s.groups.empty() && s.parts.empty())
             {
-                world = std::clamp(v, s.lo, s.hi);
+                world = std::clamp(v, scale_lo(s), scale_hi(s));
                 continue;
             }
             auto scale_bone = [&](const std::string& bone, ScaleAxes axes, Spread fresh_spread) {
