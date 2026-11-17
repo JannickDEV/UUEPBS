@@ -949,28 +949,31 @@ end
 -- Lists characters for the picker: the player first, then the nearest ones. `full` walks the object
 -- array; otherwise the characters noticed since the last full walk are used.
 local function refresh_candidates(full)
-    local pool, seen = {}, {}
+    local pool, seen, trusted = {}, {}, {}
     local pawn = player_pawn()
-    local function add(actor)
+    local function add(actor, trust)
         if not alive(actor) or is_default_object(actor) then
             return
         end
         local id = address_of(actor)
+        if id and trust then
+            trusted[id] = true
+        end
         if id and not seen[id] then
             seen[id] = true
             pool[#pool + 1] = actor
         end
     end
     if pawn then
-        add(pawn)
+        add(pawn, true)
     end
     if Profile.Target and Profile.Target ~= "" then
         if full or not USE_LIVE_LIST then
             for _, a in ipairs(FindAllOf(Profile.Target) or {}) do
-                add(a)
+                add(a, true)
             end
         elseif Prefer.actor then
-            add(Prefer.actor)
+            add(Prefer.actor, true)
         end
     end
     if full or not USE_LIVE_LIST or not liveCharactersSeen then
@@ -1017,7 +1020,7 @@ local function refresh_candidates(full)
                 d = (p[1] - origin[1]) ^ 2 + (p[2] - origin[2]) ^ 2 + (p[3] - origin[3]) ^ 2
             end
         end
-        entries[#entries + 1] = { actor = a, d = d, n = #entries }
+        entries[#entries + 1] = { actor = a, d = d, n = #entries, trusted = trusted[address_of(a)] }
     end
     table.sort(entries, function(x, y)
         if x.d ~= y.d then
@@ -1032,10 +1035,17 @@ local function refresh_candidates(full)
     for _, e in ipairs(entries) do
         local key = key_of(e.actor, default)
         local edited = keptSet[key] ~= nil
-        if not edited then
-            plain = plain + 1
+        -- only bodies (uuepbs_cast.lua); the player, the profile's Target, the picked one and characters
+        -- with sliders are always listed
+        local listed = edited
+        if not edited and plain < cap then
+            listed = e.trusted or (pickedId ~= nil and address_of(e.actor) == pickedId)
+                or not late.is_character or late.is_character(e.actor)
+            if listed then
+                plain = plain + 1
+            end
         end
-        if edited or plain <= cap then
+        if listed then
             local label, engine = actor_label(e.actor, pawn)
             -- show who a character is recognised as when that differs from its object name
             -- (engine names only: with readable names the window has the engine name in a tooltip)
@@ -1365,6 +1375,98 @@ local function location_of(actor)
 end
 
 late.identity, late.location = identity_of, location_of
+
+-- Which actors the Choose character list shows (uuepbs_cast.lua: only bodies, no boats or sequence
+-- helpers). Kept in `late` (main.lua is at Lua's limit of 200 locals).
+do
+    local okK, mod = pcall(require, "uuepbs_cast")
+    if okK and type(mod) == "table" then
+        -- the actor's own skeletal meshes (its Mesh first), else those of the actors attached to it;
+        -- nil when they cannot be listed here
+        local function own_meshes(actor, out, seen)
+            local cls = engine_class("/Script/Engine.SkeletalMeshComponent")
+            if not cls then
+                return false
+            end
+            local function take(c)
+                local a = c and address_num(c)
+                if a and not seen[a] and alive(c) then
+                    seen[a] = true
+                    out[#out + 1] = c
+                end
+            end
+            pcall(function()
+                take(actor.Mesh)
+            end)
+            return pcall(function()
+                each_of(actor:K2_GetComponentsByClass(cls), take)
+            end)
+        end
+        mod.setup({
+            enabled = function()
+                return Config.CharacterListFilter ~= false
+            end,
+            show = Config.CharacterListShow,
+            hide = Config.CharacterListHide,
+            chatter = chatter,
+            now = function()
+                return os.clock() * 1000
+            end,
+            address = address_num,
+            full_name = full_name,
+            name_of = name_of,
+            class_name = class_name,
+            skeletal_meshes = function(actor)
+                if Profile.WorldMeshSearch == true then
+                    return nil -- meshes are not the actor's own components in this game
+                end
+                local out, seen = {}, {}
+                if not own_meshes(actor, out, seen) then
+                    return nil
+                end
+                if #out == 0 then
+                    for _, form in ipairs({ 3, 2 }) do
+                        local arr = {}
+                        local ok = pcall(function()
+                            if form == 2 then
+                                actor:GetAttachedActors(arr, true)
+                            else
+                                actor:GetAttachedActors(arr, true, false)
+                            end
+                        end)
+                        if ok then
+                            pcall(each_of, arr, function(a)
+                                own_meshes(a, out, seen)
+                            end)
+                            break
+                        end
+                    end
+                end
+                return out
+            end,
+            mesh_key = function(comp)
+                local m = mesh_asset(comp)
+                local a = m and address_num(m)
+                return a and (tostring(a) .. " " .. tostring(full_name(m))) or nil
+            end,
+            bone_count = function(comp)
+                local ok, n = pcall(function()
+                    return comp:GetNumBones()
+                end)
+                return ok and tonumber(n) or nil
+            end,
+            bone_name = function(comp, i)
+                local ok, n = pcall(function()
+                    return comp:GetBoneName(i):ToString()
+                end)
+                return ok and type(n) == "string" and n or nil
+            end,
+        })
+        late.is_character = mod.is_character
+    else
+        say("Choose character filter off: %s", tostring(mod))
+    end
+end
 
 ---------------------------------------------------------------------------
 -- Readable names (labels only; see uuepbs_names.lua)
