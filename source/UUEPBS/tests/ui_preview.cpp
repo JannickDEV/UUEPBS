@@ -564,6 +564,7 @@ int main(int argc, char** argv)
                           {ui::PanelView::Tab::Simplified, -1, "preview_body_groin.ppm", false, 0, "Proportions", "Groin"},
                           {ui::PanelView::Tab::Simplified, -1, "preview_body_chest.ppm", false, 0, "Proportions", "Chest"},
                           {ui::PanelView::Tab::Simplified, -1, "preview_body_torso.ppm", false, 0, "Proportions", "Torso"},
+                          {ui::PanelView::Tab::Simplified, -1, "preview_body_tail.ppm", false, 0, "Proportions", "Tail"},
                           {ui::PanelView::Tab::Presets, -1, "preview_presets.ppm"},
                           {ui::PanelView::Tab::Presets, -1, "preview_presets_list.ppm", false, 1},
                           {ui::PanelView::Tab::Presets, -1, "preview_presets_search.ppm", false, 2},

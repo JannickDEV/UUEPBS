@@ -55,7 +55,8 @@ namespace uuepbs::ui
             return false;
         }
         const float delta = (io.KeyShift ? fine : step) * (io.MouseWheel > 0.0f ? 1.0f : -1.0f);
-        v = std::min(hi, std::max(lo, v + delta));
+        // A value typed past the track's end stays out there: nudging moves it, it does not snap it back in.
+        v = std::min(std::max(hi, v), std::max(std::min(lo, v), v + delta));
         return true;
     }
 
@@ -1499,7 +1500,7 @@ namespace uuepbs::ui
         }
         ImGui::PopStyleColor();
         ImGui::PopStyleVar();
-        tooltip("Click to type a value.");
+        tooltip("Click to type a value. Typed values may go past the ends of the slider.");
         if (spec.has_axes)
         {
             ImGui::SameLine();
@@ -1562,7 +1563,7 @@ namespace uuepbs::ui
                 {"neck", "Neck size"},       {"rib cage", "Rib cage size"}, {"waist", "Waist size"},     {"belly", "Belly size"},
                 {"hips", "Hip size"},        {"shoulders", "Shoulder size"}, {"breasts", "Breast size"}, {"nipples", "Nipple size"},
                 {"butt", "Butt size"},       {"thighs", "Thigh size"},     {"calves", "Calf size"},      {"feet", "Foot size"},
-                {"upper arms", "Upper arm size"}, {"forearms", "Forearm size"}, {"hands", "Hand size"}, {"tail", "Tail size"},
+                {"upper arms", "Upper arm size"}, {"forearms", "Forearm size"}, {"hands", "Hand size"}, {"tail", "Tail size"}, {"wings", "Wing size"},
             };
             const auto it = names.find(fold_case(title));
             return it != names.end() ? std::string(it->second) : title;
