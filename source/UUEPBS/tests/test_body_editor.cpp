@@ -374,6 +374,61 @@ int main()
         set_scale_value(ears, "ear_length", 1.5);
         p = run(ears);
         CHECK(std::fabs(path(p, "c_ear_01_l", "c_ear_02_l") / path(original, "c_ear_01_l", "c_ear_02_l") - 1.5) < 1e-3);
+
+        // ---- Touched by Dibella's sliders ----
+        // Breast gravity: lower and pointing down, both sides alike (one slider, two effects).
+        EditBook gravity;
+        set_scale_value(gravity, "breast_gravity", 1.0);
+        p = run(gravity);
+        const double sag_l = pitch(p, "boob_l", "nipp_l") - pitch(original, "boob_l", "nipp_l");
+        const double sag_r = pitch(p, "boob_r", "nipp_r") - pitch(original, "boob_r", "nipp_r");
+        std::printf("breast gravity +1: breasts tilted %.1f / %.1f deg, nipple %.2f cm lower\n", sag_l, sag_r,
+                    at(original, "nipp_l").pos[2] - at(p, "nipp_l").pos[2]);
+        CHECK(sag_l < -6.0 && std::fabs(sag_l - sag_r) < 0.5 && at(p, "nipp_l").pos[2] < at(original, "nipp_l").pos[2] - 1.0);
+        CHECK(scale_slider_bones(*find_scale_slider("breast_gravity"), map).size() == 2);
+
+        // Lower back arch: the waist leans back and the rib cage forward again, so the chest stays upright and the
+        // upper body sits a little further back.
+        EditBook arch;
+        set_scale_value(arch, "lower_back_arch", 1.0);
+        p = run(arch);
+        const double upright0 = pitch(original, "spine_03", "neck_01"), upright1 = pitch(p, "spine_03", "neck_01");
+        const double back = at(original, "neck_01").pos[1] - at(p, "neck_01").pos[1];
+        const double bend = pitch(p, "spine_01", "spine_02") - pitch(original, "spine_01", "spine_02");
+        std::printf("lower back arch +1: lower spine turned %.1f deg, chest %.2f -> %.2f deg, neck %.2f cm further back\n", bend, upright0,
+                    upright1, back);
+        CHECK(std::fabs(upright1 - upright0) < 0.5 && back > 0.5 && std::fabs(bend) > 6.0);
+
+        // Butt stretch: the butt bones scale top to bottom only.
+        EditBook stretch;
+        set_scale_value(stretch, "butt_stretch", 1.4);
+        double unused = 1.0;
+        const EditBook folded = apply_proportions(stretch, map, unused);
+        const BoneFrame bf = frame_of(map, "butt_l");
+        const auto butt = folded.find("butt_l");
+        CHECK(bf.up != 0 && butt != folded.end());
+        if (bf.up != 0 && butt != folded.end())
+            for (int a = 0; a < 3; ++a)
+                CHECK(near(butt->second.edit.axis[a], a == std::abs(bf.up) - 1 ? 1.4 : 1.0));
+
+        // Nipple width: thicker, same length; arm and leg thickness: whole limbs thicker, same length, hands stay.
+        EditBook wide;
+        set_scale_value(wide, "nipple_width", 1.5);
+        set_scale_value(wide, "arm_thickness", 1.3);
+        set_scale_value(wide, "leg_thickness", 1.2);
+        const EditBook wf = apply_proportions(wide, map, unused);
+        auto girth_ok = [&](const char* bone, double v) {
+            const auto it = wf.find(bone);
+            if (it == wf.end())
+                return false;
+            const int along = long_axis_of(map, bone);
+            for (int a = 0; a < 3; ++a)
+                if (!near(it->second.edit.axis[a], a == along ? 1.0 : v))
+                    return false;
+            return true;
+        };
+        CHECK(girth_ok("nipp_l", 1.5) && girth_ok("upperarm_l", 1.3) && girth_ok("lowerarm_r", 1.3) && girth_ok("thigh_l", 1.2) &&
+              girth_ok("calf_r", 1.2) && wf.find("hand_l") == wf.end());
     }
 
     // ---- Carnal Instinct: both tails, ear tips, toes ------------------------------------------
@@ -408,6 +463,24 @@ int main()
         for (const GroupBones& gb : map.groups)
             for (const std::string& b : gb.chain)
                 CHECK(!rigging_helper(b));
+        // Top bones: a group's bones with no other bone of the group above them. Moves and turns go on these only.
+        auto index_in = [&](const std::string& b) {
+            return static_cast<int>(std::find(names.begin(), names.end(), b) - names.begin());
+        };
+        size_t below_another = 0;
+        for (const GroupBones& gb : map.groups)
+        {
+            CHECK(!gb.tops.empty() || gb.bones.empty());
+            for (const std::string& b : gb.bones)
+            {
+                bool under = false;
+                for (int p = parents[static_cast<size_t>(index_in(b))]; p >= 0; p = parents[static_cast<size_t>(p)])
+                    under = under || has(&gb.bones, names[static_cast<size_t>(p)].c_str());
+                CHECK(has(&gb.tops, b.c_str()) == !under);
+                below_another += under ? 1 : 0;
+            }
+        }
+        std::printf("Carnal Instinct: %zu group bones sit below another bone of their group\n", below_another);
     }
 
     // ---- slider table -------------------------------------------------------------------
@@ -423,7 +496,9 @@ int main()
                 continue;
             }
             CHECK(sl.lo < sl.neutral() && sl.hi > sl.neutral());
-            CHECK(sl.offset() == (sl.amount > 0.0));
+            CHECK(sl.offset() == (sl.amount != 0.0));
+            for (const SliderEffect& more : sl.also)
+                CHECK(sl.offset() && is_offset_axes(more.axes) && more.amount != 0.0 && !more.groups.empty());
             if (sl.body)
             {
                 ++body;
@@ -442,7 +517,7 @@ int main()
                 CHECK(sl.axes == ScaleAxes::Girth && sl.spread == Spread::Keep);
             }
         }
-        CHECK(body == 60 && muscle == 9);
+        CHECK(body == 67 && muscle == 9);
     }
 
     // ---- Muscle: girth only, children keep their size -----------------------------------

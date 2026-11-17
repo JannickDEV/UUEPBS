@@ -37,6 +37,9 @@ namespace uuepbs
         // that points sideways / forward / up on this bone.
         Width,    // scale sideways
         Depth,    // scale front to back
+        Vertical, // scale top to bottom (a taller, stretched butt)
+        // Moves and turns go on a group's top bones only (GroupBones::tops), so a chain of breast or ear bones moves and
+        // turns once.
         Lift,     // offset slider: move up (+) or down (-)
         Push,     // offset slider: move forward (+) or back (-)
         Together, // offset slider: move towards the middle (+) or apart (-)
@@ -62,6 +65,16 @@ namespace uuepbs
         Below, // only what hangs below the group's bones: the fingers of a hand, the toes of a foot
         Own,   // the group's own bones, while a "scale children too" size set on the group still reaches what hangs
                // below (Foot length: a longer foot, same toes, but Foot size still scales the toes)
+    };
+
+    // A further effect of the same slider value on other groups, of the same kind as the slider (offsets and turns
+    // only): Breast gravity lowers the breasts and tilts them down, Lower back arch turns the waist back and the rib
+    // cage forward again.
+    struct SliderEffect
+    {
+        std::vector<const char*> groups;
+        ScaleAxes axes;
+        double amount; // as ScaleSlider::amount; a negative amount works the other way
     };
 
     struct ScaleSlider
@@ -92,6 +105,8 @@ namespace uuepbs
         // children size" bones that carry the group's own size explicitly, so a longer tail does not compound
         // its length down the chain.
         Reach reach = Reach::Bones;
+        // More effects of the same value (see SliderEffect).
+        std::vector<SliderEffect> also = {};
 
         bool offset() const { return is_offset_axes(axes); }
         double neutral() const { return offset() ? 0.0 : 1.0; }

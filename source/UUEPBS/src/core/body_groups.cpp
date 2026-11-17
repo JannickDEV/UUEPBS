@@ -661,6 +661,24 @@ namespace uuepbs
                     const auto it = index_of.find(b);
                     at.push_back(it == index_of.end() ? n : it->second);
                 }
+                gb.tops.clear();
+                for (size_t k = 0; k < gb.bones.size(); ++k)
+                {
+                    bool top = true;
+                    if (have_parents && at[k] < n)
+                    {
+                        size_t steps = 0;
+                        for (int32_t p = parents[at[k]]; top && p >= 0 && static_cast<size_t>(p) < n && steps++ < n; p = parents[p])
+                        {
+                            top = std::find(at.begin(), at.begin() + static_cast<std::ptrdiff_t>(gb.bones.size()), static_cast<size_t>(p)) ==
+                                  at.begin() + static_cast<std::ptrdiff_t>(gb.bones.size());
+                        }
+                    }
+                    if (top)
+                    {
+                        gb.tops.push_back(gb.bones[k]);
+                    }
+                }
                 for (size_t k = 0; k < at.size(); ++k) // breadth first: parents before children
                 {
                     if (at[k] >= n)

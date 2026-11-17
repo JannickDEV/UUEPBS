@@ -126,7 +126,7 @@ namespace uuepbs
             {"breast_projection", "Chest", "Breast projection", "How far the breasts stand out from the chest.", {"Breasts"}, ScaleAxes::Depth,
              Spread::Chain, 0.2, 5.0, {}, {}, true, kBreast, {"projection", "perky", "perkiness", "forward", "pointy", "fantasy", "push"}},
             {"breast_lift", "Chest", "Breast lift", "Higher (perkier) or lower (heavier) breasts.", {"Breasts"}, ScaleAxes::Lift, Spread::Chain, -2.0,
-             2.0, {}, {}, true, kBreast, {"lift", "gravity", "sag", "saggy", "droop", "height", "up", "high"}, 0.02},
+             2.0, {}, {}, true, kBreast, {"lift", "height", "up", "high"}, 0.02},
             {"breast_cleavage", "Chest", "Breast cleavage", "Breasts closer together (+) or further apart (-).", {"Breasts"}, ScaleAxes::Together,
              Spread::Chain, -2.0, 2.0, {}, {}, true, kBreast, {"cleavage", "together", "apart", "spacing", "distance", "gap", "spread"}, 0.012},
             {"nipple_length", "Chest", "Nipple length", "Longer or flatter nipples.", {"Nipples"}, ScaleAxes::Depth, Spread::Chain, 0.2, 5.0, {}, {}, true,
@@ -239,6 +239,27 @@ namespace uuepbs
              Spread::Chain, -2.0, 2.0, {}, {}, true, {"ear"}, {"angle", "spread", "out", "side", "droop", "flop"}, 20.0},
             {"horn_angle", "Head & Neck", "Horn angle", "Horns spread out to the sides (+) or closer together (-).", {"Horns"}, ScaleAxes::Flare,
              Spread::Chain, -2.0, 2.0, {}, {}, true, {"horn"}, {"angle", "spread", "out", "side"}, 20.0},
+            // From Touched by Dibella's BodySlide / RaceMenu list (Breasts_Gravity, Breast_NippleWidth, Back_LowArch,
+            // Butt_Stretch, Torso_Large, Arm_Thick, Thighs_Thick / Calves_Size), built from the bones.
+            {"breast_gravity", "Chest", "Breast gravity", "Heavier, lower breasts that point down (+), or lighter, higher ones (-).",
+             {"Breasts"}, ScaleAxes::Lift, Spread::Chain, -2.0, 2.0, {}, {}, true, kBreast, {"gravity", "sag", "saggy", "droop", "heavy", "down"},
+             -0.012, Reach::Bones, {{{"Breasts"}, ScaleAxes::Tilt, -10.0}}},
+            {"nipple_width", "Chest", "Nipple width", "Wider or narrower nipples, same length.", {"Nipples"}, ScaleAxes::Girth, Spread::Keep, 0.2,
+             5.0, {}, {}, true, {"nipple", "nip"}, {"width", "wide", "wider", "narrow", "thick"}},
+            {"lower_back_arch", "Torso", "Lower back arch", "A deeper curve in the lower back (+) or a straighter back (-); the chest stays upright.",
+             {"Waist"}, ScaleAxes::Tilt, Spread::Chain, -2.0, 2.0, {}, {}, true, {"back", "lowerback", "spine"},
+             {"arch", "curve", "sway", "lordosis"}, 8.0, Reach::Bones, {{{"Rib cage"}, ScaleAxes::Tilt, -8.0}}},
+            {"torso_thickness", "Torso", "Torso thickness", "A thicker or slimmer waist and rib cage together, same torso length.",
+             {"Waist", "Rib cage"}, ScaleAxes::Girth, Spread::Keep, 0.2, 5.0, {"Abs", "Obliques", "Lats", "Serratus"}, {}, true,
+             {"torso"}, {"large", "big", "small", "thick", "thickness", "size"}},
+            {"butt_stretch", "Hips & Legs", "Butt stretch", "A taller (stretched) or shorter butt, top to bottom.", {"Butt"}, ScaleAxes::Vertical,
+             Spread::Chain, 0.2, 5.0, {}, {}, true, kButt, {"stretch", "tall", "height", "long"}},
+            {"arm_thickness", "Arms", "Arm thickness", "Thicker or slimmer arms along their whole length; the hands keep their size.",
+             {"Upper arms", "Forearms"}, ScaleAxes::Girth, Spread::Keep, 0.2, 5.0, {"Biceps", "Triceps"}, {}, true, {"arm", "arms"},
+             {"thick", "thickness", "slim", "thin", "chubby", "fat"}},
+            {"leg_thickness", "Hips & Legs", "Leg thickness", "Thicker or slimmer legs, thighs and calves together; the feet keep their size.",
+             {"Thighs", "Calves"}, ScaleAxes::Girth, Spread::Keep, 0.2, 5.0, {"Quads", "Hamstrings", "Calf muscles"}, {}, true, {"leg", "legs"},
+             {"thick", "thickness", "slim", "thin", "chubby", "fat"}},
         };
         return sliders;
     }
@@ -505,7 +526,7 @@ namespace uuepbs
             // Chain lengths (a tail, a finger) move the next joint out along the whole offset to it: a curled tail's
             // joints are not on one axis of the bone, and scaling only that axis would lengthen it by less.
             const bool whole_joint = s.reach != Reach::Bones && s.axes == ScaleAxes::Length;
-            auto scale_bone = [&](const std::string& bone, ScaleAxes axes, Spread fresh_spread) {
+            auto scale_bone = [&](const std::string& bone, ScaleAxes axes, Spread fresh_spread, double amount) {
                 const std::string bk = fold_case(bone);
                 auto it = out.find(bk);
                 if (it == out.end())
@@ -537,7 +558,7 @@ namespace uuepbs
                     {
                         if (std::fabs(c[a]) > 0.5)
                         {
-                            e.turn[a] += (c[a] > 0.0 ? 1.0 : -1.0) * v * s.amount;
+                            e.turn[a] += (c[a] > 0.0 ? 1.0 : -1.0) * v * amount;
                         }
                     }
                     return;
@@ -550,13 +571,13 @@ namespace uuepbs
                     {
                         // Together: towards the middle = against "outward".
                         const double towards = axes == ScaleAxes::Together ? -1.0 : 1.0;
-                        e.shift[a] += towards * sign_of(dir) * v * s.amount * height;
+                        e.shift[a] += towards * sign_of(dir) * v * amount * height;
                     }
                     return;
                 }
-                if (axes == ScaleAxes::Width || axes == ScaleAxes::Depth)
+                if (axes == ScaleAxes::Width || axes == ScaleAxes::Depth || axes == ScaleAxes::Vertical)
                 {
-                    const int a = axis_of(axes == ScaleAxes::Width ? fr.out : fr.forward);
+                    const int a = axis_of(axes == ScaleAxes::Width ? fr.out : axes == ScaleAxes::Depth ? fr.forward : fr.up);
                     if (a >= 0)
                     {
                         e.axis[a] *= v;
@@ -568,7 +589,7 @@ namespace uuepbs
                     return;
                 }
                 const int along = long_axis_of(map, bk);
-                if (whole_joint)
+                if (whole_joint && axes == ScaleAxes::Length)
                 {
                     for (int a = 0; a < 3; ++a)
                     {
@@ -618,27 +639,34 @@ namespace uuepbs
                     }
                 }
             };
-            if (s.reach == Reach::Bones)
-            {
-                each_group(s.groups, [&](const std::string& bone, const GroupBones&) { scale_bone(bone, s.axes, s.spread); });
-            }
-            else
-            {
-                for (const char* title : s.groups)
+            // A group's bones for one effect. Moves and turns go on its top bones only: a bone below another one of
+            // the group follows it already, so a chain of breast or ear bones moves and turns once instead of once
+            // more at every bone down the chain.
+            auto effect_on_groups = [&](const std::vector<const char*>& titles, ScaleAxes axes, Reach reach, double amount) {
+                const bool turn = is_offset_axes(axes);
+                for (const char* title : titles)
                 {
+                    const std::string want = fold_case(title);
                     for (const GroupBones& gb : map.groups)
                     {
-                        if (fold_case(gb.group.title) == fold_case(title))
+                        if (fold_case(gb.group.title) != want)
                         {
-                            for (const std::string& bone : reach_bones(gb, s.reach))
-                            {
-                                scale_bone(bone, s.axes, s.spread);
-                            }
+                            continue;
+                        }
+                        const std::vector<std::string> bones = turn && !gb.tops.empty() ? gb.tops : reach_bones(gb, reach);
+                        for (const std::string& bone : bones)
+                        {
+                            scale_bone(bone, axes, s.spread, amount);
                         }
                     }
                 }
+            };
+            effect_on_groups(s.groups, s.axes, s.reach, s.amount);
+            for (const SliderEffect& more : s.also)
+            {
+                effect_on_groups(more.groups, more.axes, Reach::Bones, more.amount);
             }
-            each_group(s.helpers, [&](const std::string& bone, const GroupBones& gb) { scale_bone(bone, ScaleAxes::Uniform, gb.group.spread); });
+            each_group(s.helpers, [&](const std::string& bone, const GroupBones& gb) { scale_bone(bone, ScaleAxes::Uniform, gb.group.spread, 0.0); });
             for (const char* part : s.parts)
             {
                 for (const PartBones& pb : map.parts)
@@ -647,7 +675,7 @@ namespace uuepbs
                     {
                         for (const std::string& bone : pb.bones)
                         {
-                            scale_bone(bone, s.axes, s.spread);
+                            scale_bone(bone, s.axes, s.spread, s.amount);
                         }
                     }
                 }
@@ -870,6 +898,22 @@ namespace uuepbs
                     if (fold_case(gb.group.title) == fold_case(title))
                     {
                         for (const std::string& b : list == &s.groups ? reach_bones(gb, s.reach) : gb.bones)
+                        {
+                            add(b);
+                        }
+                    }
+                }
+            }
+        }
+        for (const SliderEffect& more : s.also)
+        {
+            for (const char* title : more.groups)
+            {
+                for (const GroupBones& gb : map.groups)
+                {
+                    if (fold_case(gb.group.title) == fold_case(title))
+                    {
+                        for (const std::string& b : gb.bones)
                         {
                             add(b);
                         }

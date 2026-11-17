@@ -79,6 +79,9 @@ namespace uuepbs
         // the group's own bones. Length / thickness sliders on tails, ears and fingers use the whole chain.
         std::vector<std::string> chain;
         std::vector<int32_t> chain_parent;
+        // `bones` with no other bone of the group above them (one per side for a breast or an ear chain). Turn
+        // sliders turn these only, so an angle is not applied again at every bone down the chain.
+        std::vector<std::string> tops;
     };
 
     // Which signed local axis of a bone points up / forward / outward (measure_long_axes).
