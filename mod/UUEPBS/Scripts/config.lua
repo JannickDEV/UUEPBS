@@ -180,6 +180,12 @@ return {
     -- The window's choice (Character Scale > Overall) is remembered in _physics.txt and wins over this.
     -- Console: "ubs physics [follow|off|keep]".
     PhysicsMode = "follow",
+    -- "Heavier when bigger" (with "follow"): a bigger breast, butt or other physics part also moves like a
+    -- heavier one - softer springs, slower and wider sway, more sag; a smaller one gets quicker and tighter.
+    -- Works on every physics node type, so in every game. 1.0 = natural (100%), 2.0 = twice as pronounced,
+    -- 0 = sizes only. Up to 3.0. The window's slider (next to Jiggle physics) is remembered in _physics.txt
+    -- and wins over this. Console: "ubs physics weight <percent>".
+    PhysicsWeight = 1.0,
 
     -- Auto Ground: longer legs sink the feet into the floor (the pelvis stays where the animation put
     -- it), shorter legs make them float. With this on, the player's mesh is moved up or down by what

@@ -2830,6 +2830,8 @@ local function build_state()
         "collision_ui=" .. (late.collision and (late.collisionWanted and "1" or "0") or ""),
         -- the window's "Jiggle physics" choice and what it did (uuepbs_physics.lua)
         "physics_ui=" .. (late.physics and late.physics.mode() or ""),
+        -- "Heavier when bigger" strength (0..3, 1 = 100%) next to it
+        "physics_weight=" .. (late.physics and string.format("%.2f", late.physics.weight()) or ""),
         "physics_info=" .. clean(late.physics and late.physics.summary() or ""),
     }, "\t"))
     add("scan\t" .. scanCount)
@@ -2890,7 +2892,7 @@ local function write_state()
     stateDirty = false
 end
 
-local seen = { rescan = 0, pick = 0, refresh = 0, relist = 0, groundui = 0, collui = 0, physicsui = 0, session = nil }
+local seen = { rescan = 0, pick = 0, refresh = 0, relist = 0, groundui = 0, collui = 0, physicsui = 0, physweight = 0, session = nil }
 local hookState, hookText = "waiting", ""
 local windowOpen = false
 local lastDllText = nil
@@ -2924,6 +2926,7 @@ local function read_dll_state()
         -- New DLL session: take its counters as the baseline.
         seen.session = dllSession
         seen.rescan, seen.pick, seen.refresh, seen.relist, seen.groundui, seen.collui, seen.physicsui = -1, -1, -1, -1, -1, -1, -1
+        seen.physweight = -1
     end
     local mine = false -- ack/replies are only ours once the DLL has seen this script's session
     local open = false
@@ -2984,6 +2987,13 @@ local function read_dll_state()
                 late.set_physics(b)
             end
             seen.physicsui = n
+        elseif kind == "physweight" then
+            -- the window's "Heavier when bigger" slider (next to Jiggle physics)
+            local n = tonumber(a) or 0
+            if seen.physweight >= 0 and n ~= seen.physweight and late.set_physics_weight then
+                late.set_physics_weight(b)
+            end
+            seen.physweight = n
         elseif kind == "relist" then
             local n = tonumber(a) or 0
             if seen.relist >= 0 and n ~= seen.relist then
@@ -3322,22 +3332,40 @@ do
         end })
         local file = presetFolder .. "\\_physics.txt"
         mod.set_mode(tostring(Config.PhysicsMode or "follow"))
-        local saved = read_text(file)
-        saved = saved and saved:match("^%s*(%a+)")
+        if Config.PhysicsWeight ~= nil then
+            mod.set_weight(Config.PhysicsWeight)
+        end
+        local text = read_text(file)
+        local saved = text and text:match("^%s*(%a+)")
         if saved then
             mod.set_mode(saved)
+        end
+        local savedWeight = text and text:match("weight%s*=%s*([%d%.]+)")
+        if savedWeight then
+            mod.set_weight(savedWeight)
+        end
+        local function remember_physics()
+            stateDirty = true
+            local f = io.open(file, "wb")
+            if f then
+                f:write(mod.mode() .. "\n" .. string.format("weight=%.2f", mod.weight()) .. "\n")
+                f:close()
+            end
         end
         late.set_physics = function(m)
             if not mod.set_mode(m) then
                 return false
             end
-            stateDirty = true
-            local f = io.open(file, "wb")
-            if f then
-                f:write(mod.mode() .. "\n")
-                f:close()
-            end
+            remember_physics()
             say("jiggle physics: %s", mod.mode())
+            return true
+        end
+        late.set_physics_weight = function(w)
+            if not mod.set_weight(w) then
+                return false
+            end
+            remember_physics()
+            say("jiggle physics heavier when bigger: %d%%", math.floor(mod.weight() * 100 + 0.5))
             return true
         end
         local lastInfo = nil
@@ -3763,7 +3791,7 @@ local function rest_of(params, first)
     return table.concat(parts, " ")
 end
 
-local usage = "uuepbs (or ubs) ui | status | rescan | copies | camera | collision [on|off] | hands | list | load <name> | next | prev | save <name> | on | off | compare [on|off] | reset [all] | diag | skin [name] | morph <name> [weight] | ground [on|off|<extra cm>] | physics [follow|off|keep]"
+local usage = "uuepbs (or ubs) ui | status | rescan | copies | camera | collision [on|off] | hands | list | load <name> | next | prev | save <name> | on | off | compare [on|off] | reset [all] | diag | skin [name] | morph <name> [weight] | ground [on|off|<extra cm>] | physics [follow|off|keep|weight <percent>]"
 
 local function console(_, params, out)
     local verb = string.lower(params[1] or "")
@@ -3808,12 +3836,18 @@ local function console(_, params, out)
         reply(late.hands and late.hands.status() or "hand contact is off (HandContact in config.lua)")
         send_command("hands", "", true)
     elseif verb == "physics" then
-        -- ubs physics [follow | off | keep]
+        -- ubs physics [follow | off | keep | weight <percent>]
         local arg = string.lower(params[2] or "")
         if not late.physics then
             reply("physics handling is not loaded")
+        elseif arg == "weight" or arg == "heavier" then
+            if params[3] and not late.set_physics_weight(params[3]) then
+                reply("ubs physics weight <0-300%> (100 = natural, 0 = off)")
+            else
+                reply(late.physics.status())
+            end
         elseif arg ~= "" and not late.set_physics(arg) then
-            reply("ubs physics follow | off | keep")
+            reply("ubs physics follow | off | keep | weight <percent>")
         else
             reply(late.physics.status())
         end

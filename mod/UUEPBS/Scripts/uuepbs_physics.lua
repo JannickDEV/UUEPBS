@@ -20,6 +20,17 @@
 -- Whatever is changed is put back when the character stops scaling bones (sliders back to 1,
 -- Before, sliders off) or the mode changes.
 --
+-- "Heavier when bigger" (follow mode; the window's slider next to the choice, "ubs physics weight
+-- <percent>", config.lua PhysicsWeight): a bigger breast, butt or anything else with physics also
+-- moves like a heavier one. The springs that pull it back to the animated pose are softened and their
+-- damping with them, so it sways slower and wider, sags more and settles later; a smaller one gets
+-- quicker and tighter. It is the same rule for every node type (Kawaii Stiffness/Damping, AnimDynamics
+-- spring constants, Spring Bone stiffness/damping, Physics Asset joint limits and drives), so it works
+-- in any game without per-game lists: only bones whose size the sliders change are touched.
+-- The model is a scaled-up soft body: its mass grows with the volume (size^3) but its springiness
+-- only with its cross-section, so the spring per mass falls with size^2. At 100% a breast twice as
+-- big gets a quarter of the spring (half the bounce frequency); 200% is twice as pronounced, 0% off.
+--
 -- A Physics Asset is shared by every character using the same body. Only bodies whose bones the
 -- sliders scale are changed, the engine's own collision bodies keep theirs until the game rebuilds
 -- them, and when two edited characters share an asset the first one decides its sizes.
@@ -28,6 +39,7 @@ local P = {}
 
 local ctx = { say = function() end, fname = function(n) return n end }
 local mode = "follow"
+local weight = 1.0 -- "Heavier when bigger" strength: 0 off, 1 natural, up to MAX_WEIGHT
 local tracked = {} -- component address -> state (see track())
 local assets = {}  -- physics asset address -> { asset, owner = comp address, saved = {...}, factors key }
 local told = {}    -- messages said once
@@ -46,11 +58,15 @@ local NODE_KINDS = {
 
 -- Node fields scaled in "follow" mode. bone = the node's own bone; arrays list per-element bones.
 -- kind "len" = a length (radius...), "vec" = an offset in the bone's space.
+-- weight = fields that make the node heavier when its bone grows ("Heavier when bigger"):
+-- "stiff" = a spring (divided by the weight), "damp" = its damping (divided by the weight's square root,
+-- so it bounces as many times as before, only slower).
 local NODE_FIELDS = {
     dynamics = {
         bone = "BoundBone",
         fields = { { { "BoxExtents" }, "vec" }, { { "LocalJointOffset" }, "vec" }, { { "SphereCollisionRadius" }, "len" } },
         arrays = { { "SphericalLimits", "DrivingBone", { { { "SphereLocalOffset" }, "vec" }, { { "LimitRadius" }, "len" } } } },
+        weight = { { { "LinearSpringConstant" }, "stiff" }, { { "AngularSpringConstant" }, "stiff" } },
     },
     kawaii = {
         bone = "RootBone",
@@ -60,8 +76,33 @@ local NODE_FIELDS = {
             { "CapsuleLimits", "DrivingBone", { { { "OffsetLocation" }, "vec" }, { { "Radius" }, "len" }, { { "Length" }, "len" } } },
             { "BoxLimits", "DrivingBone", { { { "OffsetLocation" }, "vec" }, { { "Extent" }, "vec" } } },
         },
+        weight = { { { "PhysicsSettings", "Stiffness" }, "stiff" }, { { "PhysicsSettings", "Damping" }, "damp" } },
+    },
+    spring = {
+        bone = "SpringBone",
+        fields = {},
+        weight = { { { "SpringStiffness" }, "stiff" }, { { "SpringDamping" }, "damp" } },
     },
 }
+
+-- Physics Asset joint springs ("Heavier when bigger"), on joints whose child bone (ConstraintBone1) grew:
+-- soft limits and motor drives of the constraint profile.
+local JOINT_SPRINGS = {}
+for _, p in ipairs({ { "ConeLimit" }, { "TwistLimit" }, { "LinearLimit" }, { "AngularDrive", "SlerpDrive" },
+    { "AngularDrive", "TwistDrive" }, { "AngularDrive", "SwingDrive" }, { "LinearDrive", "XDrive" }, { "LinearDrive", "YDrive" },
+    { "LinearDrive", "ZDrive" } }) do
+    for _, f in ipairs({ { "Stiffness", "stiff" }, { "Damping", "damp" } }) do
+        local path = { "ProfileInstance" }
+        for _, k in ipairs(p) do
+            path[#path + 1] = k
+        end
+        path[#path + 1] = f[1]
+        JOINT_SPRINGS[#JOINT_SPRINGS + 1] = { path, f[2] }
+    end
+end
+
+local MAX_WEIGHT = 3.0   -- 300%
+local HEAVY_MIN, HEAVY_MAX = 0.04, 50 -- the weight factor stays in here, so huge or tiny sliders keep the simulation stable
 
 local EPS = 0.02 -- scale changes below 2% are ignored
 local CHECK_MS = 1000 -- bone scales are read this often per character
@@ -406,6 +447,11 @@ local function node_targets(n)
     for _, f in ipairs(spec.fields) do
         out[#out + 1] = { obj = node, path = f[1], how = f[2], bone = own }
     end
+    if weight > 0 then
+        for _, f in ipairs(spec.weight or {}) do
+            out[#out + 1] = { obj = node, path = f[1], how = f[2], bone = own }
+        end
+    end
     for _, a in ipairs(spec.arrays or {}) do
         for _, el in ipairs(items(get(node, { a[1] }))) do
             local b = bone_of(get(el, { a[2] })) or own
@@ -448,6 +494,11 @@ local function asset_targets(asset, scaled)
         if b1 and scaled[b1] then
             out[#out + 1] = { obj = inst, path = { "Pos1" }, how = "vec", bone = b1 }
             out[#out + 1] = { obj = inst, path = { "ProfileInstance", "LinearLimit", "Limit" }, how = "mean", bone = b1 }
+            if weight > 0 then
+                for _, f in ipairs(JOINT_SPRINGS) do
+                    out[#out + 1] = { obj = inst, path = f[1], how = f[2], bone = b1 }
+                end
+            end
         end
         if b2 and scaled[b2] then
             out[#out + 1] = { obj = inst, path = { "Pos2" }, how = "vec", bone = b2 }
@@ -456,8 +507,22 @@ local function asset_targets(asset, scaled)
     return out
 end
 
+-- How much heavier a bone of relative scale s moves: (size^2)^weight, kept between HEAVY_MIN and HEAVY_MAX.
+function P.heaviness(s, w)
+    w = w or weight
+    local h = (mean3(s) ^ 2) ^ w
+    if h ~= h then
+        return 1
+    end
+    return math.max(HEAVY_MIN, math.min(HEAVY_MAX, h))
+end
+
 local function factor_for(t, s)
-    if t.how == "vec" then
+    if t.how == "stiff" then
+        return 1 / P.heaviness(s)
+    elseif t.how == "damp" then
+        return 1 / math.sqrt(P.heaviness(s))
+    elseif t.how == "vec" then
         return s
     elseif t.how == "along" then
         return P.axis_factor(s, t.axes[3])
@@ -762,7 +827,8 @@ local function follow(st, t, force)
     end
     st.due = t + CHECK_MS
     local scales = read_scales(st.comp, wanted_bones(st))
-    local key = scales_key(scales)
+    local sizes = scales_key(scales)
+    local key = sizes .. "|" .. string.format("%.2f", weight)
     if key == st.applied then
         return
     end
@@ -808,8 +874,9 @@ local function follow(st, t, force)
     st.restart_post = st.restart_post or st.post_changed
     st.applied = key
     st.counts = { nodes = nodeCount, values = bodyCount }
-    if key ~= "" then
-        say("physics follows the sliders on %s: %d node(s), %d physics asset value(s) scaled", st.label, nodeCount, bodyCount)
+    if sizes ~= "" then
+        say("physics follows the sliders on %s: %d node(s), %d physics asset value(s) scaled%s", st.label, nodeCount, bodyCount,
+            weight > 0 and string.format(", %d%% heavier when bigger", math.floor(weight * 100 + 0.5)) or "")
     end
 end
 
@@ -847,6 +914,28 @@ function P.set_mode(m)
     end
     if m ~= mode then
         mode = m
+        P.force = true
+    end
+    return true
+end
+
+function P.weight()
+    return weight
+end
+
+-- "Heavier when bigger" strength: 0 (off) .. 3 (300%), 1 = natural. Accepts "150%" or "1.5".
+function P.set_weight(w)
+    local txt = tostring(w or "")
+    local n = tonumber((txt:gsub("%%", "")))
+    if not n or n ~= n then
+        return false
+    end
+    if txt:find("%", 1, true) or n > MAX_WEIGHT then
+        n = n / 100
+    end
+    n = math.max(0, math.min(MAX_WEIGHT, n))
+    if math.abs(n - weight) > 0.001 then
+        weight = n
         P.force = true
     end
     return true
@@ -920,6 +1009,7 @@ function P.summary()
             parts[#parts + 1] = st.label .. ": " .. table.concat(names, ", ") .. " off"
         else
             parts[#parts + 1] = st.label .. ": " .. table.concat(names, ", ") .. (st.waiting and " (after the animation)" or " scaled")
+                .. ((weight > 0 and not st.waiting) and ", heavier when bigger" or "")
         end
     end
     table.sort(parts)
@@ -931,7 +1021,8 @@ end
 
 -- For "ubs physics" / "ubs status".
 function P.status()
-    return "physics (" .. mode .. "): " .. P.summary()
+    return "physics (" .. mode .. (mode == "follow" and string.format(", heavier when bigger %d%%", math.floor(weight * 100 + 0.5)) or "")
+        .. "): " .. P.summary()
 end
 
 return P

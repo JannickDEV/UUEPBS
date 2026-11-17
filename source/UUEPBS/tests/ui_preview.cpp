@@ -69,6 +69,9 @@ struct FakeTargets : ui::TargetSource
     std::string physics = "follow";
     std::string physics_mode() override { return physics; }
     void set_physics_mode(const std::string& m) override { physics = m; }
+    float weight = 1.0f;
+    float physics_weight() override { return weight; }
+    void set_physics_weight(float w) override { weight = w; }
     std::string physics_info() override { return "Roku (player): 1 Kawaii, 1 Rigid Body scaled"; }
 };
 
