@@ -65,10 +65,28 @@ struct FakeTargets : ui::TargetSource
                 "hand_l: on thigh_l, 100% corrected, moved 22 cm"};
     }
     HandOptions hands{true};
+    bool hand_anims(ui::HandAnimList& out) override
+    {
+        out.custom = true;
+        out.choice = picks;
+        out.seen = {{"A_Sex-Solo_JerkMed-Futa-LoopA_Montage", "Roku (player)", 6, 9},
+                    {"AM_Emote_HandsOnHips", "Anca", 2, 8},
+                    {"A_Idle_ArmsCrossed", "Vendor", 1, 7},
+                    {"AM_Sit_Bench_Enter", "Roku (player)", 3, 6},
+                    {"AM_Cutscene_Intro_Hug", "Anca", 1, 5}};
+        out.playing_now = {{"A_Sex-Solo_JerkMed-Futa-LoopA_Montage", "Roku (player)"}};
+        out.target_playing = "A_Sex-Solo_JerkMed-Futa-LoopA_Montage";
+        return true;
+    }
+    void set_hand_anims(const anim_picks::Choice& c) override { picks = c; }
+    anim_picks::Choice picks{anim_picks::Mode::except, {"(normal movement)", "A_Idle_ArmsCrossed", "*Cutscene*"}};
     int auto_ground() override { return 1; }
     std::string physics = "follow";
     std::string physics_mode() override { return physics; }
     void set_physics_mode(const std::string& m) override { physics = m; }
+    float weight = 1.0f;
+    float physics_weight() override { return weight; }
+    void set_physics_weight(float w) override { weight = w; }
     std::string physics_info() override { return "Roku (player): 1 Kawaii, 1 Rigid Body scaled"; }
     // Status > Scene copies
     std::vector<bridge::CopyRule> copy_rules{{"never", "Nenu", "", "window"}, {"copy", "BP_Seq_*", "player", "config"}};
@@ -567,6 +585,7 @@ int main(int argc, char** argv)
                           {ui::PanelView::Tab::Simplified, -1, "preview_body_groin.ppm", false, 0, "Proportions", "Groin"},
                           {ui::PanelView::Tab::Simplified, -1, "preview_body_chest.ppm", false, 0, "Proportions", "Chest"},
                           {ui::PanelView::Tab::Simplified, -1, "preview_body_torso.ppm", false, 0, "Proportions", "Torso"},
+                          {ui::PanelView::Tab::Simplified, -1, "preview_body_tail.ppm", false, 0, "Proportions", "Tail"},
                           {ui::PanelView::Tab::Presets, -1, "preview_presets.ppm"},
                           {ui::PanelView::Tab::Presets, -1, "preview_presets_list.ppm", false, 1},
                           {ui::PanelView::Tab::Presets, -1, "preview_presets_search.ppm", false, 2},

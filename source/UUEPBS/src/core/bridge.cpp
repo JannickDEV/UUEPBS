@@ -349,6 +349,7 @@ namespace uuepbs::bridge
         {
             out += "crule\t" + clean_field(r.mode) + "\t" + clean_field(r.who) + "\t" + clean_field(r.of) + "\n";
         }
+        out += "physweight\t" + std::to_string(s.physics_weight) + "\t" + clean_field(s.physics_weight_value) + "\n";
         out += "hook\t" + clean_field(s.hook_state) + "\t" + clean_field(s.hook_text) + "\n";
         out += std::string("ui\t") + (s.window_open ? "1" : "0") + "\n";
         for (const Reply& r : s.replies)

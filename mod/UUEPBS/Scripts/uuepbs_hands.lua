@@ -4,7 +4,8 @@
 -- animation along with the edited body, and bends the arm to reach it. It works from the bones alone.
 -- This module only tells the DLL which animation each tracked character plays right now (its active
 -- montage, else the animation a single-node mesh plays), so that:
---   * config.lua HandContactAnims can limit Hand Contact to certain animations (by name), and
+--   * the window (Character Scale > Animation) can list every animation the characters played, to tick the ones
+--     Hand Contact works in (config.lua HandContactAnims does the same by typed name parts), and
 --   * "ubs hands" can show which animation is playing next to where the hands rest.
 -- Sent as "play <actor key> <name>" lines in bridge_in.txt.
 
@@ -30,6 +31,46 @@ local function clean(s)
     return (tostring(s or ""):gsub("[\t\r\n]", " "))
 end
 
+-- First element of a UE4SS TArray (1-based; elements may come as RemoteUnrealParam), nil when empty/unreadable.
+local function first(arr)
+    local ok, e = pcall(function()
+        local v = arr[1]
+        if type(v) == "userdata" or type(v) == "table" then
+            local okG, g = pcall(function()
+                return v:get()
+            end)
+            if okG and g ~= nil then
+                return g
+            end
+        end
+        return v
+    end)
+    return ok and e or nil
+end
+
+-- Montages made on the fly (PlaySlotAnimationAsDynamicMontage, Sequencer, many cutscene and emote systems) are
+-- all called "AnimMontage_<n>" and change name every time: name them by the animation inside instead, so the
+-- same scene shows up as the same entry in the window's list in every game.
+local function montage_name(m)
+    local name = name_of(m)
+    if name and not name:match("^AnimMontage_%d+$") then
+        return name
+    end
+    local ok, inner = pcall(function()
+        local track = first(m.SlotAnimTracks)
+        local seg = first(track.AnimTrack.AnimSegments)
+        return seg.AnimReference
+    end)
+    if ok and alive(inner) then
+        local n = name_of(inner)
+        if n and n ~= "" and n ~= "None" then
+            return n
+        end
+    end
+    return name
+end
+H.montage_name = montage_name
+
 -- The montage the mesh's anim instance plays, else the animation of a single-node mesh, else nil.
 function H.playing_on(comp)
     if not alive(comp) then
@@ -48,7 +89,7 @@ function H.playing_on(comp)
             return inst:GetCurrentActiveMontage()
         end)
         if okM and alive(m) then
-            return name_of(m)
+            return montage_name(m)
         end
     end
     local okA, anim = pcall(function()

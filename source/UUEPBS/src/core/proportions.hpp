@@ -37,9 +37,16 @@ namespace uuepbs
         // that points sideways / forward / up on this bone.
         Width,    // scale sideways
         Depth,    // scale front to back
+        Vertical, // scale top to bottom (a taller, stretched butt)
+        // Moves and turns go on a group's top bones only (GroupBones::tops), so a chain of breast or ear bones moves and
+        // turns once.
         Lift,     // offset slider: move up (+) or down (-)
         Push,     // offset slider: move forward (+) or back (-)
         Together, // offset slider: move towards the middle (+) or apart (-)
+        // Turn offset sliders, `amount` = degrees at 1.0, about axes taken from the measured directions:
+        Tilt,  // the forward-pointing end turns up (+) or down (-): breast perkiness, nipple angle
+        Splay, // the forward-pointing end turns outward (+) or inward (-): breasts pointing apart
+        Flare, // the upward-pointing end turns outward (+) or inward (-): ears and horns spreading
         // Character Scale > Camera (camera.hpp): no bones, the Lua script moves the game's camera.
         CameraFollow,   // toggle (offset kind, 0 = off, 1 = on): the camera follows Height
         CameraLift,     // offset slider in centimetres: camera pivot up (+) or down (-)
@@ -49,6 +56,26 @@ namespace uuepbs
     bool is_offset_axes(ScaleAxes axes);
     // True for the Camera sliders: they never touch a bone.
     bool is_camera_axes(ScaleAxes axes);
+
+    // Which bones of a slider's groups it scales (GroupBones::chain).
+    enum class Reach : uint8_t
+    {
+        Bones, // the group's own bones (a tail's root, a hand)
+        Chain, // the group's bones and everything hanging below them: a whole tail, an ear and its tip
+        Below, // only what hangs below the group's bones: the fingers of a hand, the toes of a foot
+        Own,   // the group's own bones, while a "scale children too" size set on the group still reaches what hangs
+               // below (Foot length: a longer foot, same toes, but Foot size still scales the toes)
+    };
+
+    // A further effect of the same slider value on other groups, of the same kind as the slider (offsets and turns
+    // only): Breast gravity lowers the breasts and tilts them down, Lower back arch turns the waist back and the rib
+    // cage forward again.
+    struct SliderEffect
+    {
+        std::vector<const char*> groups;
+        ScaleAxes axes;
+        double amount; // as ScaleSlider::amount; a negative amount works the other way
+    };
 
     struct ScaleSlider
     {
@@ -71,8 +98,15 @@ namespace uuepbs
         // `morph_dims`, see part_covered_by_morph) replaces this slider.
         std::vector<const char*> morph_words = {};
         std::vector<const char*> morph_dims = {};
-        // Offset sliders: how far 1.0 moves the bones, as a fraction of the character's height.
+        // Offset sliders: how far 1.0 moves the bones, as a fraction of the character's height
+        // (Lift / Push / Together), or how far it turns them in degrees (Tilt / Splay / Flare).
         double amount = 0.0;
+        // Groups only: which of their bones (see Reach). Anything but Bones turns the group's chain into "keep
+        // children size" bones that carry the group's own size explicitly, so a longer tail does not compound
+        // its length down the chain.
+        Reach reach = Reach::Bones;
+        // More effects of the same value (see SliderEffect).
+        std::vector<SliderEffect> also = {};
 
         bool offset() const { return is_offset_axes(axes); }
         double neutral() const { return offset() ? 0.0 : 1.0; }
@@ -94,6 +128,14 @@ namespace uuepbs
     // (HeightMin / HeightMax, sent by the script), the others are fixed.
     double scale_lo(const ScaleSlider& s);
     double scale_hi(const ScaleSlider& s);
+    // What a typed value may reach: the track's range is only where dragging goes. Like RaceMenu, a body
+    // slider takes values far past its track (factors 0.02..20, offsets -10..10); Height and the camera
+    // keep their own range.
+    double scale_typed_lo(const ScaleSlider& s);
+    double scale_typed_hi(const ScaleSlider& s);
+    constexpr double kTypedFactorMin = 0.02; // BoneEdit::clamp keeps any scale within 0.02..20
+    constexpr double kTypedFactorMax = 20.0;
+    constexpr double kTypedOffsetMax = 10.0;
     // Sets Height's range (config.lua HeightMin / HeightMax). Kept within kHeightRangeMin..kHeightRangeMax,
     // below 1 for the minimum and above 1 for the maximum; non-numbers fall back to the default 0.5..2.
     void set_height_range(double lo, double hi);
@@ -112,7 +154,7 @@ namespace uuepbs
     // The slider's neutral value (1.0, or 0.0 for offset sliders) when it is not set. Offset
     // sliders keep their value in the pseudo entry's shift[0], the others in axis[0].
     double scale_value(const EditBook& book, std::string_view id);
-    // Writes (or, at 1.0, removes) the pseudo entry. Values are clamped to the slider's range.
+    // Writes (or, at 1.0, removes) the pseudo entry. Values are clamped to scale_typed_lo..scale_typed_hi.
     void set_scale_value(EditBook& book, std::string_view id, double value);
     // The pseudo entry for `id` set to `value` (what Registry::set_bone stores).
     EditEntry scale_entry(std::string_view id, double value);
@@ -142,6 +184,8 @@ namespace uuepbs
     // up / forward / outward (away from the middle; sideways for middle bones).
     BoneFrame frame_of(const BodyMap& map, std::string_view bone);
 
+    // The bones of `gb` a slider with this reach scales.
+    std::vector<std::string> reach_bones(const GroupBones& gb, Reach reach);
     // Bones a slider drives on this skeleton (groups, helpers and parts), display spelling.
     std::vector<std::string> scale_slider_bones(const ScaleSlider& s, const BodyMap& map);
     // A Body tab slider whose job a real morph target in `morphs` already does.

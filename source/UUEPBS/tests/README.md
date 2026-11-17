@@ -58,7 +58,8 @@ Host-side tests (Linux/macOS/WSL with g++ 13+ or clang 17+). None of them need W
 
     # jiggle physics (Scripts/uuepbs_physics.lua) against a mocked engine: physics nodes found in the main and
     # post-process blueprints, "follow" scales Physics Asset shapes/joints and AnimDynamics/Kawaii fields,
-    # blueprint restarts (not during a montage), "off" (Alpha 0, cloth paused), "keep", everything put back
+    # blueprint restarts (not during a montage), "off" (Alpha 0, cloth paused), "keep", everything put back,
+    # "Heavier when bigger" (springs / size^2, damping / size, clamped, 0% / 200%, put back)
     lua physics_test.lua ../../../mod/UUEPBS/Scripts
 
     # Character Scale > Camera: sliders, "cam" lines, presets / share codes (core/camera.*)

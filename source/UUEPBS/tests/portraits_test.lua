@@ -116,8 +116,19 @@ local canvasRT = obj({
         })
     end),
 })
+local refuse = nil -- function(world) -> true: the engine hands back nothing for that world context
+local spawned
 local statics = obj({
     BeginDeferredActorSpawnFromClass = ufn("BeginDeferredActorSpawnFromClass", function(_, world, cls, xf)
+        if refuse and refuse(world) then
+            calls[#calls + 1] = "refused"
+            return nil
+        end
+        return spawned(world, cls, xf)
+    end),
+    FinishSpawningActor = ufn("FinishSpawningActor", function() end),
+})
+spawned = function(world, cls, xf)
         if cls == pointLightClass then
             calls[#calls + 1] = "light"
             local rec = { xf = xf, setBefore = {} }
@@ -153,9 +164,7 @@ local statics = obj({
             end,
         })
         return obj({ CaptureComponent2D = comp, K2_DestroyActor = function() calls[#calls + 1] = "destroy" end, xf = xf })
-    end),
-    FinishSpawningActor = ufn("FinishSpawningActor", function() end),
-})
+end
 local objects = {
     ["/Script/Engine.Default__KismetRenderingLibrary"] = rendering,
     ["/Script/Engine.Default__GameplayStatics"] = statics,
@@ -437,6 +446,60 @@ P = require("uuepbs_portraits")
 setup(true)
 seq = shoot(34)
 check(#lights == 0 and seq:find("export Hero.auto.png", 1, true) and #said == 0, "no PointLight: unlit shot still saved: " .. seq)
+
+-- 15. spawning that the engine refuses for the character itself (BeginDeferredActorSpawnFromClass hands back
+-- nothing): the character's world object is tried, then UE4SS's own World:SpawnActor; a bad position or a
+-- sequence template is reported instead of spawning
+objects["/Script/Engine.PointLight"] = pointLightClass
+P = nil
+package.loaded.uuepbs_portraits = nil
+P = require("uuepbs_portraits")
+setup(true)
+local hero = actors.auto
+local heroWorld = obj({ name = "World" })
+hero.GetWorld = function() return heroWorld end
+refuse = function(w) return w == hero end
+seq = shoot(40)
+check(seq:find("refused,spawn", 1, true) and seq:find("showonly Hero,capture,destroy", 1, true) and seq:find("export Hero.auto.png", 1, true),
+    "refused for the character, spawned with its world: " .. seq)
+-- refused everywhere: UE4SS spawns it
+local ue4ss = {}
+heroWorld.SpawnActor = function(_, cls, loc, rot)
+    ue4ss[#ue4ss + 1] = rot
+    calls[#calls + 1] = "ue4ss"
+    return spawned(heroWorld, cls, { Translation = loc, Rotation = { X = 0, Y = 0, Z = 0, W = 1 } })
+end
+refuse = function() return true end
+seq = shoot(41)
+check(seq:find("ue4ss,spawn", 1, true) and seq:find("showonly Hero,capture,destroy", 1, true) and seq:find("export Hero.auto.png", 1, true) and #said == 0,
+    "UE4SS World:SpawnActor as the last way: " .. seq .. " | " .. table.concat(said, " | "))
+check(ue4ss[1] and ue4ss[1].Yaw and math.abs(ue4ss[1].Yaw - 180) < 0.01 and ue4ss[1].Pitch == -2, "camera turned to face the character")
+-- no world at all: the reason names every way that was tried
+heroWorld.SpawnActor = nil
+hero.GetWorld = nil
+shoot(42)
+P.tick(600000) -- second try of the same request
+check(#said == 1 and said[1]:find("nothing came back", 1, true) and said[1]:find("in no world", 1, true), "every way tried and named: " .. table.concat(said, " | "))
+refuse = nil
+-- a NaN head position: not sent to the engine
+local nanHead = actor("Ghost", { head = true })
+nanHead.Mesh.GetSocketLocation = function() return { X = 0 / 0, Y = 0, Z = 160 } end
+actors["7FF9"] = nanHead
+lights, calls, said = {}, {}, {}
+requests("7FF9\tGhost\t44\n")
+P.tick(700000)
+P.tick(710000)
+seq = table.concat(calls, ",")
+check(not seq:find("spawn", 1, true) and said[1] and said[1]:find("no usable position", 1, true), "NaN position caught: " .. seq .. " | " .. table.concat(said, " | "))
+-- a sequence template (it lives inside the sequence, not in a level): nothing to photograph
+local template = actor("Template", { head = true })
+template.GetFullName = function() return "BP_Hero_C /Game/Cine/LS_Intro.LS_Intro:MovieScene_0.BP_Hero_C_0" end
+actors["7FFA"] = template
+lights, calls, said = {}, {}, {}
+requests("7FFA\tTemplate\t45\n")
+P.tick(720000)
+P.tick(730000)
+check(#calls == 0 and said[1] and said[1]:find("not placed in a level", 1, true), "template skipped: " .. table.concat(calls, ",") .. " | " .. table.concat(said, " | "))
 
 print(failures == 0 and "portraits: all checks passed" or (failures .. " failure(s)"))
 os.exit(failures == 0 and 0 or 1)

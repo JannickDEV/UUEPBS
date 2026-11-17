@@ -21,6 +21,7 @@
 #include "core/preset_cycle.hpp"
 #include "core/presets.hpp"
 #include "core/proportions.hpp"
+#include "core/anim_picks.hpp"
 #include "core/hand_settings.hpp"
 #include "core/registry.hpp"
 #include "ui/panel_view.hpp"
@@ -35,10 +36,12 @@
 #include <atomic>
 #include <chrono>
 #include <cstdio>
+#include <cstdlib>
 #include <ctime>
 #include <filesystem>
 #include <fstream>
 #include <optional>
+#include <iterator>
 #include <map>
 #include <mutex>
 #include <set>
@@ -370,12 +373,138 @@ namespace
         {
             std::lock_guard guard(m_hand_lock);
             m_hand_ui.reset();
+            m_anim_ui.reset();
+            std::error_code ec;
             if (!m_hand_file.empty())
             {
-                std::error_code ec;
                 fs::remove(m_hand_file, ec);
             }
+            if (!m_anim_file.empty())
+            {
+                fs::remove(m_anim_file, ec);
+            }
             apply_hands_locked();
+        }
+
+        bool hand_anims(uuepbs::ui::HandAnimList& out) override
+        {
+            std::map<std::string, std::string> labels; // actor key -> readable name
+            {
+                std::lock_guard guard(m_lock);
+                for (const auto& c : m_state.candidates)
+                {
+                    labels[c.key] = c.label;
+                }
+                if (!m_state.target.key.empty() && !m_state.target.label.empty())
+                {
+                    labels[m_state.target.key] = m_state.target.label;
+                }
+            }
+            uuepbs::Registry& reg = uuepbs::Registry::instance();
+            const auto playing = reg.playing();
+            const std::string active = reg.active_actor();
+            std::lock_guard guard(m_hand_lock);
+            if (!m_hand_known)
+            {
+                return false;
+            }
+            out.custom = m_anim_ui.has_value();
+            out.choice = m_anim_ui.value_or(uuepbs::anim_picks::Choice{});
+            out.config_list = m_hand_list;
+            out.seen = m_anim_history.entries();
+            out.playing_now.clear();
+            for (const auto& [key, name] : playing)
+            {
+                if (name.empty())
+                {
+                    continue;
+                }
+                const auto l = labels.find(key);
+                const std::string who = l != labels.end() ? l->second : key == "player" ? std::string("player") : key;
+                std::string& list = out.playing_now[name];
+                list += (list.empty() ? "" : ", ") + who;
+            }
+            const auto it = playing.find(active);
+            out.target_playing = it == playing.end() ? std::string() : it->second;
+            return true;
+        }
+
+        void set_hand_anims(const uuepbs::anim_picks::Choice& c) override
+        {
+            std::lock_guard guard(m_hand_lock);
+            m_anim_ui = c;
+            if (!m_anim_file.empty())
+            {
+                std::ofstream f(m_anim_file, std::ios::binary | std::ios::trunc);
+                f << uuepbs::anim_picks::write(c);
+            }
+            apply_hands_locked();
+        }
+
+        void clear_anim_history() override
+        {
+            std::lock_guard guard(m_hand_lock);
+            m_anim_history.clear();
+            m_history_dirty = true;
+            save_history_locked(true);
+        }
+
+        // <presets>\_animations.txt, at most every few seconds unless `now` (m_hand_lock held)
+        void save_history_locked(bool now)
+        {
+            if (!m_history_dirty || m_history_file.empty())
+            {
+                return;
+            }
+            const auto t = Clock::now();
+            if (!now && t - m_history_saved < std::chrono::seconds(5))
+            {
+                return;
+            }
+            m_history_saved = t;
+            m_history_dirty = false;
+            std::ofstream f(m_history_file, std::ios::binary | std::ios::trunc);
+            f << m_anim_history.write();
+        }
+
+        // Every animation a character starts goes into the history the window lists.
+        void record_playing(const uuepbs::bridge::LuaState& state)
+        {
+            std::lock_guard guard(m_hand_lock);
+            for (const auto& [key, name] : state.playing)
+            {
+                auto& last = m_seen_playing[key];
+                if (name.empty() || name == last)
+                {
+                    continue;
+                }
+                last = name;
+                std::string who;
+                for (const auto& c : state.candidates)
+                {
+                    if (c.key == key)
+                    {
+                        who = c.label;
+                        break;
+                    }
+                }
+                if (who.empty() && state.target.key == key)
+                {
+                    who = state.target.label;
+                }
+                if (m_anim_history.record(name, who))
+                {
+                    g_log.line("animation seen: " + name + (who.empty() ? std::string() : " on " + who));
+                    save_history_locked(true); // a new name: keep it even if the game closes right away
+                }
+                m_history_dirty = true;
+            }
+            for (auto it = m_seen_playing.begin(); it != m_seen_playing.end();)
+            {
+                // ended: the same animation playing again later counts as another start
+                it = state.playing.count(it->first) ? std::next(it) : m_seen_playing.erase(it);
+            }
+            save_history_locked(false);
         }
 
         std::vector<std::string> hand_status() override
@@ -398,6 +527,16 @@ namespace
             for (const auto& a : m_hand_anims)
             {
                 folded.push_back(uuepbs::fold_case(a));
+            }
+            const bool picks = reg.hand_choice() != m_anim_ui;
+            if (picks)
+            {
+                reg.set_hand_choice(m_anim_ui);
+                if (m_anim_ui)
+                {
+                    g_log.line(std::string("hand contact animations (window): ") + uuepbs::anim_picks::mode_key(m_anim_ui->mode) + ", " +
+                               std::to_string(m_anim_ui->names.size()) + " ticked");
+                }
             }
             const bool switches = old.enabled != h.enabled || old.fingers != h.fingers || old.feet != h.feet || reg.hand_anims() != folded;
             if (switches || old.full_within != h.full_within || old.fade_out != h.fade_out || old.strength != h.strength ||
@@ -493,6 +632,30 @@ namespace
             ++m_out.physics;
             m_out.physics_mode = mode;
             m_physics_wish = mode;
+            m_out_dirty = true;
+        }
+
+        float physics_weight() override
+        {
+            std::lock_guard guard(m_lock);
+            if (m_physics_weight_wish >= 0.0f)
+            {
+                return m_physics_weight_wish;
+            }
+            const std::string w = m_state.setting("physics_weight");
+            char* end = nullptr;
+            const float v = w.empty() ? -1.0f : std::strtof(w.c_str(), &end);
+            return (end && end != w.c_str()) ? v : -1.0f;
+        }
+
+        void set_physics_weight(float weight) override
+        {
+            std::lock_guard guard(m_lock);
+            char buf[32];
+            std::snprintf(buf, sizeof(buf), "%.2f", weight);
+            ++m_out.physics_weight;
+            m_out.physics_weight_value = buf;
+            m_physics_weight_wish = weight;
             m_out_dirty = true;
         }
 
@@ -1031,6 +1194,10 @@ namespace
                 {
                     m_copy_wish = false; // the script took the window's scene-copy rules
                 }
+                if (m_physics_weight_wish >= 0.0f && m_state.setting("physics_weight") == m_out.physics_weight_value)
+                {
+                    m_physics_weight_wish = -1.0f; // the script took the window's "Heavier when bigger" strength
+                }
             }
             for (const auto& c : todo)
             {
@@ -1186,6 +1353,32 @@ namespace
                         {
                             m_hand_ui = o;
                             g_log.line("hand contact: using the window's settings (" + uuepbs::path_to_utf8(m_hand_file) + ")");
+                        }
+                    }
+                    // Animations picked in the window and the ones seen in this game (per presets folder = per game)
+                    m_anim_file = dir / uuepbs::anim_picks::kChoiceFile;
+                    m_anim_ui.reset();
+                    std::ifstream ain(m_anim_file, std::ios::binary);
+                    if (ain)
+                    {
+                        const std::string text((std::istreambuf_iterator<char>(ain)), std::istreambuf_iterator<char>());
+                        uuepbs::anim_picks::Choice c;
+                        if (uuepbs::anim_picks::read(text, c))
+                        {
+                            m_anim_ui = c;
+                        }
+                    }
+                    save_history_locked(true); // anything seen before the folder was known
+                    m_history_file = dir / uuepbs::anim_picks::kHistoryFile;
+                    const std::vector<uuepbs::anim_picks::Seen> seen_now = m_anim_history.entries();
+                    std::ifstream hin(m_history_file, std::ios::binary);
+                    if (hin)
+                    {
+                        const std::string text((std::istreambuf_iterator<char>(hin)), std::istreambuf_iterator<char>());
+                        m_anim_history.read(text);
+                        for (auto it = seen_now.rbegin(); it != seen_now.rend(); ++it)
+                        {
+                            m_anim_history.record(it->name, it->who);
                         }
                     }
                     apply_hands_locked();
@@ -1407,6 +1600,7 @@ namespace
             reg.set_animated_morphs(std::move(animated));
             uuepbs::looks::Report::instance().set(state.looks);
             reg.set_playing(state.playing);
+            record_playing(state);
         }
 
         Clock::time_point last_publish()
@@ -1863,9 +2057,17 @@ namespace
         std::vector<std::string> m_hand_anims;  // config.lua HandContactAnims, split
         std::string m_hand_list;
         fs::path m_hand_file;
+        std::optional<uuepbs::anim_picks::Choice> m_anim_ui; // animations picked in the window (_hand_contact_anims.txt)
+        fs::path m_anim_file;
+        uuepbs::anim_picks::History m_anim_history; // animations seen in this game (_animations.txt)
+        fs::path m_history_file;
+        std::map<std::string, std::string> m_seen_playing; // actor key -> what it played at the last read
+        bool m_history_dirty{false};
+        Clock::time_point m_history_saved{};
         int m_collision_wish{-1}; // collision switch clicked in the window and not yet confirmed by the script (m_lock)
         std::string m_physics_wish; // Jiggle physics choice not yet confirmed by the script (m_lock)
         bool m_copy_wish{}; // scene-copy rules changed in the window and not yet taken by the script (m_lock)
+        float m_physics_weight_wish{-1.0f}; // "Heavier when bigger" strength not yet confirmed by the script (m_lock)
         int m_ground_wish{-1}; // Auto Ground switch clicked in the window and not yet confirmed by the script (m_lock)
         bool m_out_dirty{true};
         Clock::time_point m_last_publish{};

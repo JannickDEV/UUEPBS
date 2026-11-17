@@ -72,8 +72,8 @@ M = [
     ("2.6.2: no distances in the list",
      "parts[#parts + 1] = c.id .. \"\\t\" .. c.label .. c.dist .. \"\\t\" .. c.key", "parts[#parts + 1] = c.id .. \"\\t\" .. c.label .. \"\\t\" .. c.key"),
     ("2.6.2: edited characters capped like the rest",
-     "        if not edited then\n            plain = plain + 1\n        end\n        if edited or plain <= cap then",
-     "        plain = plain + 1\n        if plain <= cap then"),
+     "        local listed = edited\n        if not edited and plain < cap then",
+     "        local listed = false\n        if plain < cap then"),
     ("2.6.2: kept characters not added to the list",
      "        if k and alive(k.actor) and full_name(k.actor) == k.full then\n            add(k.actor)",
      "        if false then\n            add(k.actor)"),
@@ -174,6 +174,17 @@ M = [
      "    if vt and lastView and vt ~= lastView then", "    if false then", "uuepbs_copies.lua"),
     ("2.8: searches while out of view never stop",
      "and away.count < AWAY_MAX then", "then", "uuepbs_copies.lua"),
+    # Scripts/uuepbs_cast.lua (Choose character: bodies only)
+    ("cast: every skeletal mesh is a body",
+     "    local ok = regions >= 2\n", "    local ok = true\n", "uuepbs_cast.lua"),
+    ("cast: sequence templates listed",
+     "    if full and not full:find(\"PersistentLevel.\", 1, true) then", "    if false then", "uuepbs_cast.lua"),
+    ("cast: an actor without a skeletal mesh listed",
+     "    if #comps == 0 then\n        return false", "    if #comps == 0 then\n        return true", "uuepbs_cast.lua"),
+    ("cast: CharacterListFilter = false ignored",
+     "    if not ctx or (ctx.enabled and not ctx.enabled()) then", "    if not ctx then", "uuepbs_cast.lua"),
+    ("cast: the filter never asked",
+     "                or not late.is_character or late.is_character(e.actor)", "                or true"),
 ]
 
 bad = 0

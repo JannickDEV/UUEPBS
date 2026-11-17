@@ -71,6 +71,24 @@ inst.montage = object({ name = "AM\tWeird\nName" })
 H.poll(rigs)
 check(H.report() == "play\tplayer\tAM Weird Name", "tabs not cleaned: " .. H.report())
 
+-- a montage made on the fly ("AnimMontage_<n>", Sequencer / dynamic slot montages) is named by its animation
+local seq = object({ name = "A_Cutscene_Hug" })
+local wrap = function(v) return { get = function() return v end } end
+inst.montage = object({
+    name = "AnimMontage_17",
+    SlotAnimTracks = { wrap({ AnimTrack = { AnimSegments = { wrap({ AnimReference = seq }) } } }) },
+})
+H.poll(rigs)
+check(H.report() == "play\tplayer\tA_Cutscene_Hug", "dynamic montage not named by its animation: " .. H.report())
+-- unreadable insides: keep the montage's own name
+inst.montage = object({ name = "AnimMontage_18" })
+H.poll(rigs)
+check(H.report() == "play\tplayer\tAnimMontage_18", "dynamic montage without tracks: " .. H.report())
+-- a real montage asset keeps its name even with tracks
+inst.montage = object({ name = "AM_Emote", SlotAnimTracks = { wrap({ AnimTrack = { AnimSegments = { wrap({ AnimReference = seq }) } } }) } })
+H.poll(rigs)
+check(H.report() == "play\tplayer\tAM_Emote", "montage asset renamed: " .. H.report())
+
 if failures > 0 then
     print(failures .. " failure(s)")
     os.exit(1)

@@ -1025,14 +1025,15 @@ int main()
         h.apply(buf.data(), (int)buf.size());
         CHECK(worst(buf, want) < 1e-6);
 
-        // Pseudo entries: set, read, neutral removes, clamped to the slider range.
+        // Pseudo entries: set, read, neutral removes, clamped to the typed range
+        // (values may go past the slider track, the way typed values do).
         EditBook book = edits;
         set_scale_value(book, "Leg_Length", 1.1);
         set_scale_value(book, "height", 1.05);
-        set_scale_value(book, "head", 5.0);
+        set_scale_value(book, "head", 50.0);
         CHECK(has_proportions(book));
         CHECK(std::fabs(scale_value(book, "leg_length") - 1.1) < 1e-9);
-        CHECK(std::fabs(scale_value(book, "head") - 2.0) < 1e-9);
+        CHECK(std::fabs(scale_value(book, "head") - kTypedFactorMax) < 1e-9);
         CHECK(bone_entry_count(book) == 2);
         CHECK(is_scale_key("@SCALE:height") && !is_scale_key("thigh_l") && scale_id_of("@scale:head") == "head");
         set_scale_value(book, "head", 1.0);

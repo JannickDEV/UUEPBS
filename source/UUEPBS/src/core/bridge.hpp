@@ -192,6 +192,8 @@ namespace uuepbs::bridge
         std::string physics_mode; // ... with the wished mode (follow / off / keep)
         uint64_t copy_rules{};             // the window's scene-copy rules: bumped on each change ...
         std::vector<CopyRule> copy_rule_list; // ... with the whole list (window rules only)
+        uint64_t physics_weight{};       // "Heavier when bigger" slider: bumped on each change ...
+        std::string physics_weight_value; // ... with the wished strength ("1.00" = 100%)
         std::string hook_state{"waiting"};
         std::string hook_text;
         bool window_open{};

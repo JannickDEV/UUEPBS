@@ -949,28 +949,31 @@ end
 -- Lists characters for the picker: the player first, then the nearest ones. `full` walks the object
 -- array; otherwise the characters noticed since the last full walk are used.
 local function refresh_candidates(full)
-    local pool, seen = {}, {}
+    local pool, seen, trusted = {}, {}, {}
     local pawn = player_pawn()
-    local function add(actor)
+    local function add(actor, trust)
         if not alive(actor) or is_default_object(actor) then
             return
         end
         local id = address_of(actor)
+        if id and trust then
+            trusted[id] = true
+        end
         if id and not seen[id] then
             seen[id] = true
             pool[#pool + 1] = actor
         end
     end
     if pawn then
-        add(pawn)
+        add(pawn, true)
     end
     if Profile.Target and Profile.Target ~= "" then
         if full or not USE_LIVE_LIST then
             for _, a in ipairs(FindAllOf(Profile.Target) or {}) do
-                add(a)
+                add(a, true)
             end
         elseif Prefer.actor then
-            add(Prefer.actor)
+            add(Prefer.actor, true)
         end
     end
     if full or not USE_LIVE_LIST or not liveCharactersSeen then
@@ -1017,7 +1020,7 @@ local function refresh_candidates(full)
                 d = (p[1] - origin[1]) ^ 2 + (p[2] - origin[2]) ^ 2 + (p[3] - origin[3]) ^ 2
             end
         end
-        entries[#entries + 1] = { actor = a, d = d, n = #entries }
+        entries[#entries + 1] = { actor = a, d = d, n = #entries, trusted = trusted[address_of(a)] }
     end
     table.sort(entries, function(x, y)
         if x.d ~= y.d then
@@ -1032,10 +1035,17 @@ local function refresh_candidates(full)
     for _, e in ipairs(entries) do
         local key = key_of(e.actor, default)
         local edited = keptSet[key] ~= nil
-        if not edited then
-            plain = plain + 1
+        -- only bodies (uuepbs_cast.lua); the player, the profile's Target, the picked one and characters
+        -- with sliders are always listed
+        local listed = edited
+        if not edited and plain < cap then
+            listed = e.trusted or (pickedId ~= nil and address_of(e.actor) == pickedId)
+                or not late.is_character or late.is_character(e.actor)
+            if listed then
+                plain = plain + 1
+            end
         end
-        if edited or plain <= cap then
+        if listed then
             local label, engine = actor_label(e.actor, pawn)
             -- show who a character is recognised as when that differs from its object name
             -- (engine names only: with readable names the window has the engine name in a tooltip)
@@ -1365,6 +1375,98 @@ local function location_of(actor)
 end
 
 late.identity, late.location = identity_of, location_of
+
+-- Which actors the Choose character list shows (uuepbs_cast.lua: only bodies, no boats or sequence
+-- helpers). Kept in `late` (main.lua is at Lua's limit of 200 locals).
+do
+    local okK, mod = pcall(require, "uuepbs_cast")
+    if okK and type(mod) == "table" then
+        -- the actor's own skeletal meshes (its Mesh first), else those of the actors attached to it;
+        -- nil when they cannot be listed here
+        local function own_meshes(actor, out, seen)
+            local cls = engine_class("/Script/Engine.SkeletalMeshComponent")
+            if not cls then
+                return false
+            end
+            local function take(c)
+                local a = c and address_num(c)
+                if a and not seen[a] and alive(c) then
+                    seen[a] = true
+                    out[#out + 1] = c
+                end
+            end
+            pcall(function()
+                take(actor.Mesh)
+            end)
+            return pcall(function()
+                each_of(actor:K2_GetComponentsByClass(cls), take)
+            end)
+        end
+        mod.setup({
+            enabled = function()
+                return Config.CharacterListFilter ~= false
+            end,
+            show = Config.CharacterListShow,
+            hide = Config.CharacterListHide,
+            chatter = chatter,
+            now = function()
+                return os.clock() * 1000
+            end,
+            address = address_num,
+            full_name = full_name,
+            name_of = name_of,
+            class_name = class_name,
+            skeletal_meshes = function(actor)
+                if Profile.WorldMeshSearch == true then
+                    return nil -- meshes are not the actor's own components in this game
+                end
+                local out, seen = {}, {}
+                if not own_meshes(actor, out, seen) then
+                    return nil
+                end
+                if #out == 0 then
+                    for _, form in ipairs({ 3, 2 }) do
+                        local arr = {}
+                        local ok = pcall(function()
+                            if form == 2 then
+                                actor:GetAttachedActors(arr, true)
+                            else
+                                actor:GetAttachedActors(arr, true, false)
+                            end
+                        end)
+                        if ok then
+                            pcall(each_of, arr, function(a)
+                                own_meshes(a, out, seen)
+                            end)
+                            break
+                        end
+                    end
+                end
+                return out
+            end,
+            mesh_key = function(comp)
+                local m = mesh_asset(comp)
+                local a = m and address_num(m)
+                return a and (tostring(a) .. " " .. tostring(full_name(m))) or nil
+            end,
+            bone_count = function(comp)
+                local ok, n = pcall(function()
+                    return comp:GetNumBones()
+                end)
+                return ok and tonumber(n) or nil
+            end,
+            bone_name = function(comp, i)
+                local ok, n = pcall(function()
+                    return comp:GetBoneName(i):ToString()
+                end)
+                return ok and type(n) == "string" and n or nil
+            end,
+        })
+        late.is_character = mod.is_character
+    else
+        say("Choose character filter off: %s", tostring(mod))
+    end
+end
 
 ---------------------------------------------------------------------------
 -- Readable names (labels only; see uuepbs_names.lua)
@@ -2750,6 +2852,8 @@ local function build_state()
         "collision_ui=" .. (late.collision and (late.collisionWanted and "1" or "0") or ""),
         -- the window's "Jiggle physics" choice and what it did (uuepbs_physics.lua)
         "physics_ui=" .. (late.physics and late.physics.mode() or ""),
+        -- "Heavier when bigger" strength (0..3, 1 = 100%) next to it
+        "physics_weight=" .. (late.physics and string.format("%.2f", late.physics.weight()) or ""),
         "physics_info=" .. clean(late.physics and late.physics.summary() or ""),
         -- Status > Scene copies: "" = scene copies off; else the window's rule list counter last taken
         "copies_seen=" .. (late.copies and tostring(late.copyRulesSeen) or ""),
@@ -2815,7 +2919,7 @@ local function write_state()
     stateDirty = false
 end
 
-local seen = { rescan = 0, pick = 0, refresh = 0, relist = 0, groundui = 0, collui = 0, physicsui = 0, copyrules = 0, session = nil }
+local seen = { rescan = 0, pick = 0, refresh = 0, relist = 0, groundui = 0, collui = 0, physicsui = 0, copyrules = 0, physweight = 0, session = nil }
 local hookState, hookText = "waiting", ""
 local windowOpen = false
 local lastDllText = nil
@@ -2851,6 +2955,7 @@ local function read_dll_state()
         seen.session = dllSession
         seen.rescan, seen.pick, seen.refresh, seen.relist, seen.groundui, seen.collui, seen.physicsui = -1, -1, -1, -1, -1, -1, -1
         seen.copyrules = -1
+        seen.physweight = -1
     end
     local mine = false -- ack/replies are only ours once the DLL has seen this script's session
     local open = false
@@ -2924,6 +3029,13 @@ local function read_dll_state()
             if a ~= "" and who and who ~= "" then
                 copyRules[#copyRules + 1] = { mode = a, who = who, of = of or "" }
             end
+        elseif kind == "physweight" then
+            -- the window's "Heavier when bigger" slider (next to Jiggle physics)
+            local n = tonumber(a) or 0
+            if seen.physweight >= 0 and n ~= seen.physweight and late.set_physics_weight then
+                late.set_physics_weight(b)
+            end
+            seen.physweight = n
         elseif kind == "relist" then
             local n = tonumber(a) or 0
             if seen.relist >= 0 and n ~= seen.relist then
@@ -3273,22 +3385,40 @@ do
         end })
         local file = presetFolder .. "\\_physics.txt"
         mod.set_mode(tostring(Config.PhysicsMode or "follow"))
-        local saved = read_text(file)
-        saved = saved and saved:match("^%s*(%a+)")
+        if Config.PhysicsWeight ~= nil then
+            mod.set_weight(Config.PhysicsWeight)
+        end
+        local text = read_text(file)
+        local saved = text and text:match("^%s*(%a+)")
         if saved then
             mod.set_mode(saved)
+        end
+        local savedWeight = text and text:match("weight%s*=%s*([%d%.]+)")
+        if savedWeight then
+            mod.set_weight(savedWeight)
+        end
+        local function remember_physics()
+            stateDirty = true
+            local f = io.open(file, "wb")
+            if f then
+                f:write(mod.mode() .. "\n" .. string.format("weight=%.2f", mod.weight()) .. "\n")
+                f:close()
+            end
         end
         late.set_physics = function(m)
             if not mod.set_mode(m) then
                 return false
             end
-            stateDirty = true
-            local f = io.open(file, "wb")
-            if f then
-                f:write(mod.mode() .. "\n")
-                f:close()
-            end
+            remember_physics()
             say("jiggle physics: %s", mod.mode())
+            return true
+        end
+        late.set_physics_weight = function(w)
+            if not mod.set_weight(w) then
+                return false
+            end
+            remember_physics()
+            say("jiggle physics heavier when bigger: %d%%", math.floor(mod.weight() * 100 + 0.5))
             return true
         end
         local lastInfo = nil
@@ -3841,7 +3971,7 @@ local function rest_of(params, first)
     return table.concat(parts, " ")
 end
 
-local usage = "uuepbs (or ubs) ui | status | rescan | copies [never|copy|forget <who>] | camera | collision [on|off] | hands | list | load <name> | next | prev | save <name> | on | off | compare [on|off] | reset [all] | diag | skin [name] | morph <name> [weight] | ground [on|off|<extra cm>] | physics [follow|off|keep]"
+local usage = "uuepbs (or ubs) ui | status | rescan | copies [never|copy|forget <who>] | camera | collision [on|off] | hands | list | load <name> | next | prev | save <name> | on | off | compare [on|off] | reset [all] | diag | skin [name] | morph <name> [weight] | ground [on|off|<extra cm>] | physics [follow|off|keep|weight <percent>]"
 
 local function console(_, params, out)
     local verb = string.lower(params[1] or "")
@@ -3911,12 +4041,18 @@ local function console(_, params, out)
         reply(late.hands and late.hands.status() or "hand contact is off (HandContact in config.lua)")
         send_command("hands", "", true)
     elseif verb == "physics" then
-        -- ubs physics [follow | off | keep]
+        -- ubs physics [follow | off | keep | weight <percent>]
         local arg = string.lower(params[2] or "")
         if not late.physics then
             reply("physics handling is not loaded")
+        elseif arg == "weight" or arg == "heavier" then
+            if params[3] and not late.set_physics_weight(params[3]) then
+                reply("ubs physics weight <0-300%> (100 = natural, 0 = off)")
+            else
+                reply(late.physics.status())
+            end
         elseif arg ~= "" and not late.set_physics(arg) then
-            reply("ubs physics follow | off | keep")
+            reply("ubs physics follow | off | keep | weight <percent>")
         else
             reply(late.physics.status())
         end

@@ -57,6 +57,15 @@ return {
     -- window opens and on Refresh; while it stays open, newly spawned characters are added as they appear.
     CandidateClasses = { "Character" },
     MaxCandidates = 40,
+    -- Leave out actors of those classes that are not bodies (boats, cameras, sequence helpers): an actor
+    -- is listed when one of its skeletal meshes has bones named like at least two of head, torso, arms
+    -- and legs (any game, any rig, animals too). The player, the profile's Target and characters with
+    -- sliders are always listed. false = list every actor of the classes above.
+    CharacterListFilter = true,
+    -- Name patterns (* = anything; the actor's object or class name) that override that rule:
+    -- e.g. CharacterListShow = { "BP_Mount*" }, CharacterListHide = { "BP_Dummy_C" }.
+    CharacterListShow = {},
+    CharacterListHide = {},
     -- Readable names in the Character list and mesh labels ("Eve" instead of BP_Eve_C_2147482611 or
     -- 00_EVE_01_Body): the game's own name for the character when it has one, else the game profile's
     -- "Names" table, else the engine name cleaned up. Saved sliders and presets don't depend on it.
@@ -183,6 +192,12 @@ return {
     -- The window's choice (Character Scale > Overall) is remembered in _physics.txt and wins over this.
     -- Console: "ubs physics [follow|off|keep]".
     PhysicsMode = "follow",
+    -- "Heavier when bigger" (with "follow"): a bigger breast, butt or other physics part also moves like a
+    -- heavier one - softer springs, slower and wider sway, more sag; a smaller one gets quicker and tighter.
+    -- Works on every physics node type, so in every game. 1.0 = natural (100%), 2.0 = twice as pronounced,
+    -- 0 = sizes only. Up to 3.0. The window's slider (next to Jiggle physics) is remembered in _physics.txt
+    -- and wins over this. Console: "ubs physics weight <percent>".
+    PhysicsWeight = 1.0,
 
     -- Auto Ground: longer legs sink the feet into the floor (the pelvis stays where the animation put
     -- it), shorter legs make them float. With this on, the player's mesh is moved up or down by what
@@ -230,6 +245,8 @@ return {
     -- Only while the character plays an animation (montage) whose name contains one of these words,
     -- comma separated, e.g. "Touch, Masturbat". "" = whenever a hand is close to the body.
     -- "ubs hands" shows the names of the animations playing.
+    -- Easier: Character Scale > Animation > Which animations lists every animation the characters played in
+    -- this game; tick the ones to use (or to skip). Once you pick there, the window's choice wins over this line.
     HandContactAnims = "",
 
     Verbose = false,

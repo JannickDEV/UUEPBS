@@ -56,13 +56,17 @@
     { "Title": "Calves", "Bones": ["calf", "lowerleg", "leg", "shin", "calf#", "legstretch", "knee", "*xiaotui*"],
       "Extra": ["*xtui*"], "Helpers": true, "Children": "keep_size", "Hint": "Lower legs." },
     { "Title": "Feet", "Bones": ["foot", "foot#", "ankle"], "Children": "scale_too", "Hint": "Feet and toes." },
-    { "Title": "Tail", "Bones": ["tailroot", "tailbase", "tail", "tail#"], "Children": "scale_too", "Hint": "The whole tail, from its root." },
 
     { "Section": "Arms", "Title": "Upper arms", "Bones": ["upperarm", "arm", "shldrbend", "upperarm#", "armstretch", "*dabi*"],
       "Helpers": true, "Children": "keep_size", "Hint": "Upper arms." },
     { "Title": "Forearms", "Bones": ["lowerarm", "forearm", "forearmbend", "lowerarm#", "forearmstretch", "elbow", "*xiaobi*"],
       "Helpers": true, "Children": "keep_size", "Hint": "Forearms." },
     { "Title": "Hands", "Bones": ["hand", "hand#", "wrist"], "Children": "scale_too", "Hint": "Hands and fingers." },
+
+    { "Section": "Tail", "Title": "Tail", "Bones": ["tailroot", "tailbase", "tail", "tail#"], "Children": "scale_too", "Hint": "The whole tail, from its root." },
+
+    { "Section": "Wings", "Title": "Wings", "Bones": ["wingroot", "wingbase", "wing", "wing#", "wingshoulder", "wingarm", "wingupper"],
+      "Children": "scale_too", "Hint": "Both wings, from their roots." },
 
     { "Section": "Muscles", "Title": "Deltoids", "Bones": ["*deltoid*", "delt", "delt#", "*shoulderdelt*"], "MatchAll": true, "Children": "scale_too",
       "Hint": "Shoulder muscle helper bones." },
