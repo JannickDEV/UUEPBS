@@ -35,6 +35,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdio>
+#include <cstdlib>
 #include <ctime>
 #include <filesystem>
 #include <fstream>
@@ -447,6 +448,30 @@ namespace
             ++m_out.physics;
             m_out.physics_mode = mode;
             m_physics_wish = mode;
+            m_out_dirty = true;
+        }
+
+        float physics_weight() override
+        {
+            std::lock_guard guard(m_lock);
+            if (m_physics_weight_wish >= 0.0f)
+            {
+                return m_physics_weight_wish;
+            }
+            const std::string w = m_state.setting("physics_weight");
+            char* end = nullptr;
+            const float v = w.empty() ? -1.0f : std::strtof(w.c_str(), &end);
+            return (end && end != w.c_str()) ? v : -1.0f;
+        }
+
+        void set_physics_weight(float weight) override
+        {
+            std::lock_guard guard(m_lock);
+            char buf[32];
+            std::snprintf(buf, sizeof(buf), "%.2f", weight);
+            ++m_out.physics_weight;
+            m_out.physics_weight_value = buf;
+            m_physics_weight_wish = weight;
             m_out_dirty = true;
         }
 
@@ -980,6 +1005,10 @@ namespace
                 if (!m_physics_wish.empty() && m_state.setting("physics_ui") == m_physics_wish)
                 {
                     m_physics_wish.clear(); // the script took the window's Jiggle physics choice
+                }
+                if (m_physics_weight_wish >= 0.0f && m_state.setting("physics_weight") == m_out.physics_weight_value)
+                {
+                    m_physics_weight_wish = -1.0f; // the script took the window's "Heavier when bigger" strength
                 }
             }
             for (const auto& c : todo)
@@ -1815,6 +1844,7 @@ namespace
         fs::path m_hand_file;
         int m_collision_wish{-1}; // collision switch clicked in the window and not yet confirmed by the script (m_lock)
         std::string m_physics_wish; // Jiggle physics choice not yet confirmed by the script (m_lock)
+        float m_physics_weight_wish{-1.0f}; // "Heavier when bigger" strength not yet confirmed by the script (m_lock)
         int m_ground_wish{-1}; // Auto Ground switch clicked in the window and not yet confirmed by the script (m_lock)
         bool m_out_dirty{true};
         Clock::time_point m_last_publish{};

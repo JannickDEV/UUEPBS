@@ -94,6 +94,9 @@ namespace uuepbs::ui
         // script without it. The window's choice asks the script, which applies and remembers it.
         virtual std::string physics_mode() { return {}; }
         virtual void set_physics_mode(const std::string& mode) { (void)mode; }
+        // "Heavier when bigger" strength next to it: 0 off, 1 = 100% (natural), up to 3; < 0 = not known yet.
+        virtual float physics_weight() { return -1.0f; }
+        virtual void set_physics_weight(float weight) { (void)weight; }
         virtual std::string physics_info() { return {}; } // what the script did, one line
         // Who an actor key is across reloads (character_memory.hpp), "" when unknown. Renames are
         // stored under it, so they survive reloads.

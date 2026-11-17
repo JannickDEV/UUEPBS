@@ -2327,6 +2327,45 @@ namespace uuepbs::ui
                         "Game's own: untouched.\n"
                         "Everything goes back when the sliders are back to 1, on Before, or with sliders off. For every character; "
                         "remembered in the presets folder (_physics.txt). Console: ubs physics.");
+                // "Heavier when bigger" (config.lua PhysicsWeight): only meaningful while following the sliders.
+                const float weight = m_targets->physics_weight();
+                if (physics == "follow" && weight >= 0.0f)
+                {
+                    static float dragging = -1.0f; // the value while the slider is held; sent on release
+                    float pct = (dragging >= 0.0f ? dragging : weight) * 100.0f;
+                    ImGui::AlignTextToFramePadding();
+                    ImGui::TextUnformatted("Heavier when bigger");
+                    ImGui::SameLine();
+                    ImGui::SetNextItemWidth(std::min(dpi_px(220.0f), ImGui::GetContentRegionAvail().x));
+                    if (ImGui::SliderFloat("##physweight", &pct, 0.0f, 300.0f, pct < 0.5f ? "Off" : "%.0f %%", ImGuiSliderFlags_AlwaysClamp))
+                    {
+                        dragging = pct / 100.0f;
+                    }
+                    if (ImGui::IsItemDeactivatedAfterEdit() && dragging >= 0.0f)
+                    {
+                        m_targets->set_physics_weight(dragging);
+                        char msg[64];
+                        std::snprintf(msg, sizeof(msg), "Heavier when bigger: %.0f %%", dragging * 100.0f);
+                        set_message(dragging < 0.005f ? std::string("Heavier when bigger: off") : std::string(msg));
+                        dragging = -1.0f;
+                    }
+                    else if (!ImGui::IsItemActive())
+                    {
+                        dragging = -1.0f;
+                    }
+                    if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) && std::fabs(weight - 1.0f) > 0.005f)
+                    {
+                        m_targets->set_physics_weight(1.0f);
+                        set_message("Heavier when bigger: 100 % (natural)");
+                    }
+                    tooltip("A bigger breast, butt or other bouncing part also moves like a heavier one: its physics springs get "
+                            "softer, so it sways slower and wider, sags more and takes longer to settle. A smaller one gets "
+                            "quicker and tighter. Works on every kind of game physics (Kawaii Physics, AnimDynamics, Spring Bone, "
+                            "Physics Asset joints), only on the parts your sliders resize.\n"
+                            "100 %: natural (twice the size, half the bounce speed). 200-300 %: exaggerated. Off: sizes only.\n"
+                            "Double-click for 100 %, Ctrl+click to type. Remembered in _physics.txt; config.lua PhysicsWeight; "
+                            "console: ubs physics weight <percent>.");
+                }
                 const std::string info = m_targets->physics_info();
                 if (!info.empty())
                 {

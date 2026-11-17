@@ -60,7 +60,8 @@ local breastSphere = { Center = v3(10, 0, 0), Radius = 8, Rotation = { Pitch = 0
 local breastCapsule = { Center = v3(0, 0, 0), Radius = 4, Length = 10, Rotation = { Pitch = 90, Yaw = 0, Roll = 0 } } -- capsule Z -> bone X
 local spineBox = { Center = v3(0, 0, 0), X = 20, Y = 20, Z = 20, Rotation = { Pitch = 0, Yaw = 0, Roll = 0 } }
 local joint = { ConstraintBone1 = fname("breast_l"), ConstraintBone2 = fname("spine_03"), Pos1 = v3(2, 0, 0), Pos2 = v3(5, 5, 0),
-    ProfileInstance = { LinearLimit = { Limit = 3 } } }
+    ProfileInstance = { LinearLimit = { Limit = 3 }, ConeLimit = { Stiffness = 100, Damping = 10 },
+        AngularDrive = { SlerpDrive = { Stiffness = 40, Damping = 4 } } } }
 local asset = object({
     name = "PA_Body",
     SkeletalBodySetups = {
@@ -73,10 +74,10 @@ local skelMesh = object({ name = "SK_Body", GetPhysicsAsset = function() return 
 
 local function make_mesh(name, scales)
     local kawaii = { Alpha = 1, bAlphaBoolEnabled = true, RootBone = { BoneName = fname("butt_l") },
-        PhysicsSettings = { Radius = 5 }, DummyBoneLength = 0,
+        PhysicsSettings = { Radius = 5, Stiffness = 0.1, Damping = 0.1 }, DummyBoneLength = 0,
         SphericalLimits = { { DrivingBone = { BoneName = fname("butt_l") }, OffsetLocation = v3(1, 2, 3), Radius = 6 } } }
     local dyn = { Alpha = 1, BoundBone = { BoneName = fname("penis_01") }, BoxExtents = v3(2, 2, 10), LocalJointOffset = v3(0, 0, 5),
-        SphereCollisionRadius = 3, SphericalLimits = {} }
+        SphereCollisionRadius = 3, SphericalLimits = {}, AngularSpringConstant = 50, LinearSpringConstant = 20 }
     local rbn = { Alpha = 1, OverridePhysicsAsset = nil }
     local mainCls = class("AnimBlueprintGeneratedClass /Game/ABP_Main.ABP_Main_C", {
         { "AnimGraphNode_KawaiiPhysics_1", "AnimNode_KawaiiPhysics" },
@@ -161,6 +162,7 @@ check(near(body.dyn.BoxExtents.Z, 10 * 1) and near(body.dyn.BoxExtents.X, 4) and
     "animdynamics box per axis")
 check(body.postRestarts == 1 and body.mainRestarts == 1, "post-process and main blueprints restarted once")
 
+
 -- same scales again: nothing rewritten, no restart
 P.apply(rigs, { player = true }, 5000)
 check(near(breastSphere.Radius, 12) and body.postRestarts == 1 and body.mainRestarts == 1, "steady: no restart")
@@ -174,6 +176,34 @@ check(P.summary():find("after the animation", 1, true) ~= nil, "summary says it 
 body.main.montage = false
 P.apply(rigs, { player = true }, 11000)
 check(body.mainRestarts == 2, "main restarted after the montage")
+
+-- heavier when bigger (100%, the default): springs / size^2, damping / size
+check(near(P.weight(), 1), "heavier when bigger defaults to 100%")
+check(near(body.kawaii.PhysicsSettings.Stiffness, 0.1 / 1.44) and near(body.kawaii.PhysicsSettings.Damping, 0.1 / 1.2),
+    "kawaii butt 1.2: softer and less damped")
+check(near(joint.ProfileInstance.ConeLimit.Stiffness, 100 / 4) and near(joint.ProfileInstance.ConeLimit.Damping, 10 / 2)
+    and near(joint.ProfileInstance.AngularDrive.SlerpDrive.Stiffness, 40 / 4), "breast 2 joint springs softened")
+check(near(body.dyn.AngularSpringConstant, 50 / 2 ^ (2 / 3)) and near(body.dyn.LinearSpringConstant, 20 / 2 ^ (2 / 3)),
+    "animdynamics springs by the mean size")
+check(near(P.heaviness({ 100, 100, 100 }), 50) and near(P.heaviness({ 0.01, 0.01, 0.01 }), 0.04), "heaviness is clamped")
+check(near(P.heaviness({ 2, 2, 2 }, 2), 16) and near(P.heaviness({ 2, 2, 2 }, 0), 1), "strength is an exponent")
+-- off (0%): the springs go back, the sizes stay; a restart picks it up
+local prW = body.postRestarts
+check(P.set_weight("0%") and near(P.weight(), 0), "0% accepted")
+P.apply(rigs, { player = true }, 12000)
+check(body.kawaii.PhysicsSettings.Stiffness == 0.1 and joint.ProfileInstance.ConeLimit.Stiffness == 100
+    and body.dyn.AngularSpringConstant == 50, "0%: springs back")
+check(near(breastSphere.Radius, 16) and near(body.kawaii.PhysicsSettings.Radius, 6), "0%: sizes still follow")
+check(body.postRestarts == prW + 1, "weight change restarts")
+-- 200%: twice as pronounced
+check(P.set_weight(200) and near(P.weight(), 2), "200 read as 200%")
+P.apply(rigs, { player = true }, 13000)
+check(near(body.kawaii.PhysicsSettings.Stiffness, 0.1 / 1.44 ^ 2), "200%: kawaii softer still")
+check(P.status():find("200%", 1, true) ~= nil, "status names the strength")
+check(not P.set_weight("lots"), "bad strength refused")
+check(P.set_weight(1) and near(P.weight(), 1), "back to 100%")
+P.apply(rigs, { player = true }, 14000)
+check(near(body.kawaii.PhysicsSettings.Stiffness, 0.1 / 1.44), "100% again")
 
 -- another character with the same asset: the first one keeps deciding its sizes
 local npc = make_mesh("Npc", { root = { 1, 1, 1 }, breast_l = { 3, 3, 3 } })
@@ -194,6 +224,8 @@ check(breastSphere.Radius == 8 and breastSphere.Center.X == 10 and breastCapsule
     and joint.ProfileInstance.LinearLimit.Limit == 3, "asset back")
 check(body.kawaii.PhysicsSettings.Radius == 5 and body.dyn.BoxExtents.X == 2 and body.kawaii.SphericalLimits[1].OffsetLocation.Z == 3,
     "node fields back")
+check(body.kawaii.PhysicsSettings.Stiffness == 0.1 and body.kawaii.PhysicsSettings.Damping == 0.1 and body.dyn.AngularSpringConstant == 50
+    and joint.ProfileInstance.ConeLimit.Stiffness == 100 and joint.ProfileInstance.ConeLimit.Damping == 10, "springs back")
 check(body.postRestarts == pr + 1 and body.mainRestarts == mr + 1, "restarted to drop the sizes")
 
 -- off: alpha 0, cloth paused; back when the scaling ends

@@ -350,11 +350,13 @@ print = function(s) printed[#printed + 1] = s end
 
 local peerGround = "0:0" -- the window's Auto Ground switch keeps its last click count between calls
 local peerPhysics = nil -- the window's Jiggle physics choice "<clicks>:<mode>" (UUEPBS_PEER_PHYSICS)
+local peerWeight = nil -- the window's "Heavier when bigger" slider "<changes>:<strength>" (UUEPBS_PEER_PHYSWEIGHT)
 local function run_peer(rescan, pick, pickId, refresh, session, ui, morphs, keep, remember, relist, ground)
     ground = ground or peerGround
     peerGround = ground
     local report = work .. "/peer_report.txt"
-    os.execute(string.format((peerPhysics and ("UUEPBS_PEER_PHYSICS=" .. peerPhysics .. " ") or "") .. (mode == "names" and "UUEPBS_PEER_ENGINE=1 " or "") .. '%s %s/native %d %d %s %d %s %d "%s" "%s" "%s" %d %s > %s', peer, work, rescan, pick, pickId, refresh, session or "dll1", ui or 0, morphs or "-", keep or "-", remember or "-", relist or 0, ground, report))
+    os.execute(string.format((peerPhysics and ("UUEPBS_PEER_PHYSICS=" .. peerPhysics .. " ") or "")
+        .. (peerWeight and ("UUEPBS_PEER_PHYSWEIGHT=" .. peerWeight .. " ") or "") .. (mode == "names" and "UUEPBS_PEER_ENGINE=1 " or "") .. '%s %s/native %d %d %s %d %s %d "%s" "%s" "%s" %d %s > %s', peer, work, rescan, pick, pickId, refresh, session or "dll1", ui or 0, morphs or "-", keep or "-", remember or "-", relist or 0, ground, report))
     local h = realOpen(report, "rb")
     local out = h:read("a")
     h:close()
@@ -722,6 +724,19 @@ run_peer(0, 0, "none", 0, "dll1", 1, "-", "-", "-", 1)
 loop()
 s = run_peer(0, 0, "none", 0, "dll1", 1, "-", "-", "-", 1)
 check(s:find("physics follow [", 1, true) and (read(work .. "/_physics.txt") or ""):match("^follow"), "and back to follow:\n" .. s)
+-- the "Heavier when bigger" slider: 100% by default, 2.50 taken, shown and remembered next to the mode
+check(s:find("physics weight 1.00\n", 1, true), "heavier when bigger is 100% by default:\n" .. s)
+peerWeight = "1:2.50"
+run_peer(0, 0, "none", 0, "dll1", 1, "-", "-", "-", 1)
+loop()
+s = run_peer(0, 0, "none", 0, "dll1", 1, "-", "-", "-", 1)
+check(s:find("physics weight 2.50\n", 1, true) and (read(work .. "/_physics.txt") or ""):match("^follow\nweight=2.50"),
+    "heavier when bigger from the window:\n" .. s .. "\n" .. tostring(read(work .. "/_physics.txt")))
+peerWeight = "2:1.00"
+run_peer(0, 0, "none", 0, "dll1", 1, "-", "-", "-", 1)
+loop()
+s = run_peer(0, 0, "none", 0, "dll1", 1, "-", "-", "-", 1)
+check(s:find("physics weight 1.00\n", 1, true), "and back to 100%:\n" .. s)
 other._loc = { X = 0, Y = 0, Z = 0 }
 settle()
 run_peer(0, 0, "none", 0, "dll1", 0)

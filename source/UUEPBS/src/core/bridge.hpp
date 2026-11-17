@@ -154,6 +154,8 @@ namespace uuepbs::bridge
         bool collision_on{};   // ... with the wished state
         uint64_t physics{};       // Jiggle physics choice in the window: bumped on each click ...
         std::string physics_mode; // ... with the wished mode (follow / off / keep)
+        uint64_t physics_weight{};       // "Heavier when bigger" slider: bumped on each change ...
+        std::string physics_weight_value; // ... with the wished strength ("1.00" = 100%)
         std::string hook_state{"waiting"};
         std::string hook_text;
         bool window_open{};
