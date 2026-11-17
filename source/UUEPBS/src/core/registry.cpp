@@ -705,6 +705,16 @@ namespace uuepbs
         return false;
     }
 
+    std::string Registry::hands_summary(const HandOptions& h, const char* source, const std::string& only)
+    {
+        char line[320];
+        std::snprintf(line, sizeof line, "hand contact%s%s%s: %s, strength %.2f, contact %.2f-%.2f x arm, shoulder %.0f deg, stretch %.2fx, fingers %s, feet %s%s%s",
+                      source ? " (" : "", source ? source : "", source ? ")" : "", h.enabled ? "on" : "off", h.strength, h.full_within, h.fade_out,
+                      h.shoulder_turn, h.stretch, h.fingers ? "on" : "off", h.feet ? "on" : "off", only.empty() ? ", every animation" : ", only while playing: ",
+                      only.c_str());
+        return line;
+    }
+
     std::string Registry::hands_report() const
     {
         std::lock_guard guard(m_lock);

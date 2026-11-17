@@ -31,6 +31,11 @@ do
         { "BP_NPC_Merchant_C_2147482611", "NPC Merchant" }, -- acronyms stay capitals
         { "PolarisCharacterActor_2147470001", "PolarisCharacterActor" },
         { "lune_v2", "Lune v2" },
+        -- UE5 World Partition ids and a game's tag words in front (Carnal Instinct)
+        { "CI_NPC_DLG_Damaris_C_UAID_F4A475A95D2F4F8701", "Damaris" },
+        { "CI_NPC_Bard_Nenu_C_UAID_F4A475A95D2FF39D01_1834711720", "Bard Nenu" },
+        { "BP_PlayerCapture_C_UAID_3C7C3FF35C6FC31701_2078139769", "PlayerCapture" },
+        { "NPC_Katie_C_2147452237", "NPC Katie" },
         { "SkeletalMeshComponent_2147482611", nil }, -- engine names that say nothing
         { "CharacterMesh0", nil },
         { "BP_C_0", nil },

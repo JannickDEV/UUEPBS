@@ -81,12 +81,18 @@ function M.clean(name, character)
     for w in s:gmatch("[^_%-%s]+") do
         words[#words + 1] = w
     end
-    -- drop numbers (run-time and placed instance numbers, "00_" sort prefixes, "_01" variants)
+    -- drop numbers (run-time and placed instance numbers, "00_" sort prefixes, "_01" variants) and UE5 World
+    -- Partition actor ids ("_UAID_F4A475A95D2F4F8701_1834711720")
     local kept = {}
-    for _, w in ipairs(words) do
-        if not w:match("^%d+$") then
+    local i = 1
+    while i <= #words do
+        local w = words[i]
+        if w == "UAID" and words[i + 1] and words[i + 1]:match("^%x+$") and #words[i + 1] >= 8 then
+            i = i + 1 -- the id after it goes too
+        elseif not w:match("^%d+$") then
             kept[#kept + 1] = w
         end
+        i = i + 1
     end
     -- naming-convention prefixes in front ("BP_", "SK_"), the class suffix "_C" at the end
     while #kept > 1 and PREFIXES[kept[1]:lower()] do
@@ -94,6 +100,17 @@ function M.clean(name, character)
     end
     while #kept > 1 and kept[#kept] == "C" do
         table.remove(kept)
+    end
+    -- a run of short all-capital tags in front of a name ("CI_NPC_DLG_Damaris" -> "Damaris"); a single one
+    -- stays ("NPC Merchant", "EVE Body")
+    local tags = 0
+    while tags < #kept and #kept[tags + 1] <= 3 and kept[tags + 1]:match("^%u+$") do
+        tags = tags + 1
+    end
+    if tags >= 2 and tags < #kept and not kept[tags + 1]:match("^%u+$") then
+        for _ = 1, tags do
+            table.remove(kept, 1)
+        end
     end
     if character then
         for i = #kept, 1, -1 do

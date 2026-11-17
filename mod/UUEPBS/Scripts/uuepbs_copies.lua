@@ -16,6 +16,11 @@
 --     mesh (NPCs often share a body mesh). Shared eyes, eyelashes or hair alone never make a copy: in
 --     games like Afterparty every NPC wears the same ones as the player.
 --   * really uses that asset: the match is checked once more with GetSkinnedAsset before it is taken.
+--   * when the actor is a pawn (an NPC or companion of its own, not a plain cutscene / menu actor), its body
+--     looks like the character's: the main mesh's morph targets that shape the body (not the ones the sliders
+--     set, nor expressions, correctives or other animated ones) have the same weights. In character-creator
+--     games NPCs are built from the player's base body and outfits and only differ in those weights
+--     (Afterparty's NPCs, two Carnal Instinct NPCs with the same body and clothes).
 -- Copies are sent to the DLL as extra (non-primary) meshes of that character, so they get its bone
 -- edits, proportions, morphs and looks. They are dropped as soon as they go away or change mesh.
 --
@@ -44,6 +49,7 @@ local MAX_PENDING = 512
 local sources = {} -- mesh asset address -> { key, label, ownerLabel, ownerEngine }
 local keyAssets = {} -- actor key -> number of distinct sculpted mesh assets
 local mainAsset = {} -- actor key -> mesh asset address of the character's main (primary) mesh
+local mainComp = {} -- actor key -> { comp, full, names } the character's main mesh and its morph target names
 local tracked = {} -- component address -> true (meshes sculpted as part of a character)
 local planned = {} -- actor address -> true (characters being sculpted)
 local primary = nil -- { comp, full } the edited character's main mesh (for the rendering check)
@@ -62,6 +68,7 @@ local unsupported = {} -- engine calls that failed ("view", "rendered") -> when 
 local RETRY_MS = 30000
 local stats = { searches = 0, found = 0, ms = 0, lastReason = "" }
 local changed = false
+local rejected = {} -- actor address -> true: told once that it is not a copy
 
 -- ------------------------------------------------------------- helpers
 
@@ -147,6 +154,52 @@ end
 
 -- ------------------------------------------------------------- matching
 
+-- Morph targets that say nothing about who a body belongs to: expressions, eyes, speech, correctives, jiggle
+-- and the ones animations open and close. Those differ between a character and its copy whenever they play
+-- different animations.
+local NOT_SHAPE = { "jiggle", "crctve", "correct", "jcm", "look", "eye", "blink", "brow", "lid", "speech", "viseme", "exp_",
+    "expr", "emot", "oral", "mouth", "jaw", "lip", "tongue", "teeth", "cheek", "smile", "frown", "sneer", "nose", "gape", "flash",
+    "bulge", "open", "close", "breath", "flex", "fcl_", "face", "erect", "squeeze", "suck", "kiss", "swallow", "pose" }
+
+local function shape_morph(name)
+    local n = string.lower(name)
+    for _, w in ipairs(NOT_SHAPE) do
+        if n:find(w, 1, true) then
+            return false
+        end
+    end
+    -- in / out pairs that animations drive (Morph_PussyIn, Morph_AnalOut), but not "Thin" or "Chin"
+    return not (name:find("In$") or name:find("Out$") or n:find("_in$") or n:find("_out$"))
+end
+
+local function is_pawn(actor)
+    return actor ~= nil and ctx.is_pawn ~= nil and ctx.is_pawn(actor) == true
+end
+
+-- Nil when the candidate's main mesh `cand` looks like character `key`'s main mesh (or there is nothing to
+-- compare), else why not: the body morph that differs most.
+local MORPH_GAP = 0.1
+local function looks_different(key, cand)
+    local m = mainComp[key]
+    if not m or not ctx.morph_value or not ctx.still(m.comp, m.full) then
+        return nil
+    end
+    local worst, worstName, mine, theirs = 0, nil, 0, 0
+    for _, name in ipairs(m.names) do
+        if shape_morph(name) and not (ctx.morph_overridden and ctx.morph_overridden(m.comp, name)) then
+            local a = ctx.morph_value(m.comp, name)
+            local b = a and ctx.morph_value(cand, name)
+            if a and b and math.abs(a - b) > worst then
+                worst, worstName, mine, theirs = math.abs(a - b), name, a, b
+            end
+        end
+    end
+    if worst > MORPH_GAP then
+        return string.format("%s %.2f there, %.2f on the character", worstName, theirs, mine)
+    end
+    return nil
+end
+
 -- Does this component (and the rest of its actor) look like a copy of an edited character?
 -- Adds the actor's matching meshes; returns how many were added.
 local function consider(comp)
@@ -205,6 +258,22 @@ local function consider(comp)
     local main = mainAsset[src.key]
     if ctx.match ~= "mesh" and main and not shared[main] then
         return 0
+    end
+    -- a pawn with the character's body and outfit: an NPC built from the same parts, unless its body has the same shape
+    if ctx.match ~= "mesh" and main and is_pawn(owner) then
+        for _, e in ipairs(list) do
+            if e.asset == main then
+                local why = looks_different(src.key, e.comp)
+                if why then
+                    if not rejected[ownerAddr or 0] then
+                        rejected[ownerAddr or 0] = true
+                        ctx.chatter("%s is not a scene copy of %s: its body differs (%s)", ctx.name_of(owner), src.ownerLabel or src.key, why)
+                    end
+                    return 0
+                end
+                break
+            end
+        end
     end
     local added = 0
     for _, e in ipairs(list) do
@@ -334,7 +403,7 @@ end
 -- The meshes sculpted as part of characters (main.lua's rigs before copies are added) and the
 -- characters being sculpted (actor address -> true). Copies whose source went away are dropped.
 function C.set_sources(rigs, plannedAddr)
-    sources, keyAssets, tracked, planned, mainAsset = {}, {}, {}, {}, {}
+    sources, keyAssets, tracked, planned, mainAsset, mainComp = {}, {}, {}, {}, {}, {}
     primary = nil
     local perKey = {}
     local sig = {}
@@ -356,6 +425,13 @@ function C.set_sources(rigs, plannedAddr)
             end
             if r.primary and r.meshAddr and not mainAsset[r.actorKey] then
                 mainAsset[r.actorKey] = r.meshAddr
+                local names = {}
+                for n in tostring(r.morphs or ""):gmatch("[^\t]+") do
+                    if #names < 256 then
+                        names[#names + 1] = n
+                    end
+                end
+                mainComp[r.actorKey] = { comp = r.comp, full = r.full, names = names }
             end
         end
     end

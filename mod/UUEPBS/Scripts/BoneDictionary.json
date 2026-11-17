@@ -27,7 +27,7 @@
     { "Title": "Neck", "Bones": ["neck01", "neck", "necklower", "neck1", "neck#"], "Helpers": true, "Children": "keep_size",
       "Hint": "Neck length/thickness; the head keeps its size." },
     { "Title": "Horns", "Bones": ["horn1", "horn", "horn#"], "Children": "scale_too", "Hint": "Both horns." },
-    { "Title": "Ears", "Bones": ["cear01", "ear", "ear#"], "Children": "scale_too", "Hint": "Both ears." },
+    { "Title": "Ears", "Bones": ["cear01", "ear", "ear#", "earbase", "earroot"], "Children": "scale_too", "Hint": "Both ears." },
     { "Title": "Eyes", "Bones": ["ceye", "eye", "eyeball", "eye#"], "Children": "scale_too", "Hint": "Eyeballs." },
 
     { "Section": "Torso", "Title": "Rib cage", "Bones": ["spine02", "spine2", "chestlower", "chest", "abdomenupper", "spine002", "ribs", "ribcage", "*xiong"],
@@ -47,7 +47,8 @@
     { "Title": "Nipples", "Bones": ["nipp", "nipple", "nipple#", "*nipple*", "nipp#"], "Children": "scale_too", "Hint": "Nipple size." },
 
     { "Section": "Hips & Legs", "Title": "Butt",
-      "Bones": ["butt", "glute", "buttock", "gluteus", "butt#", "buttcheek", "*butt*", "*glute*", "*buttock*", "*pigu*", "*shiri*", "*tunbu*"],
+      "Bones": ["butt", "glute", "buttock", "gluteus", "butt#", "buttcheek", "*butt*", "*glute*", "*buttock*", "*pigu*", "*shiri*", "*tunbu*",
+              "ass", "ass#", "assjiggle", "assjiggle#", "asscheek"],
       "Children": "scale_too", "Hint": "Glutes." },
     { "Title": "Thighs", "Bones": ["thigh", "upleg", "upperleg", "thighbend", "thigh#", "thighstretch", "*datui*", "*momo*"],
       "Extra": ["*dtui*", "thighjiggle#"], "Helpers": true, "Children": "keep_size",
@@ -55,6 +56,7 @@
     { "Title": "Calves", "Bones": ["calf", "lowerleg", "leg", "shin", "calf#", "legstretch", "knee", "*xiaotui*"],
       "Extra": ["*xtui*"], "Helpers": true, "Children": "keep_size", "Hint": "Lower legs." },
     { "Title": "Feet", "Bones": ["foot", "foot#", "ankle"], "Children": "scale_too", "Hint": "Feet and toes." },
+    { "Title": "Tail", "Bones": ["tailroot", "tailbase", "tail", "tail#"], "Children": "scale_too", "Hint": "The whole tail, from its root." },
 
     { "Section": "Arms", "Title": "Upper arms", "Bones": ["upperarm", "arm", "shldrbend", "upperarm#", "armstretch", "*dabi*"],
       "Helpers": true, "Children": "keep_size", "Hint": "Upper arms." },
@@ -98,6 +100,14 @@
         { "Title": "Thighs", "Bones": ["hip"], "Extra": ["hippart#", "*dtui*", "*datui*"] },
         { "Title": "Calves", "Bones": ["knee"], "Extra": ["kneepart#", "*xtui*", "*xiaotui*"] },
         { "Title": "Feet", "Bones": ["ankle"] }
+      ]
+    },
+    {
+      "Name": "Jiggle bones (Carnal Instinct)",
+      "Detect": ["jiggle", "assjiggle", "bellyjiggle"],
+      "Groups": [
+        { "Title": "Breasts", "Bones": ["jiggle"] },
+        { "Title": "Tail", "Extra": ["ftail#"] }
       ]
     }
   ]

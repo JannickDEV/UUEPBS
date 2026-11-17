@@ -28,14 +28,14 @@ R"UBSD({
     { "Title": "Neck", "Bones": ["neck01", "neck", "necklower", "neck1", "neck#"], "Helpers": true, "Children": "keep_size",
       "Hint": "Neck length/thickness; the head keeps its size." },
     { "Title": "Horns", "Bones": ["horn1", "horn", "horn#"], "Children": "scale_too", "Hint": "Both horns." },
-    { "Title": "Ears", "Bones": ["cear01", "ear", "ear#"], "Children": "scale_too", "Hint": "Both ears." },
+    { "Title": "Ears", "Bones": ["cear01", "ear", "ear#", "earbase", "earroot"], "Children": "scale_too", "Hint": "Both ears." },
     { "Title": "Eyes", "Bones": ["ceye", "eye", "eyeball", "eye#"], "Children": "scale_too", "Hint": "Eyeballs." },
 
     { "Section": "Torso", "Title": "Rib cage", "Bones": ["spine02", "spine2", "chestlower", "chest", "abdomenupper", "spine002", "ribs", "ribcage", "*xiong"],
       "Children": "keep_size", "Hint": "Upper torso. Arms, neck and breasts keep their size but move with it." },
-    { "Title": "Waist", "Bones": ["spine01", "abdomenlower", "abdomen", "spine", "spine001", "waist", "spine1", "*yaobu*", "*koshi*"],
-      "C)UBSD"
-R"UBSD(hildren": "keep_size", "Hint": "Mid torso / waist." },
+    { "Title": "Waist", "Bones": ["spine01", "abdomenlower", "abdomen", "spine", "spine001", "waist", "spine1", "*yaobu*")UBSD"
+R"UBSD(, "*koshi*"],
+      "Children": "keep_size", "Hint": "Mid torso / waist." },
     { "Title": "Belly", "Bones": ["belly", "belly#", "stomach", "tummy", "*belly*", "*fubu*"], "Children": "scale_too",
       "Hint": "Belly / stomach soft-body bone." },
     { "Title": "Hips", "Bones": ["pelvis", "hips", "hip", "pelvis#"], "Children": "keep_size",
@@ -49,7 +49,8 @@ R"UBSD(hildren": "keep_size", "Hint": "Mid torso / waist." },
     { "Title": "Nipples", "Bones": ["nipp", "nipple", "nipple#", "*nipple*", "nipp#"], "Children": "scale_too", "Hint": "Nipple size." },
 
     { "Section": "Hips & Legs", "Title": "Butt",
-      "Bones": ["butt", "glute", "buttock", "gluteus", "butt#", "buttcheek", "*butt*", "*glute*", "*buttock*", "*pigu*", "*shiri*", "*tunbu*"],
+      "Bones": ["butt", "glute", "buttock", "gluteus", "butt#", "buttcheek", "*butt*", "*glute*", "*buttock*", "*pigu*", "*shiri*", "*tunbu*",
+              "ass", "ass#", "assjiggle", "assjiggle#", "asscheek"],
       "Children": "scale_too", "Hint": "Glutes." },
     { "Title": "Thighs", "Bones": ["thigh", "upleg", "upperleg", "thighbend", "thigh#", "thighstretch", "*datui*", "*momo*"],
       "Extra": ["*dtui*", "thighjiggle#"], "Helpers": true, "Children": "keep_size",
@@ -57,6 +58,7 @@ R"UBSD(hildren": "keep_size", "Hint": "Mid torso / waist." },
     { "Title": "Calves", "Bones": ["calf", "lowerleg", "leg", "shin", "calf#", "legstretch", "knee", "*xiaotui*"],
       "Extra": ["*xtui*"], "Helpers": true, "Children": "keep_size", "Hint": "Lower legs." },
     { "Title": "Feet", "Bones": ["foot", "foot#", "ankle"], "Children": "scale_too", "Hint": "Feet and toes." },
+    { "Title": "Tail", "Bones": ["tailroot", "tailbase", "tail", "tail#"], "Children": "scale_too", "Hint": "The whole tail, from its root." },
 
     { "Section": "Arms", "Title": "Upper arms", "Bones": ["upperarm", "arm", "shldrbend", "upperarm#", "armstretch", "*dabi*"],
       "Helpers": true, "Children": "keep_size", "Hint": "Upper arms." },
@@ -67,10 +69,10 @@ R"UBSD(hildren": "keep_size", "Hint": "Mid torso / waist." },
     { "Section": "Muscles", "Title": "Deltoids", "Bones": ["*deltoid*", "delt", "delt#", "*shoulderdelt*"], "MatchAll": true, "Children": "scale_too",
       "Hint": "Shoulder muscle helper bones." },
     { "Title": "Biceps", "Bones": ["*bicep*"], "MatchAll": true, "Children": "scale_too", "Hint": "Biceps helper bones." },
-    { "Title": "Triceps", "Bones": ["*tricep*"], "MatchAll": true, "Children": "scale_too", "Hint": "Triceps helper bones." },
+    { "Title": "Triceps", "Bones": ["*tricep*"], "MatchAll": true,)UBSD"
+R"UBSD( "Children": "scale_too", "Hint": "Triceps helper bones." },
     { "Title": "Pecs", "Bones": ["*pectoral*", "pec", "pec#", "pecs", "*pecs*", "*claviclepec*", "*chestmuscle*"], "MatchAll": true,
-      "Children": "scale_too", "Hint": ")UBSD"
-R"UBSD(Chest muscle helper bones." },
+      "Children": "scale_too", "Hint": "Chest muscle helper bones." },
     { "Title": "Lats", "Bones": ["*latissimus*", "lat", "lats", "lat#", "*lats"], "MatchAll": true, "Children": "scale_too",
       "Hint": "Latissimus (back width) helper bones." },
     { "Title": "Traps", "Bones": ["*trapezius*", "trap", "traps", "trap#"], "MatchAll": true, "Children": "scale_too",
@@ -101,6 +103,14 @@ R"UBSD(Chest muscle helper bones." },
         { "Title": "Thighs", "Bones": ["hip"], "Extra": ["hippart#", "*dtui*", "*datui*"] },
         { "Title": "Calves", "Bones": ["knee"], "Extra": ["kneepart#", "*xtui*", "*xiaotui*"] },
         { "Title": "Feet", "Bones": ["ankle"] }
+      ]
+    },
+    {
+      "Name": "Jiggle bones (Carnal Instinct)",
+      "Detect": ["jiggle", "assjiggle", "bellyjiggle"],
+      "Groups": [
+        { "Title": "Breasts", "Bones": ["jiggle"] },
+        { "Title": "Tail", "Extra": ["ftail#"] }
       ]
     }
   ]

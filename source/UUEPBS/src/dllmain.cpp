@@ -399,16 +399,19 @@ namespace
             {
                 folded.push_back(uuepbs::fold_case(a));
             }
-            if (old.enabled != h.enabled || old.full_within != h.full_within || old.fade_out != h.fade_out || old.strength != h.strength ||
-                old.shoulder_turn != h.shoulder_turn || old.stretch != h.stretch || old.fingers != h.fingers || old.feet != h.feet ||
-                reg.hand_anims() != folded)
+            const bool switches = old.enabled != h.enabled || old.fingers != h.fingers || old.feet != h.feet || reg.hand_anims() != folded;
+            if (switches || old.full_within != h.full_within || old.fade_out != h.fade_out || old.strength != h.strength ||
+                old.shoulder_turn != h.shoulder_turn || old.stretch != h.stretch)
             {
                 reg.set_hands(h, m_hand_anims);
-                char line[256];
-                std::snprintf(line, sizeof line, "hand contact (%s): %s, strength %.2f, contact %.2f-%.2f x arm, shoulder %.0f deg, stretch %.2fx%s%s",
-                              m_hand_ui ? "window" : "config.lua", h.enabled ? "on" : "off", h.strength, h.full_within, h.fade_out, h.shoulder_turn,
-                              h.stretch, m_hand_list.empty() ? ", every animation" : ", only while playing: ", m_hand_list.c_str());
-                g_log.line(line);
+                // A slider dragged in the window changes the values every frame: log those at most once a second
+                // (ubs hands / ubs status always show the values in use).
+                const auto now = Clock::now();
+                if (switches || now - m_hand_logged >= std::chrono::seconds(1))
+                {
+                    m_hand_logged = now;
+                    g_log.line(uuepbs::Registry::hands_summary(h, m_hand_ui ? "window" : "config.lua", m_hand_list));
+                }
             }
         }
 
@@ -1582,7 +1585,7 @@ namespace
             }
             {
                 const uuepbs::HandOptions h = reg.hands();
-                s += std::string("hand contact: ") + (h.enabled ? "on" : "off") + "\n";
+                s += uuepbs::Registry::hands_summary(h, nullptr, {}) + "\n";
                 if (h.enabled)
                 {
                     s += reg.hands_report();
@@ -1635,7 +1638,7 @@ namespace
             if (v == "hands")
             {
                 const uuepbs::HandOptions h = uuepbs::Registry::instance().hands();
-                std::string s = std::string("hand contact: ") + (h.enabled ? "on" : "off (HandContact in config.lua)") + "\n";
+                std::string s = h.enabled ? uuepbs::Registry::hands_summary(h, nullptr, {}) + "\n" : std::string("hand contact: off (HandContact in config.lua)\n");
                 s += uuepbs::Registry::instance().hands_report();
                 g_log.line(s);
                 return s;
@@ -1806,6 +1809,7 @@ namespace
         bool m_hand_known{false};               // the script sent its HandContact settings
         uuepbs::HandOptions m_hand_config{};    // config.lua
         std::optional<uuepbs::HandOptions> m_hand_ui; // set in the window (_hand_contact.txt)
+        Clock::time_point m_hand_logged{};             // last "hand contact (...)" log line
         std::vector<std::string> m_hand_anims;  // config.lua HandContactAnims, split
         std::string m_hand_list;
         fs::path m_hand_file;

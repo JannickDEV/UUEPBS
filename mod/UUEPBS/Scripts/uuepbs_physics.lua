@@ -643,7 +643,14 @@ local function track(r)
     local a = address(r.comp)
     local st = a and tracked[a]
     local main, post = anim_instances(r.comp)
-    if st and st.comp == r.comp and st.main == main and st.post == post then
+    -- Compare by address: UE4SS hands out a new Lua object for every engine call, and two of them for the same
+    -- UObject are not ==. (Comparing the objects re-tracked every mesh on every pass and restarted its animation
+    -- and physics blueprints about twice a second.)
+    if st and address(st.main) == address(main) and address(st.post) == address(post) then
+        st.comp, st.main, st.post = r.comp, main, post
+        for _, nd in ipairs(st.nodes) do
+            nd.inst = nd.post and post or main
+        end
         return st
     end
     if st then
@@ -651,10 +658,14 @@ local function track(r)
     end
     st = { comp = r.comp, key = r.actorKey, label = r.label or name_of(r.comp), main = main, post = post, nodes = {},
         saved = {}, index = {}, applied = nil, due = 0, assets = {} }
-    for _, inst in ipairs({ main, post }) do
-        for _, nd in ipairs(P.find_nodes(inst)) do
-            nd.post = inst == post
-            st.nodes[#st.nodes + 1] = nd
+    -- (not ipairs({ main, post }): with no main instance - a hair or outfit mesh that only has a post-process
+    -- blueprint - ipairs would stop at the nil and miss the post-process nodes)
+    for _, pair in ipairs({ { main, false }, { post, true } }) do
+        if pair[1] then
+            for _, nd in ipairs(P.find_nodes(pair[1])) do
+                nd.post = pair[2]
+                st.nodes[#st.nodes + 1] = nd
+            end
         end
     end
     st.rigid = false
@@ -858,8 +869,8 @@ function P.apply(rigs, scaled, t)
             end
         end
     end
-    for a, st in pairs(tracked) do
-        if not want[a] or not alive(st.comp) then
+    for a in pairs(tracked) do
+        if not want[a] then
             P.release(a)
         end
     end

@@ -520,6 +520,149 @@ static void elbow_follows_waist()
     CHECK(std::fabs(len3(ul0) - len3(ul1)) < 1.0e-3 && std::fabs(len3(lh0) - len3(lh1)) < 1.0e-3, "arm bone lengths changed");
 }
 
+// An arm hanging almost straight with the hand by the thigh, and wider shoulders (a longer collar bone, "keep children
+// size"): the shoulder moves out, the hand's spot stays, so the spot ends up a hair out of the arm's reach. "Shoulder
+// help" used to turn the collar bone by its whole limit (30 degrees) the moment that happened, so a tiny sway of the
+// animation made the shoulder snap between its wide and its narrow place every few frames. The turn has to grow
+// smoothly from 0 with how far out of reach the spot is.
+static void shoulder_help_is_smooth()
+{
+    const double S[3] = {0.0, -20.0, 145.0};
+    double prev_turn = -1.0, prev_shoulder[3] = {0.0, 0.0, 0.0}, worst_turn = 0.0, worst_move = 0.0, most_turn = 0.0;
+    for (int step = 0; step <= 160; ++step)
+    {
+        const double a = (-8.0 + 0.1 * step) * 3.14159265358979323846 / 180.0; // the arm sways in toward the body
+        const double b = a + 3.0 * 3.14159265358979323846 / 180.0;              // a slightly bent elbow
+        const double E[3] = {0.0, S[1] + 27.0 * std::sin(a), S[2] - 27.0 * std::cos(a)};
+        const double H[3] = {0.0, E[1] + 26.0 * std::sin(b), E[2] - 26.0 * std::cos(b)};
+        std::vector<Xform> comp;
+        const Skel sk = made_rig({{"root", -1, 0, 0, 0},
+                                  {"pelvis", 0, 0, 0, 100},
+                                  {"spine_01", 1, 0, 0, 120},
+                                  {"spine_02", 2, 0, 0, 140},
+                                  {"clavicle_r", 3, 0, -8, 145},
+                                  {"upperarm_r", 4, S[0], S[1], S[2]},
+                                  {"lowerarm_r", 5, E[0], E[1], E[2]},
+                                  {"hand_r", 6, H[0], H[1], H[2]},
+                                  {"thigh_r", 1, 0, -10, 95},
+                                  {"calf_r", 8, 0, -10, 50},
+                                  {"foot_r", 9, 0, -10, 8}},
+                                 comp);
+        EditBook book;
+        book["clavicle_r"] = entry("clavicle_r", 1.0, 1.3, 1.0, Spread::Keep); // the collar bone runs along Y here
+        HandOptions h;
+        h.enabled = true;
+        RigSculptor keep;
+        const std::vector<Xform> on = run_with(sk, book, h, &keep);
+        const double turned = keep.hand_samples()[0].turned;
+        if (prev_turn >= 0.0)
+        {
+            worst_turn = std::max(worst_turn, std::fabs(turned - prev_turn));
+            double d[3];
+            sub(on[5].pos, prev_shoulder, d);
+            worst_move = std::max(worst_move, len3(d));
+        }
+        most_turn = std::max(most_turn, turned);
+        prev_turn = turned;
+        std::memcpy(prev_shoulder, on[5].pos, sizeof prev_shoulder);
+    }
+    std::printf("wider shoulders, hand by the thigh, arm swaying 0.1 deg a step: shoulder help up to %.1f deg, at most %.2f deg / %.2f cm a step\n",
+                most_turn, worst_turn, worst_move);
+    CHECK(most_turn > 0.5, "the spot never went out of reach: the case tests nothing (%.2f deg)", most_turn);
+    CHECK(worst_turn < 0.5 && worst_move < 0.3, "the shoulder jumped (%.2f deg, %.2f cm in one 0.1 deg step)", worst_turn, worst_move);
+}
+
+// The elbow rests against a wider waist (the arm turns out about the shoulder) while the hand comes close to the belly.
+// When the hand's own contact starts, the hand must start from where the elbow's turn took it - it used to jump back.
+static void elbow_then_hand_is_smooth()
+{
+    double prev[3] = {0.0, 0.0, 0.0}, worst = 0.0;
+    for (int step = 0; step <= 440; ++step)
+    {
+        const double hx = 30.0 - 0.05 * step;
+        std::vector<Xform> comp;
+        const Skel sk = made_rig({{"root", -1, 0, 0, 0},
+                                  {"pelvis", 0, 0, 0, 100},
+                                  {"spine_01", 1, 0, 0, 120},
+                                  {"spine_02", 2, 0, 0, 140},
+                                  {"clavicle_r", 3, 0, -8, 145},
+                                  {"upperarm_r", 4, 0, -14, 145},
+                                  {"lowerarm_r", 5, 0, -5, 120},
+                                  {"hand_r", 6, hx, -5, 120}},
+                                 comp);
+        EditBook book;
+        for (const char* b : {"pelvis", "spine_01", "spine_02"})
+        {
+            book[b] = entry(b, 1.0, 1.5, 1.0, Spread::Solo);
+        }
+        HandOptions h;
+        h.enabled = true;
+        const std::vector<Xform> on = run_with(sk, book, h);
+        if (step > 0)
+        {
+            double d[3];
+            sub(on[7].pos, prev, d);
+            worst = std::max(worst, len3(d));
+        }
+        std::memcpy(prev, on[7].pos, sizeof prev);
+    }
+    std::printf("elbow on a wider waist, hand coming in 0.5 mm a step: the hand moved at most %.2f mm a step\n", worst * 10.0);
+    CHECK(worst < 0.2, "the hand jumped %.2f cm when its contact began", worst);
+}
+
+// Sitting, an arm almost straight presses on the thigh, and the thigh is made thicker: the spot rises, so the elbow has
+// to bend. Its side comes from the animation's own slight bend; below 1% of the arm the elbow used to switch to a
+// fallback side, so an arm straightening by a fraction of a degree threw the elbow 90 degrees sideways.
+static void straight_arm_elbow_is_smooth()
+{
+    const double pi = 3.14159265358979323846;
+    double prev[3] = {0.0, 0.0, 0.0}, worst = 0.0, most_bend = 0.0;
+    for (int step = 0; step <= 200; ++step)
+    {
+        const double beta = (0.1 + 0.02 * step) * pi / 180.0; // the elbow's own bend: 0.1 to 4.1 degrees
+        const double S[3] = {30.0, -14.0, 154.0};
+        const double E[3] = {S[0], S[1], S[2] - 27.0};
+        const double H[3] = {E[0] + 26.0 * std::sin(beta), E[1], E[2] - 26.0 * std::cos(beta)};
+        std::vector<Xform> comp;
+        const Skel sk = made_rig({{"root", -1, 0, 0, 0},
+                                  {"pelvis", 0, 0, 0, 100},
+                                  {"spine_01", 1, 0, 0, 120},
+                                  {"spine_02", 2, 0, 0, 140},
+                                  {"clavicle_r", 3, 10, -10, 150},
+                                  {"upperarm_r", 4, S[0], S[1], S[2]},
+                                  {"lowerarm_r", 5, E[0], E[1], E[2]},
+                                  {"hand_r", 6, H[0], H[1], H[2]},
+                                  {"thigh_r", 1, 0, -14, 95},
+                                  {"calf_r", 8, 45, -14, 95},
+                                  {"foot_r", 9, 45, -14, 50}},
+                                 comp);
+        EditBook book;
+        book["thigh_r"] = entry("thigh_r", 1.0, 1.5, 1.5, Spread::Solo);
+        HandOptions h;
+        h.enabled = true;
+        const std::vector<Xform> on = run_with(sk, book, h);
+        // how far the elbow sits off the shoulder -> hand line
+        double sh[3], se[3];
+        sub(on[7].pos, on[5].pos, sh);
+        sub(on[6].pos, on[5].pos, se);
+        const double along = (sh[0] * se[0] + sh[1] * se[1] + sh[2] * se[2]) / (len3(sh) * len3(sh));
+        const double off[3] = {se[0] - along * sh[0], se[1] - along * sh[1], se[2] - along * sh[2]};
+        most_bend = std::max(most_bend, len3(off));
+        if (step > 0)
+        {
+            double d[3];
+            sub(on[6].pos, prev, d);
+            worst = std::max(worst, len3(d));
+        }
+        std::memcpy(prev, on[6].pos, sizeof prev);
+    }
+    std::printf("nearly straight arm on a thicker thigh, elbow bend growing 0.02 deg a step: elbow up to %.2f cm off the line, "
+                "moved at most %.2f cm a step\n",
+                most_bend, worst);
+    CHECK(most_bend > 3.0, "the elbow never had to bend: the case tests nothing (%.2f cm)", most_bend);
+    CHECK(worst < 0.5, "the elbow jumped %.2f cm in one step", worst);
+}
+
 // Crossed legs: the right foot rests on the left knee. A thicker left leg lifts the foot with it (the right leg
 // bends to reach); "Feet and knees too" off leaves it where it was.
 static void foot_follows_knee()
@@ -585,6 +728,9 @@ int main(int argc, char** argv)
     find_arms_by_name();
     fingers_follow_surface();
     elbow_follows_waist();
+    shoulder_help_is_smooth();
+    elbow_then_hand_is_smooth();
+    straight_arm_elbow_is_smooth();
     foot_follows_knee();
     settings_file();
     if (argc < 4)

@@ -80,6 +80,23 @@ int main(int argc, char** argv)
         CHECK(has(m, "Thighs", "thigh_l") && has(m, "Thighs", "thighjiggle_r") && has(m, "Breasts", "boob_l") && has(m, "Hips", "pelvis"));
         CHECK(has(m, "Waist", "spine_01") && has(m, "Rib cage", "spine_02") && has(m, "Upper arms", "upperarm_twist_01_l"));
     }
+    // Carnal Instinct (UE5 jackal base model): breasts and butt are jiggle bones, two tail chains, ear bases.
+    {
+        std::vector<std::string> names; std::vector<int32_t> parents;
+        std::ifstream f("fixtures/carnal_instinct_cache.txt"); std::string line;
+        while (std::getline(f, line))
+        {
+            std::istringstream l(line); std::string kind, item; std::getline(l, kind, '\t');
+            if (kind == "names" && names.empty()) while (std::getline(l, item, '\t')) names.push_back(item);
+            if (kind == "parents" && parents.empty()) while (std::getline(l, item, '\t')) parents.push_back(std::stoi(item));
+        }
+        CHECK(names.size() == 139 && parents.size() == names.size());
+        auto m = show("Carnal Instinct", names, parents, d);
+        CHECK(has(m, "Breasts", "Jiggle_R") && has(m, "Breasts", "Jiggle_L") && has(m, "Butt", "AssJiggle_L") && !has(m, "Butt", "AssPhys_L"));
+        CHECK(has(m, "Belly", "BellyJiggle") && has(m, "Ears", "Ear_Base_R") && !has(m, "Ears", "Ear_Tip_R"));
+        CHECK(has(m, "Tail", "TailRoot") && has(m, "Tail", "FTail_01") && !has(m, "Tail", "Tail01") && m["Tail"].size() == 2);
+        CHECK(has(m, "Rib cage", "spine_02") && has(m, "Thighs", "thigh_l") && !m.count("Nipples"));
+    }
     for (int a = 2; a < argc; ++a)
     {
         std::vector<std::string> names; std::vector<int32_t> parents;

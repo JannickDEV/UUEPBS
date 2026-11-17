@@ -227,6 +227,51 @@ check(body.rbn.Alpha == 1 and breastSphere.Radius == 8 and body.cloth == false, 
 check(not P.set_mode("bogus"), "unknown mode refused")
 check(P.status():find("keep", 1, true) ~= nil, "status names the mode")
 
+-- UE4SS hands out a new Lua object for every engine call (and they are not ==): a steady character must not be
+-- re-tracked, and its blueprints not restarted, on every pass. Here every handle is a fresh proxy.
+do
+    local function handle(obj)
+        return setmetatable({}, { __index = obj, __newindex = obj })
+    end
+    local inner = make_mesh("Fresh", { root = { 1, 1, 1 }, breast_l = { 1.5, 1.5, 1.5 } })
+    local gi, gp = inner.GetAnimInstance, inner.GetPostProcessInstance
+    inner.GetAnimInstance = function(self) return handle(gi(self)) end
+    inner.GetPostProcessInstance = function(self) return handle(gp(self)) end
+    P.set_mode("follow")
+    local before = #said
+    P.apply({ { comp = handle(inner), label = "Fresh", actorKey = "fresh" } }, { fresh = true }, 80000)
+    local pr, mr = inner.postRestarts, inner.mainRestarts
+    check(pr == 1, "fresh handles: the post-process blueprint restarted once when the sizes came in (" .. pr .. ")")
+    for i = 1, 6 do
+        P.apply({ { comp = handle(inner), label = "Fresh", actorKey = "fresh" } }, { fresh = true }, 80000 + 700 * i)
+    end
+    local tracked_again = 0
+    for i = before + 1, #said do
+        if said[i]:find("physics: Fresh has", 1, true) then
+            tracked_again = tracked_again + 1
+        end
+    end
+    check(tracked_again == 1, "fresh handles: the mesh was looked at " .. tracked_again .. " times instead of once")
+    check(inner.postRestarts == pr and inner.mainRestarts == mr, "fresh handles: blueprints restarted again on a steady pose ("
+        .. inner.postRestarts .. " / " .. inner.mainRestarts .. ")")
+    P.apply({}, {}, 90000)
+    check(near(breastSphere.Radius, 8), "fresh handles: sizes back")
+end
+
+-- a hair mesh with only a post-process blueprint (no main animation instance): its nodes are still found
+do
+    local hair = make_mesh("Hair", { root = { 1, 1, 1 }, breast_l = { 1.5, 1.5, 1.5 } })
+    hair.main = nil
+    local before = #said
+    P.apply({ { comp = hair, label = "Hair", actorKey = "hair" } }, { hair = true }, 95000)
+    local found = false
+    for i = before + 1, #said do
+        found = found or (said[i]:find("physics: Hair has", 1, true) ~= nil and said[i]:find("AnimNode_RigidBody", 1, true) ~= nil)
+    end
+    check(found, "post-process nodes found without a main animation instance")
+    P.apply({}, {}, 96000)
+end
+
 -- restore_all
 P.set_mode("follow")
 P.apply(rigs, { player = true }, 70000)
