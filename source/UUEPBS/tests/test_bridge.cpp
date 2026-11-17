@@ -84,7 +84,7 @@ int main(int argc, char** argv)
     CHECK(forgot.size() == 1 && forgot[0].who == "nenu");
     CHECK(with_copy_rule(mine, "never", "x", "ignored")[0].of.empty());
     DllState dc; dc.copy_rules = 4; dc.copy_rule_list = {{"never", "key:7FF6AB", "", "window"}, {"copy", "Bard\tx", "player", "window"}};
-    CHECK(format_dll_state(dc).find("copyrules\t4\ncrule\tnever\tkey:7FF6AB\t\ncrule\tcopy\tBard x\tplayer\nhook\t") != std::string::npos);
+    CHECK(format_dll_state(dc).find("copyrules\t4\ncrule\tnever\tkey:7FF6AB\t\ncrule\tcopy\tBard x\tplayer\nphysweight\t") != std::string::npos);
     std::printf(fails ? "BRIDGE TESTS FAILED\n" : "bridge tests passed\n");
     return fails;
 }
