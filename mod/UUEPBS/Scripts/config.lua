@@ -57,6 +57,15 @@ return {
     -- window opens and on Refresh; while it stays open, newly spawned characters are added as they appear.
     CandidateClasses = { "Character" },
     MaxCandidates = 40,
+    -- Leave out actors of those classes that are not bodies (boats, cameras, sequence helpers): an actor
+    -- is listed when one of its skeletal meshes has bones named like at least two of head, torso, arms
+    -- and legs (any game, any rig, animals too). The player, the profile's Target and characters with
+    -- sliders are always listed. false = list every actor of the classes above.
+    CharacterListFilter = true,
+    -- Name patterns (* = anything; the actor's object or class name) that override that rule:
+    -- e.g. CharacterListShow = { "BP_Mount*" }, CharacterListHide = { "BP_Dummy_C" }.
+    CharacterListShow = {},
+    CharacterListHide = {},
     -- Readable names in the Character list and mesh labels ("Eve" instead of BP_Eve_C_2147482611 or
     -- 00_EVE_01_Body): the game's own name for the character when it has one, else the game profile's
     -- "Names" table, else the engine name cleaned up. Saved sliders and presets don't depend on it.

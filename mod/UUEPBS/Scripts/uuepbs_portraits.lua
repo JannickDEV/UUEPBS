@@ -395,33 +395,116 @@ local function draw_texture(world, rt, tex)
     return drawn
 end
 
--- Spawns `cls` at `xf` with BeginDeferredActorSpawnFromClass / FinishSpawningActor. `before(actor)` runs
--- between the two (properties that must be in place when the components are set up). Returns the actor,
--- or nil and why not.
-local function spawn(world, cls, xf, what, before)
-    local gs = statics()
-    -- 1 = always spawn; no owner; (UE5.3+) scale method 1 = multiply with root
-    local ok, a = ucall(gs, "BeginDeferredActorSpawnFromClass", table.pack(world, cls, xf, 1, nil), table.pack(1))
-    if not ok or not valid(a) then
-        return nil, "could not spawn a " .. what .. " (" .. (ok and "nothing came back" or short(a)) .. ")"
-    end
-    if before then
-        pcall(before, a)
-    end
-    local finished, ferr = ucall(gs, "FinishSpawningActor", table.pack(a, xf), table.pack(1))
-    if not finished then
-        pcall(function()
-            a:K2_DestroyActor()
-        end)
-        return nil, "could not finish spawning the " .. what .. " (" .. short(ferr) .. ")"
-    end
-    return a
-end
-
 local function destroy(a)
     pcall(function()
         a:K2_DestroyActor()
     end)
+end
+
+local function finite(x)
+    return type(x) == "number" and x == x and x ~= math.huge and x ~= -math.huge
+end
+
+-- The engine refuses to spawn at a transform with a NaN in it ("SpawnActor failed because of an invalid
+-- transform") and hands back nothing, so a bad bone or forward vector is caught here with a reason.
+-- The rotation is normalised on the way (UE checks that too).
+local function clean_transform(xf)
+    local t, r = xf.Translation, xf.Rotation
+    if not t or not finite(t.X) or not finite(t.Y) or not finite(t.Z) then
+        return nil, "no usable position"
+    end
+    if not r or not finite(r.X) or not finite(r.Y) or not finite(r.Z) or not finite(r.W) then
+        return nil, "no usable rotation"
+    end
+    local n = math.sqrt(r.X * r.X + r.Y * r.Y + r.Z * r.Z + r.W * r.W)
+    if n < 1e-6 then
+        return nil, "no usable rotation"
+    end
+    xf.Rotation = { X = r.X / n, Y = r.Y / n, Z = r.Z / n, W = r.W / n }
+    return xf
+end
+
+-- The world an object lives in (nil when it is not in one, or the call is not there).
+local function world_of(obj)
+    local w = nil
+    pcall(function()
+        w = obj:GetWorld()
+    end)
+    return valid(w) and w or nil
+end
+
+-- Spawns `cls` at `xf` with BeginDeferredActorSpawnFromClass / FinishSpawningActor. `before(actor)` runs
+-- between the two (properties that must be in place when the components are set up). Returns the actor,
+-- or nil and why not.
+--
+-- `world` is the world context: the character the picture is of, so whatever is spawned lands in the
+-- character's own world (a menu preview can live in a world of its own). When the engine hands back
+-- nothing for it, the same call is tried with the character's world object and with its mesh, and last
+-- with UE4SS's own World:SpawnActor (spawned at once; `before` runs right after). `rot` is the rotation
+-- as { Pitch, Yaw, Roll } for that last way.
+local function spawn(world, cls, xf, what, before, rot)
+    local gs = statics()
+    local fixed, bad = clean_transform(xf)
+    if not fixed then
+        return nil, "could not spawn a " .. what .. " (" .. bad .. ")"
+    end
+    local contexts, seen = { world }, {}
+    local w = world_of(world)
+    if w then
+        contexts[#contexts + 1] = w
+    end
+    pcall(function()
+        local m = world.Mesh
+        if valid(m) then
+            contexts[#contexts + 1] = m
+        end
+    end)
+    local tried = {}
+    local a = nil
+    for _, c in ipairs(contexts) do
+        if not seen[c] then
+            seen[c] = true
+            -- 1 = always spawn; no owner; (UE5.3+) scale method 1 = multiply with root
+            local ok, got = ucall(gs, "BeginDeferredActorSpawnFromClass", table.pack(c, cls, fixed, 1, nil), table.pack(1))
+            if ok and valid(got) then
+                a = got
+                break
+            end
+            tried[#tried + 1] = ok and "nothing came back" or short(got)
+        end
+    end
+    if a then
+        if #tried > 0 then
+            log("%s spawned with another world context (the character itself: %s)", what, tried[1])
+        end
+        if before then
+            pcall(before, a)
+        end
+        local finished, ferr = ucall(gs, "FinishSpawningActor", table.pack(a, fixed), table.pack(1))
+        if not finished then
+            destroy(a)
+            return nil, "could not finish spawning the " .. what .. " (" .. short(ferr) .. ")"
+        end
+        return a
+    end
+    -- last resort: UE4SS spawns it itself
+    if w then
+        local ok, got = pcall(function()
+            local r = rot or { Pitch = 0, Yaw = 0, Roll = 0 }
+            return w:SpawnActor(cls, fixed.Translation, r)
+        end)
+        if ok and valid(got) then
+            if before then
+                pcall(before, got)
+            end
+            log("%s spawned through UE4SS (BeginDeferredActorSpawnFromClass: %s)", what, table.concat(tried, "; "))
+            return got
+        end
+        tried[#tried + 1] = "World:SpawnActor " .. (ok and "gave nothing" or short(got))
+    else
+        tried[#tried + 1] = "the character is in no world"
+    end
+    return nil, "could not spawn a " .. what .. " (" .. table.concat(tried, "; ") .. ")"
 end
 
 -- ---------------------------------------------------------------- studio lights
@@ -578,7 +661,7 @@ local function scene_shot(actor, rt, centre, dist, fov, lift, pitch)
     local yaw = math.deg(math.atan(fwd.Y, fwd.X)) + 180
     local xf = { Rotation = quat(pitch, yaw, 0), Translation = cam, Scale3D = { X = 1, Y = 1, Z = 1 } }
 
-    local cap, err = spawn(actor, cls, xf, "SceneCapture2D")
+    local cap, err = spawn(actor, cls, xf, "SceneCapture2D", nil, { Pitch = pitch, Yaw = yaw, Roll = 0 })
     if not cap then
         return false, err
     end
@@ -688,7 +771,19 @@ local function read_requests(file, header)
     return list
 end
 
+-- A template (the actor a level sequence spawns from lives inside the sequence, not in a level) has no
+-- world to take a picture in. Live actors always sit in a level ("...:PersistentLevel.Name").
+local function placed(actor)
+    local ok, full = pcall(function()
+        return actor:GetFullName()
+    end)
+    return not (ok and type(full) == "string") or full:find("PersistentLevel.", 1, true) ~= nil
+end
+
 local function take(actor, stem)
+    if not placed(actor) then
+        return false, "not placed in a level (a template), nothing to photograph"
+    end
     local folder = ctx.folder
     local file = stem .. ".auto.png"
     local rt, readOnly = make_target(actor)
@@ -717,6 +812,9 @@ end
 
 -- Preset thumbnail: always the whole character (the game's portrait shows a face, not a shape).
 local function take_thumbnail(actor, name)
+    if not placed(actor) then
+        return false, "not placed in a level (a template), nothing to photograph"
+    end
     local file = name .. ".auto.png"
     local rt, readOnly = make_target(actor)
     if not rt then

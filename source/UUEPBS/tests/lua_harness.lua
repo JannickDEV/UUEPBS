@@ -12,6 +12,24 @@ local function check(cond, msg)
     end
 end
 
+-- Body regions from bone names (Scripts/uuepbs_cast.lua, the Choose character filter). Checked in every mode.
+do
+    local K = dofile(scripts .. "/uuepbs_cast.lua")
+    for name, want in pairs({
+        ["upperarm_l"] = "arm", ["Bip001 L UpperArm"] = "arm", ["mixamorig:LeftArm"] = "arm", ["lShldrBend"] = "arm",
+        ["lForearmBend"] = "arm", ["clavicle_r"] = "arm", ["thigh_twist_01_l"] = "leg", ["lShin"] = "leg", ["ik_foot_root"] = "leg",
+        ["spine_03"] = "torso", ["abdomenLower"] = "torso", ["mixamorig:Hips"] = "torso", ["neck_01"] = "head", ["Head"] = "head",
+        ["上半身"] = "torso", ["首"] = "head", ["左腕"] = "arm",
+        ["handle"] = false, ["ship_hull"] = false, ["Armature"] = false, ["Root"] = false, ["Rudder"] = false, ["Oar_L"] = false,
+        ["shipment"] = false, ["Toenail_Cam"] = false,
+    }) do
+        local got = K.region(name) or false
+        check(got == want, "bone region of " .. name .. ": " .. tostring(got))
+    end
+    check(K.body_of({ "Root", "Pelvis", "Spine1", "Neck" }) == true and K.body_of({ "Root", "Hull", "Mast", "Sail_01" }) == false
+        and K.body_of({ "Root", "spine_01", "spine_02" }) == false, "two body regions make a body")
+end
+
 -- Readable names (Scripts/uuepbs_names.lua): cleanup rules, the profile "Names" table, the game's own
 -- name properties. Plain functions, checked in every mode.
 do
@@ -515,6 +533,7 @@ if mode == "names" then
     -- Anca: placed in the level (her object name is a name); the game names her a moment after loading
     local anca = obj("BP_Villager_C /Game/Maps/Lvl.Lvl:PersistentLevel.Anca_243")
     anca._loc = { X = 2000, Y = 0, Z = 0 }
+    anca.Mesh = comp("CharacterMesh0", anca, bodyMesh, boneNames, boneParents, false) -- a body (the list shows bodies only)
     allComps[#allComps + 1] = eveBody
     extraChars = { eve, anca }
     local eveId, ancaId = string.format("%X", eve._addr), string.format("%X", anca._addr)
@@ -551,6 +570,59 @@ if mode == "names" then
     loop()
     s = run_peer(0, 1, eveId, 2)
     check(s:find("\ncand Anca the Smith   20 m key=" .. ancaId .. "\n", 1, true), "name set by the game later is picked up:\n" .. s)
+
+    -- Choose character lists bodies only (uuepbs_cast.lua): no boats, empty helpers or sequence templates,
+    -- whatever the game calls them; animals and other rigs with a body stay
+    local function thing(full, x, bones)
+        local a = obj(full)
+        a._loc = { X = x, Y = 0, Z = 0 }
+        if bones then
+            local parents = {}
+            for i = 1, #bones do parents[i] = i - 2 end
+            local m = obj("SkeletalMesh /Game/Props/" .. a.GetFName():ToString() .. "_Mesh")
+            a.Mesh = comp("CharacterMesh0", a, m, bones, parents, false)
+        end
+        extraChars[#extraChars + 1] = a
+        return a
+    end
+    local boat = thing("BP_Boat_B_C /Game/Maps/Lvl.Lvl:PersistentLevel.BP_Boat_B_C_1", 300, { "Root", "Hull", "Rudder", "Oar_L", "Oar_R", "ship_mast" })
+    local helper = thing("BP_SequenceHelper_C /Game/Maps/Lvl.Lvl:PersistentLevel.BP_SequenceHelper_C_0", 310)
+    local template = thing("BP_Hero_C /Game/Cine/LS_Intro.LS_Intro:MovieScene_0.BP_Hero_C_0", 320)
+    template.Mesh = comp("CharacterMesh0", template, bodyMesh, boneNames, boneParents, false)
+    local wolf = thing("BP_Wolf_C /Game/Maps/Lvl.Lvl:PersistentLevel.BP_Wolf_C_2", 330, { "Root", "Pelvis", "Spine1", "Neck", "Head", "Tail1", "FrontLeg_L" })
+    local daz = thing("BP_Daz_C /Game/Maps/Lvl.Lvl:PersistentLevel.BP_Daz_C_4", 340, { "hip", "pelvis", "lThighBend", "lShin", "abdomenLower", "lShldrBend" })
+    local mmd = thing("BP_Miku_C /Game/Maps/Lvl.Lvl:PersistentLevel.BP_Miku_C_5", 350, { "センター", "上半身", "首", "頭" })
+    cfg.Verbose = true -- the reasons are logged with Verbose on
+    run_peer(0, 1, eveId, 20)
+    loop()
+    cfg.Verbose = false
+    s = run_peer(0, 1, eveId, 20)
+    check(s:find("cand_engine [^\n]* BP_Wolf_C_2\n") and not s:find("BP_Boat_B_C_1", 1, true) and not s:find("BP_SequenceHelper_C_0", 1, true)
+        and not s:find("BP_Hero_C_0", 1, true),
+        "boat, empty helper and sequence template left out:\n" .. s)
+    check(s:find("\ncand Wolf ", 1, true) and s:find("\ncand Daz ", 1, true) and s:find("\ncand Miku ", 1, true) and s:find("\ncand Eve ", 1, true),
+        "animals, Daz and MMD rigs listed:\n" .. s)
+    local seen = table.concat(printed, "")
+    check(seen:find("Choose character: BP_Boat_B_C_1 left out, no body skeleton (6 bone(s), none named like a head, spine, arm or leg)", 1, true)
+        and seen:find("BP_SequenceHelper_C_0 left out, no skeletal mesh", 1, true) and seen:find("BP_Hero_C_0 left out, not placed in a level", 1, true),
+        "why each one is left out, in the log:\n" .. seen)
+    -- a picked or edited character is listed whatever it is; CharacterListShow / Hide and the switch override the rule
+    cfg.CharacterListFilter = false
+    run_peer(0, 1, eveId, 21)
+    loop()
+    s = run_peer(0, 1, eveId, 21)
+    check(s:find(" BP_Boat_B_C_1\n", 1, true) and s:find(" BP_SequenceHelper_C_0\n", 1, true) and s:find(" BP_Hero_C_0\n", 1, true),
+        "CharacterListFilter = false lists everything:\n" .. s)
+    cfg.CharacterListFilter = true
+    local boatKey = string.format("%X", boat._addr)
+    run_peer(0, 1, eveId, 22, "dll1", 0, "-", boatKey)
+    loop()
+    s = run_peer(0, 1, eveId, 22, "dll1", 0, "-", boatKey)
+    check(s:find("key=" .. boatKey .. "\n", 1, true), "a character with sliders stays listed:\n" .. s)
+    run_peer(0, 1, eveId, 23)
+    for _, a in ipairs({ boat, helper, template, wolf, daz, mmd }) do a._valid = false; if a.Mesh then a.Mesh._valid = false end end
+    extraChars = { eve, anca }
+    loop()
 
     -- FriendlyNames = false: engine names, as before 2.8 (read live, no restart needed)
     cfg.FriendlyNames = false
@@ -998,6 +1070,7 @@ if mode == "gon" then
             return { ForEach = function(_, fn) for i, c in ipairs(comps) do fn(i - 1, { get = function() return c end }) end end }
         end
         a._stubComp = stubComp
+        a.Mesh = comp("CharacterMesh0", a, bodyMesh, boneNames, boneParents, false) -- read only by the Choose character check
         extraChars[#extraChars + 1] = a
         return a
     end
