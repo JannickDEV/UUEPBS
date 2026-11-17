@@ -673,6 +673,24 @@ namespace uuepbs
         return m_hand_anims;
     }
 
+    void Registry::set_hand_choice(std::optional<anim_picks::Choice> choice)
+    {
+        std::lock_guard guard(m_lock);
+        m_hand_choice = std::move(choice);
+    }
+
+    std::optional<anim_picks::Choice> Registry::hand_choice() const
+    {
+        std::lock_guard guard(m_lock);
+        return m_hand_choice;
+    }
+
+    std::map<std::string, std::string> Registry::playing() const
+    {
+        std::lock_guard guard(m_lock);
+        return m_playing;
+    }
+
     void Registry::set_playing(std::map<std::string, std::string> playing)
     {
         std::lock_guard guard(m_lock);
@@ -685,11 +703,15 @@ namespace uuepbs
         {
             return false;
         }
+        const auto it = m_playing.find(rig.actor_key);
+        if (m_hand_choice)
+        {
+            return anim_picks::wanted(*m_hand_choice, it == m_playing.end() ? std::string_view{} : std::string_view(it->second));
+        }
         if (m_hand_anims.empty())
         {
             return true;
         }
-        const auto it = m_playing.find(rig.actor_key);
         if (it == m_playing.end() || it->second.empty())
         {
             return false;
@@ -730,7 +752,7 @@ namespace uuepbs
             std::string state = rig->sculptor.hands_report();
             if (m_hands.enabled && !hands_wanted_locked(*rig))
             {
-                state = "waiting (animation not in HandContactAnims)";
+                state = m_hand_choice ? "waiting (animation not picked in the window)" : "waiting (animation not in HandContactAnims)";
             }
             else if (m_hands.enabled && rig->actor->book.empty())
             {
@@ -759,7 +781,9 @@ namespace uuepbs
             }
             if (!hands_wanted_locked(*rig))
             {
-                out.push_back("Waiting: this animation is not in HandContactAnims (config.lua).");
+                out.push_back(m_hand_choice ? (m_hand_choice->mode == anim_picks::Mode::only ? "Waiting: this animation is not ticked below."
+                                                                                             : "Waiting: this animation is ticked as an exception below.")
+                                            : "Waiting: this animation is not in HandContactAnims (config.lua).");
                 break;
             }
             if (rig->actor->book.empty())

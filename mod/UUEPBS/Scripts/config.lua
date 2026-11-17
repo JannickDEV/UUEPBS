@@ -233,6 +233,8 @@ return {
     -- Only while the character plays an animation (montage) whose name contains one of these words,
     -- comma separated, e.g. "Touch, Masturbat". "" = whenever a hand is close to the body.
     -- "ubs hands" shows the names of the animations playing.
+    -- Easier: Character Scale > Animation > Which animations lists every animation the characters played in
+    -- this game; tick the ones to use (or to skip). Once you pick there, the window's choice wins over this line.
     HandContactAnims = "",
 
     Verbose = false,

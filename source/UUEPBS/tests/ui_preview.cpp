@@ -65,6 +65,21 @@ struct FakeTargets : ui::TargetSource
                 "hand_l: on thigh_l, 100% corrected, moved 22 cm"};
     }
     HandOptions hands{true};
+    bool hand_anims(ui::HandAnimList& out) override
+    {
+        out.custom = true;
+        out.choice = picks;
+        out.seen = {{"A_Sex-Solo_JerkMed-Futa-LoopA_Montage", "Roku (player)", 6, 9},
+                    {"AM_Emote_HandsOnHips", "Anca", 2, 8},
+                    {"A_Idle_ArmsCrossed", "Vendor", 1, 7},
+                    {"AM_Sit_Bench_Enter", "Roku (player)", 3, 6},
+                    {"AM_Cutscene_Intro_Hug", "Anca", 1, 5}};
+        out.playing_now = {{"A_Sex-Solo_JerkMed-Futa-LoopA_Montage", "Roku (player)"}};
+        out.target_playing = "A_Sex-Solo_JerkMed-Futa-LoopA_Montage";
+        return true;
+    }
+    void set_hand_anims(const anim_picks::Choice& c) override { picks = c; }
+    anim_picks::Choice picks{anim_picks::Mode::except, {"(normal movement)", "A_Idle_ArmsCrossed", "*Cutscene*"}};
     int auto_ground() override { return 1; }
     std::string physics = "follow";
     std::string physics_mode() override { return physics; }

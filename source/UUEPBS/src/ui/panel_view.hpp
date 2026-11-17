@@ -53,6 +53,18 @@ namespace uuepbs::ui
         std::string engine;        // engine object name, e.g. BP_Rokuv3_C_0 (empty from older scripts); label is the readable name
     };
 
+    // Hand Contact's animation list (Character Scale > Animation): what the characters play and have played
+    // in this game, and which of those Hand Contact works in.
+    struct HandAnimList
+    {
+        bool custom{false};                 // picked in the window (else config.lua HandContactAnims decides)
+        anim_picks::Choice choice;          // the window's picks (mode every when none)
+        std::string config_list;            // config.lua HandContactAnims as written
+        std::vector<anim_picks::Seen> seen; // newest first
+        std::map<std::string, std::string> playing_now; // animation name -> characters playing it now
+        std::string target_playing;         // what the character picked in the window plays now ("" = nothing)
+    };
+
     // Characters the user can switch the sliders to (fed by the Lua script).
     class TargetSource
     {
@@ -86,6 +98,14 @@ namespace uuepbs::ui
         virtual void reset_hand_contact() {}
         // Live readout for the character picked in the window.
         virtual std::vector<std::string> hand_status() { return {}; }
+        // Which animations Hand Contact works in. False when the DLL has no Hand Contact settings yet.
+        virtual bool hand_anims(HandAnimList& out)
+        {
+            (void)out;
+            return false;
+        }
+        virtual void set_hand_anims(const anim_picks::Choice& c) { (void)c; }
+        virtual void clear_anim_history() {}
         // "Collision follows Height" (config.lua CollisionFollow): 1 on, 0 off, -1 unknown (older script).
         // The script sizes each character's collision capsule with its Height and remembers the switch.
         virtual int collision_follow() { return -1; }
@@ -189,6 +209,7 @@ namespace uuepbs::ui
         // Character Scale tab (height and proportions, see core/proportions.hpp).
         void draw_scale();
         void draw_animation_fixes(); // Character Scale > Animation (Hand Contact)
+        void draw_hand_anims();      // ... its list of the animations the characters play / played
         std::vector<Category> scale_categories() const;
         bool scale_available(const ScaleSlider& sl) const;
         void write_scale(const ScaleSlider& sl, double value);
@@ -378,6 +399,7 @@ namespace uuepbs::ui
         bool m_simplified_changed_only{false};
         char m_body_filter[64]{}; // Body tab search: every category's sliders whose name matches
         char m_char_filter[64]{}; // Choose character search
+        char m_anim_filter[96]{}; // Hand Contact animation list search
 
         // Presets tab: details of the picked preset
         std::string m_details_for{};
