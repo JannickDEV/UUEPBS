@@ -2187,6 +2187,8 @@ namespace uuepbs::ui
             m_targets->set_hand_contact(o);
         }
 
+        draw_hand_anims();
+
         // live readout for the character picked above
         ImGui::Dummy(ImVec2(0.0f, dpi_px(6.0f)));
         ImGui::PushFont(nullptr, style.FontSizeBase * 0.86f);
@@ -2198,6 +2200,225 @@ namespace uuepbs::ui
         }
         ImGui::PopTextWrapPos();
         ImGui::PopFont();
+    }
+
+    void PanelView::draw_hand_anims()
+    {
+        HandAnimList list;
+        if (!m_targets || !m_targets->hand_anims(list))
+        {
+            return;
+        }
+        using anim_picks::Mode;
+        Skin& sk = skin();
+        const ImGuiStyle& style = ImGui::GetStyle();
+        anim_picks::Choice choice = list.choice;
+        bool changed = false;
+
+        ImGui::Dummy(ImVec2(0.0f, dpi_px(6.0f)));
+        if (section_bar("Which animations", "Clear list", !list.seen.empty()))
+        {
+            m_targets->clear_anim_history();
+            set_message("Hand Contact: animation list cleared (ticked ones are kept)");
+            return;
+        }
+        ImGui::PushFont(nullptr, style.FontSizeBase * 0.86f);
+        ImGui::PushTextWrapPos(0.0f);
+        ImGui::TextColored(muted(), "Every animation the characters play is listed here as it starts, in any game, and kept for next "
+                                    "time. Tick the ones Hand Contact should work in (or leave alone); nothing to type.");
+        ImGui::PopTextWrapPos();
+        ImGui::PopFont();
+
+        static const char* const kModes[] = {"Every animation", "Only the ticked ones", "All but the ticked ones"};
+        const int mode_index = choice.mode == Mode::only ? 1 : choice.mode == Mode::except ? 2 : 0;
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextUnformatted("Hand Contact in");
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(std::min(dpi_px(240.0f), ImGui::GetContentRegionAvail().x));
+        if (ImGui::BeginCombo("##hand_anim_mode", list.custom ? kModes[mode_index] : (list.config_list.empty() ? kModes[0] : "config.lua list")))
+        {
+            for (int i = 0; i < 3; ++i)
+            {
+                if (ImGui::Selectable(kModes[i], list.custom && i == mode_index))
+                {
+                    choice.mode = i == 1 ? Mode::only : i == 2 ? Mode::except : Mode::every;
+                    changed = true;
+                    set_message(std::string("Hand Contact: ") + kModes[i]);
+                }
+            }
+            ImGui::EndCombo();
+        }
+        tooltip("Every animation: Hand Contact always works.\nOnly the ticked ones: it waits in every other animation.\n"
+                "All but the ticked ones: it leaves the ticked animations as the game made them (e.g. idle hands hanging by the "
+                "thighs).\nRemembered in the presets folder (_hand_contact_anims.txt), so per game; preferred over config.lua "
+                "HandContactAnims.");
+        if (!list.custom && !list.config_list.empty())
+        {
+            ImGui::PushFont(nullptr, style.FontSizeBase * 0.86f);
+            ImGui::PushTextWrapPos(0.0f);
+            ImGui::TextColored(muted(), "config.lua HandContactAnims: %s (used until you pick here)", list.config_list.c_str());
+            ImGui::PopTextWrapPos();
+            ImGui::PopFont();
+        }
+
+        ImGui::SetNextItemWidth(-1.0f);
+        ImGui::InputTextWithHint("##anim_filter", "Search animations...", m_anim_filter, sizeof(m_anim_filter));
+        const std::string filter = fold_case(m_anim_filter);
+        auto matches = [&](const std::string& text) { return filter.empty() || fold_case(text).find(filter) != std::string::npos; };
+
+        struct Row
+        {
+            std::string name;  // entry stored when ticked
+            std::string shown; // text shown
+            std::string meta;  // muted, right
+            bool now{false};   // playing now
+        };
+        std::vector<Row> rows;
+        {
+            Row normal{anim_picks::kNormal, "Normal movement (no montage)", {}, false};
+            normal.now = list.target_playing.empty();
+            rows.push_back(normal);
+        }
+        auto listed = [&](const std::string& n) {
+            const std::string f = fold_case(n);
+            return std::any_of(rows.begin(), rows.end(), [&](const Row& r) { return fold_case(r.name) == f; });
+        };
+        // ticked patterns and ticked names this game has not shown yet stay on the list
+        const auto in_history = [&](const std::string& n) {
+            const std::string f = fold_case(n);
+            return std::any_of(list.seen.begin(), list.seen.end(), [&](const anim_picks::Seen& s) { return fold_case(s.name) == f; });
+        };
+        for (const std::string& n : choice.names)
+        {
+            if (!listed(n) && !in_history(n))
+            {
+                rows.push_back({n, n, n.find('*') != std::string::npos ? "pattern" : "ticked", false});
+            }
+        }
+        std::vector<Row> seen_rows;
+        for (const auto& s : list.seen)
+        {
+            if (listed(s.name))
+            {
+                continue;
+            }
+            Row r{s.name, s.name, {}, false};
+            const auto now = list.playing_now.find(s.name);
+            r.now = now != list.playing_now.end();
+            r.meta = r.now ? now->second : s.who;
+            if (s.count > 1)
+            {
+                r.meta += (r.meta.empty() ? "" : "  ") + std::to_string(s.count) + "x";
+            }
+            seen_rows.push_back(std::move(r));
+        }
+        // playing right now first, the rest newest first
+        std::stable_partition(seen_rows.begin(), seen_rows.end(), [](const Row& r) { return r.now; });
+        for (auto& r : seen_rows)
+        {
+            rows.push_back(std::move(r));
+        }
+
+        const float line_h = ImGui::GetFrameHeightWithSpacing();
+        size_t shown = 0;
+        for (const Row& r : rows)
+        {
+            shown += matches(r.shown) ? 1 : 0;
+        }
+        const float list_h = line_h * static_cast<float>(std::clamp<size_t>(shown, 3, 10)) + style.WindowPadding.y * 2.0f;
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(dpi_px(10.0f), dpi_px(6.0f)));
+        sk.begin_child("##hand_anim_list", ImVec2(0, list_h), ImGuiChildFlags_Borders | ImGuiChildFlags_AlwaysUseWindowPadding);
+        ImGui::PopStyleVar();
+        int id = 0;
+        for (const Row& r : rows)
+        {
+            ++id;
+            if (!matches(r.shown))
+            {
+                continue;
+            }
+            ImGui::PushID(id);
+            bool on = anim_picks::ticked(choice, r.name);
+            if (sk.checkbox("##tick", &on))
+            {
+                anim_picks::tick(choice, r.name, on);
+                if (choice.mode == Mode::every || !list.custom)
+                {
+                    choice.mode = Mode::only; // ticking something means "only these" until the mode says otherwise
+                }
+                changed = true;
+                set_message(std::string(on ? "Ticked " : "Unticked ") + r.shown);
+            }
+            ImGui::SameLine();
+            const float right = ImGui::GetContentRegionAvail().x;
+            std::string meta = r.now ? (r.meta.empty() ? std::string("now") : "now: " + r.meta) : r.meta;
+            if (!on && r.name != anim_picks::kNormal)
+            {
+                // not ticked itself, but a ticked * pattern covers it
+                for (const std::string& n : choice.names)
+                {
+                    if (n.find('*') != std::string::npos && anim_picks::covers(n, r.name))
+                    {
+                        meta = "by " + n + (meta.empty() ? "" : "  ") + meta;
+                        break;
+                    }
+                }
+            }
+            meta = fit_text(meta, right * 0.45f);
+            const float meta_w = meta.empty() ? 0.0f : ImGui::CalcTextSize(meta.c_str()).x;
+            ImGui::AlignTextToFramePadding();
+            if (r.now)
+            {
+                ImGui::TextColored(accent(), "%s", fit_text(r.shown, std::max(dpi_px(60.0f), right - meta_w - dpi_px(16.0f))).c_str());
+            }
+            else
+            {
+                ImGui::TextUnformatted(fit_text(r.shown, std::max(dpi_px(60.0f), right - meta_w - dpi_px(16.0f))).c_str());
+            }
+            if (ImGui::IsItemHovered())
+            {
+                ImGui::SetTooltip("%s", r.name == anim_picks::kNormal ? "No montage playing: the game's own walking, standing and idle animation."
+                                                                      : r.name.c_str());
+            }
+            if (!meta.empty())
+            {
+                ImGui::SameLine(ImGui::GetWindowContentRegionMax().x - meta_w);
+                ImGui::TextColored(muted(), "%s", meta.c_str());
+            }
+            ImGui::PopID();
+        }
+        if (list.seen.empty())
+        {
+            ImGui::PushTextWrapPos(0.0f);
+            ImGui::TextColored(muted(), "No animation seen yet in this game. Play one (a scene, an emote, a cutscene) and it shows up here.");
+            ImGui::PopTextWrapPos();
+        }
+        sk.end_child();
+
+        // a typed search can tick every matching animation at once, also ones not played yet
+        if (!filter.empty())
+        {
+            std::string pattern = std::string("*") + m_anim_filter + "*";
+            std::erase_if(pattern, [](char c) { return c == '\t' || c == '\r' || c == '\n'; });
+            const bool has = anim_picks::ticked(choice, pattern);
+            const std::string label = (has ? "Untick \"" : "Tick every animation with \"") + std::string(m_anim_filter) + "\"";
+            if (sk.small_button(label.c_str()))
+            {
+                anim_picks::tick(choice, pattern, !has);
+                if (choice.mode == Mode::every || !list.custom)
+                {
+                    choice.mode = Mode::only;
+                }
+                changed = true;
+                set_message(has ? "Unticked " + pattern : "Ticked " + pattern + " (also animations not played yet)");
+            }
+            tooltip("Ticks a pattern that covers every animation whose name holds this text, including ones that have not played "
+                    "yet. Ignores upper/lower case.");
+        }
+        if (changed)
+        {
+            m_targets->set_hand_anims(choice);
+        }
     }
 
     void PanelView::draw_scale()

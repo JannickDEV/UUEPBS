@@ -9,6 +9,7 @@
 // while they have some (Lua is told which through edited_actors()).
 #pragma once
 
+#include "anim_picks.hpp"
 #include "camera.hpp"
 #include "body_groups.hpp"
 #include "compare.hpp"
@@ -22,6 +23,7 @@
 #include <cstdint>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <set>
 #include <string>
 #include <vector>
@@ -192,6 +194,12 @@ namespace uuepbs
         void set_hands(const HandOptions& options, std::vector<std::string> anims);
         HandOptions hands() const;
         std::vector<std::string> hand_anims() const;
+        // Animations picked in the window (Character Scale > Animation); while set they decide instead of
+        // config.lua HandContactAnims. nullopt = no window choice.
+        void set_hand_choice(std::optional<anim_picks::Choice> choice);
+        std::optional<anim_picks::Choice> hand_choice() const;
+        // What each actor key plays now ("" when nothing reported).
+        std::map<std::string, std::string> playing() const;
         // What each character plays right now (reported by Lua: montage, else the single-node animation), by actor key.
         void set_playing(std::map<std::string, std::string> playing);
         // "hand contact (<source>): on, strength 1.00, contact 0.25-0.45 x arm, shoulder 30 deg, stretch 1.20x, ...";
@@ -319,6 +327,7 @@ namespace uuepbs
         GroundOptions m_ground{}; // guarded by m_lock
         HandOptions m_hands{};    // guarded by m_lock
         std::vector<std::string> m_hand_anims;          // folded name parts, guarded by m_lock
+        std::optional<anim_picks::Choice> m_hand_choice; // window's picks, guarded by m_lock
         std::map<std::string, std::string> m_playing;   // actor key -> animation playing, guarded by m_lock
         bool hands_wanted_locked(const Rig& rig) const;
 
