@@ -167,7 +167,7 @@ do
         { comp = comp("hair", damaris, hair) },
     }
     local nenu = actor("CI_NPC_Bard_Nenu_C_1")
-    nenu._pawn = true
+    nenu._pawn, nenu._id = true, "Nenu"
     weights(comp("CharacterMesh0", nenu, felian), { Morph_BreastEnl = 0.2, Morph_HipsWide = 0.3, Morph_LegFat = 0.8 })
     comp("skirt", nenu, skirt)
     comp("Top", nenu, bra)
@@ -198,6 +198,7 @@ do
         controller = function() return nil end,
         find_all = function() return all end,
         is_pawn = function(a) return a._pawn == true end,
+        identity = function(a) return a._id end,
         morph_value = function(c, name) return (c._morphs or {})[name] or 0 end,
         morph_overridden = function(c, name) return c == dRigs[1].comp and name == "Morph_LegFat" end,
         build = function(c, src)
@@ -221,6 +222,75 @@ do
         told = told or (line:find("CI_NPC_Bard_Nenu_C_1 is not a scene copy", 1, true) ~= nil and line:find("Morph_BreastEnl", 1, true) ~= nil)
     end
     check(told, "the reason is logged: " .. table.concat(said, " | "))
+    check(C.report():find("snot\tNenu\t", 1, true) ~= nil, "the window hears that Nenu was turned down: " .. C.report())
+
+    -- Rules: the guesses can be overruled per actor, by identity, engine name or wildcard.
+    local function copies_now()
+        built = {}
+        C.search_now()
+        C.tick(0)
+        local owners, seen = {}, {}
+        for _, r in ipairs(C.rigs()) do
+            local o = r.comp._owner._name
+            if not seen[o] then
+                seen[o] = true
+                owners[#owners + 1] = o
+            end
+        end
+        table.sort(owners)
+        return table.concat(owners, ", ")
+    end
+    -- "never": the look-alike stand-in is not a copy any more; the menu actor still is
+    C.set_rules({ { mode = "never", who = "BP_Damaris_Cine*" } })
+    C.tick(0)
+    local got2 = copies_now()
+    check(got2 == "BP_PlayerCapture_C_1", "a never rule (wildcard) turns the stand-in down: " .. got2)
+    check(C.report():find("srule\tnever\tBP_Damaris_Cine*\t\twindow", 1, true) ~= nil, "the rule is reported: " .. C.report())
+    -- "copy": Nenu (by identity) is a copy after all, the morph check is skipped
+    C.set_rules({ { mode = "copy", who = "nenu" } })
+    C.tick(0)
+    local got3 = copies_now()
+    check(got3 == "BP_Damaris_Cine_C_1, BP_PlayerCapture_C_1, CI_NPC_Bard_Nenu_C_1", "a copy rule (identity, any case) takes Nenu: " .. got3)
+    local ruled = false
+    for line in (C.report() .. "\n"):gmatch("([^\n]*)\n") do
+        ruled = ruled or (line:sub(1, 11) == "scopy\tNenu\t" and line:sub(-2) == "\t1")
+    end
+    check(ruled, "the window sees the copy and that a rule made it: " .. C.report())
+    -- the window's rule beats config.lua's for the same actor
+    C.set_rules({ { mode = "never", who = "Nenu", source = "window" }, { mode = "copy", who = "CI_NPC_*", source = "config" } })
+    C.tick(0)
+    local got4 = copies_now()
+    check(not got4:find("Nenu", 1, true), "the window's never beats config's copy: " .. got4)
+    -- "copy <who> <of>": a cutscene actor with a mesh of its own (no shared asset) becomes a copy of Damaris
+    local cineBody = obj("SK_Damaris_Cinematic")
+    local cine = actor("BP_Seq_Damaris_C_3")
+    comp("CineBody", cine, cineBody)
+    comp("CineHair", cine, hair)
+    check(not copies_now():find("BP_Seq_Damaris", 1, true), "no rule: an actor with its own body is not a copy")
+    C.set_rules({ { mode = "copy", who = "BP_Seq_*", of = "damaris" } })
+    C.tick(0)
+    local got5 = copies_now()
+    check(got5:find("BP_Seq_Damaris_C_3", 1, true) ~= nil, "a copy-of rule takes it whole: " .. got5)
+    local both = 0
+    for _, r in ipairs(C.rigs()) do
+        if r.comp._owner == cine then
+            both = both + 1
+            check(r.actorKey == "D1", "its meshes get Damaris's sliders: " .. tostring(r.actorKey))
+        end
+    end
+    check(both == 2, "both of its meshes (own body and shared hair): " .. both)
+    -- the character it copies is no longer sculpted: let go
+    C.set_sources({}, {})
+    C.tick(0)
+    check(#C.rigs() == 0, "copies of a character that is gone are let go: " .. #C.rigs())
+    -- a rule naming a character that is not loaded does nothing
+    C.set_sources(dRigs, { [damaris._addr] = true })
+    C.set_rules({ { mode = "copy", who = "BP_Seq_*", of = "Somebody" } })
+    C.tick(0)
+    check(not copies_now():find("BP_Seq_Damaris", 1, true), "a copy of a character that is not loaded is not made")
+    -- unusable rules are dropped
+    C.set_rules({ { mode = "maybe", who = "x" }, { mode = "never", who = "  " } })
+    check(#C.rules() == 0, "unusable rules are dropped: " .. #C.rules())
 end
 
 if fails > 0 then

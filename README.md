@@ -26,6 +26,7 @@ https://github.com/user-attachments/assets/4e4372bc-8a64-4255-b8ae-a33645ce187e
 * One source per slider, in this order: a clearly named morph target of the mesh (`Morph_HipsWide` replaces *Hip width*, `Morph_BreastEnl` replaces the bone *Breast size*), then the bone-built slider, then morph targets with cryptic names (still under **Other**). A bone row you already edited stays visible
 * Body tab cleanup: sliders have character-creator names (*Thigh size*, *Breast size*), each category lists **Size** rows first and **Shape** rows (morphs) under them, every track lines up, and the bone / morph name lists moved out of the tooltips (Advanced lists them)
 * **Cutscenes, inventory and menu previews keep your sliders.** Many games show the character there through an actor of its own that uses the same meshes, which used to show the original body until you were back in the open world. Those copies now get the character's bones, scale, morphs and looks too, and are let go when the scene ends. A copy has to wear at least two of the character's meshes (one if the character only has one), and an AI-controlled NPC that only shares the body mesh is never taken. `SceneCopies` / `SceneCopyMatch` in `config.lua`; console `ubs copies` searches now and shows what was found
+* **Scene copies you decide**: when the automatic guess is wrong (an NPC built from the same body and outfit taken for a copy, or a cutscene actor with a mesh of its own missed), set it per actor. **Status > Scene copies** lists the copies right now (**Not a copy**), the actors that were turned down and why (**It is a copy**), and your rules (**Remove**); a name box takes any identity, engine name or class with `*` wildcards. Right-click a character in **Choose character** for **Never a scene copy** / **Scene copy of <the picked character>**. A *copy of* rule also works when the actor shares no mesh with the character: all of its meshes get that character's sliders. Rules are kept in `_scene_copies.txt` in the presets folder; `SceneCopyNever` / `SceneCopyAlways` in `config.lua` and `"SceneCopies"` in a game profile add their own. Console: `ubs copies never <who>`, `ubs copies copy <who> [of <character>]`, `ubs copies forget <who>`
 * **Auto Ground** (contributed upstream by afraxass-bit): longer or shorter legs no longer sink the feet into the floor or leave them floating. The pose is lifted, and every other leg is bent with IK so its foot stays where the game put it (stairs, slopes). On by default; `AutoGround*` settings in `config.lua`, console `ubs ground [on|off|<cm>]`. Details in `CHANGES_AUTO_GROUND.md`
 * Meshes that copy the body's finished pose (a separate head, face, eyes or hair mesh) no longer get every slider twice
 * Games that draw characters through a dual quaternion skinning **mesh deformer** (Afterparty): while a character's sliders scale bones its deformer is switched off, so Head size, Hand size or Height no longer tear the mesh apart (`MeshDeformers` in `config.lua`; jiggle from the deformer is missing meanwhile)
@@ -240,6 +241,17 @@ Install the mod in as many games as you like; each one gets its own file.
 * The window shows each character by a readable name. It uses, in this order: the game's own name for the character (`DisplayName`, `CharacterName` and similar, on the character or on its character data), then this table, then the engine name cleaned up (`BP_Guard_C_3` becomes "Guard", `00_EVE_01_Body` becomes "Eve").
 * **`Names`** maps engine names to the name you want. A key can be the character's object name (`BP_Eve_C_0`), its class (`BP_Eve_C`), or one of its mesh assets (`00_EVE_01_Body`). The engine names are in the tooltip of the Character list and on the Status tab. `*` matches anything, a plain key also matches every name that starts with it, and matching is not case-sensitive.
 * Only the labels change. Saved sliders, remembered NPCs and presets still go by the engine names, so renaming here loses nothing. Set `FriendlyNames = false` in `config.lua` to see the engine names in the list again.
+
+**Scene copies in the profile** (optional): actors that are, or are never, a copy of an edited character in this game.
+```json
+"SceneCopies": {
+  "Never":  ["CI_NPC_*"],
+  "Always": { "BP_Cine_Player_*": "player", "BP_MenuPreview_C": "" }
+}
+```
+* Names are identities, engine names, classes or shown names, `*` = anything, not case-sensitive.
+* **`Always`** maps an actor to the character it copies: `"player"` (the one you play), a character's name or identity, or `""` for whichever edited character it shares meshes with. A named character also works when the actor uses meshes of its own.
+* The window's rules (Status > Scene copies, `_scene_copies.txt`) win over `config.lua`'s `SceneCopyNever` / `SceneCopyAlways`, which win over these.
 
 ### Simplified Panel mapping (bone dictionary)
 

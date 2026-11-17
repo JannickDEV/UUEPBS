@@ -34,6 +34,17 @@
 --     out of view the search is repeated every few seconds, a limited number of times.
 -- Config.SceneCopies = false turns all of it off. Config.SceneCopyMatch = "mesh" accepts a single shared
 -- mesh asset everywhere (for games whose copies only reuse the body).
+--
+-- Rules (when the guess is wrong): an actor can be named "never a copy" or "always a copy", optionally "a copy
+-- of <character>". They win over everything above. A rule names actors by identity (what survives reloads,
+-- e.g. "Nenu"), engine name, class name or shown name, case-insensitive, with * as a wildcard ("CI_NPC_*").
+--   never  <who>        never a copy (an NPC built from the character's parts)
+--   copy   <who>        a copy of whichever edited character it shares mesh assets with, no other checks
+--   copy   <who> <of>   a copy of character <of> ("player", an identity, a name, a wildcard), even when it
+--                       shares no mesh asset with it (a cutscene actor with a mesh of its own): all of its
+--                       skeletal meshes get that character's sliders
+-- They come from the window (Status > Scene copies, Choose character right-click), the console
+-- ("ubs copies never|copy|forget"), <presets>\_scene_copies.txt, config.lua and the game profile.
 
 local C = {}
 
@@ -68,7 +79,13 @@ local unsupported = {} -- engine calls that failed ("view", "rendered") -> when 
 local RETRY_MS = 30000
 local stats = { searches = 0, found = 0, ms = 0, lastReason = "" }
 local changed = false
-local rejected = {} -- actor address -> true: told once that it is not a copy
+local rejected = {} -- actor address -> { who, label, of, why, order }: turned down (shown in the window)
+local rejectedOrder = 0
+local MAX_REJECTED = 16
+local rules = {} -- { mode = "never"|"copy", who, of, source, pattern (lowercased glob or nil), exact }
+local hasTargeted = false -- a "copy <who> <of>" rule exists: actors are looked at even without shared assets
+local keyInfo = {} -- actor key -> { names = { lowercased }, label, engine } of the characters being sculpted
+local reportDirty = false
 
 -- ------------------------------------------------------------- helpers
 
@@ -148,8 +165,144 @@ local function drop(a, why)
     if c then
         copies[a] = nil
         changed = true
+        reportDirty = true
         ctx.chatter("scene copy %s let go (%s)", c.rig and c.rig.engine or "?", why)
     end
+end
+
+-- ------------------------------------------------------------- rules
+
+local function glob(pattern)
+    return "^" .. pattern:gsub("[%^%$%(%)%%%.%[%]%+%-%?]", "%%%0"):gsub("%*", ".*") .. "$"
+end
+
+local function trim(text)
+    return (tostring(text or ""):gsub("^%s+", ""):gsub("%s+$", ""))
+end
+
+-- One rule, ready for matching (nil when unusable).
+local function compile_rule(r)
+    local mode = string.lower(trim(r.mode))
+    if mode == "always" or mode == "yes" then
+        mode = "copy"
+    elseif mode == "no" or mode == "not" then
+        mode = "never"
+    end
+    local who = trim(r.who)
+    if (mode ~= "never" and mode ~= "copy") or who == "" then
+        return nil
+    end
+    local of = mode == "copy" and trim(r.of) or ""
+    local low = who:lower()
+    return { mode = mode, who = who, of = of, source = r.source or "window", exact = not low:find("*", 1, true) and low or nil,
+        pattern = low:find("*", 1, true) and glob(low) or nil }
+end
+
+local function name_matches(rule, names)
+    for _, n in ipairs(names) do
+        if n ~= "" and ((rule.exact and n == rule.exact) or (rule.pattern and n:find(rule.pattern))) then
+            return true
+        end
+    end
+    return false
+end
+
+-- The names a rule can use for an actor: identity, engine name, class name, shown name (lowercased).
+local function actor_names(actor)
+    local out, seen = {}, {}
+    local function add(v)
+        if type(v) == "string" and v ~= "" and v ~= "?" then
+            local l = v:lower()
+            if not seen[l] then
+                seen[l] = true
+                out[#out + 1] = l
+            end
+        end
+    end
+    if ctx.identity then
+        local ok, id = pcall(ctx.identity, actor)
+        add(ok and id or nil)
+    end
+    add(ctx.name_of(actor))
+    if ctx.class_name then
+        local ok, c = pcall(ctx.class_name, actor)
+        add(ok and c or nil)
+    end
+    if ctx.label_of then
+        local ok, l = pcall(ctx.label_of, actor)
+        add(ok and l or nil)
+    end
+    return out
+end
+
+-- The first rule that names this actor (rules are kept most important first), or nil.
+local function rule_for(actor)
+    if not actor or #rules == 0 then
+        return nil
+    end
+    local names = actor_names(actor)
+    for _, r in ipairs(rules) do
+        if name_matches(r, names) then
+            return r
+        end
+    end
+    return nil
+end
+
+-- The edited character a "copy <who> <of>" rule means (its actor key), or nil when it is not being sculpted.
+local function key_for(of)
+    local low = string.lower(of)
+    local probe = { exact = not low:find("*", 1, true) and low or nil, pattern = low:find("*", 1, true) and glob(low) or nil }
+    local best = nil
+    for key, info in pairs(keyInfo) do
+        if name_matches(probe, info.names) and (best == nil or key < best) then
+            best = key
+        end
+    end
+    return best
+end
+
+-- How the window and the rules name an actor: its identity, else its engine name.
+local function who_of(actor)
+    if ctx.identity then
+        local ok, id = pcall(ctx.identity, actor)
+        if ok and type(id) == "string" and id ~= "" then
+            return id
+        end
+    end
+    return ctx.name_of(actor)
+end
+
+local function shown_name(actor)
+    if ctx.label_of then
+        local ok, l = pcall(ctx.label_of, actor)
+        if ok and type(l) == "string" and l ~= "" then
+            return l
+        end
+    end
+    return ctx.name_of(actor)
+end
+
+local function turn_down(owner, ownerAddr, ofLabel, why)
+    local k = ownerAddr or 0
+    if rejected[k] then
+        return
+    end
+    rejectedOrder = rejectedOrder + 1
+    rejected[k] = { who = owner and who_of(owner) or "?", label = owner and shown_name(owner) or "?", of = ofLabel or "?", why = why, order = rejectedOrder }
+    reportDirty = true
+    -- only the newest few are kept
+    local n, oldest, oldestKey = 0, nil, nil
+    for a, r in pairs(rejected) do
+        n = n + 1
+        if oldest == nil or r.order < oldest then
+            oldest, oldestKey = r.order, a
+        end
+    end
+    if n > MAX_REJECTED and oldestKey then
+        rejected[oldestKey] = nil
+    end
+    ctx.chatter("%s is not a scene copy of %s: %s", owner and ctx.name_of(owner) or "?", ofLabel or "?", why)
 end
 
 -- ------------------------------------------------------------- matching
@@ -212,7 +365,7 @@ local function consider(comp)
     end
     local asset = ctx.mesh_prop(comp)
     local src = asset and sources[asset]
-    if not src then
+    if not src and not hasTargeted then
         return 0
     end
     local owner = owner_of(comp)
@@ -220,65 +373,97 @@ local function consider(comp)
     if ownerAddr and planned[ownerAddr] then
         return 0
     end
-    -- the actor's meshes that use this character's sculpted assets
+    -- rules (window, console, _scene_copies.txt, config.lua, game profile) win over the guesses below
+    local rule = owner and rule_for(owner) or nil
+    if rule and rule.mode == "never" then
+        if src then
+            turn_down(owner, ownerAddr, src.ownerLabel or src.key, "marked as not a copy (" .. rule.source .. ")")
+        end
+        return 0
+    end
     local list, shared = {}, {}
-    if owner then
+    local forced = rule ~= nil
+    if rule and rule.of ~= "" then
+        -- a copy of a named character: every skeletal mesh on the actor, shared assets or not
+        local key = key_for(rule.of)
+        local info = key and keyInfo[key]
+        if not info or not owner then
+            return 0 -- that character is not being sculpted right now
+        end
+        local target = { key = key, label = info.label, ownerLabel = info.label, ownerEngine = info.engine }
         for _, c in ipairs(skeletal_comps(owner)) do
             local m = ctx.mesh_prop(c)
-            local s = m and sources[m]
-            if s and s.key == src.key then
-                list[#list + 1] = { comp = c, asset = m, src = s }
-                shared[m] = true
+            if m then
+                local s = sources[m]
+                list[#list + 1] = { comp = c, asset = m, src = (s and s.key == key) and s or target, forced = true }
             end
         end
-    end
-    if #list == 0 then
-        list[1] = { comp = comp, asset = asset, src = src } -- the actor can't be asked: this mesh alone
-        shared[asset] = true
-    end
-    local n = 0
-    for _ in pairs(shared) do
-        n = n + 1
-    end
-    local need = math.min(2, keyAssets[src.key] or 1)
-    if ctx.match == "mesh" then
-        need = 1
-    end
-    local who = owner and controlled(owner) or 0
-    if who == 2 then
-        return 0 -- another player's character (or the player's own pawn, not being edited)
-    end
-    if who == 1 then
-        need = 2 -- an NPC: one shared mesh is not enough to call it a copy
-    end
-    if n < need then
-        return 0
-    end
-    -- the body: without the character's main mesh it is an NPC wearing the same eyes / hair / outfit piece
-    local main = mainAsset[src.key]
-    if ctx.match ~= "mesh" and main and not shared[main] then
-        return 0
-    end
-    -- a pawn with the character's body and outfit: an NPC built from the same parts, unless its body has the same shape
-    if ctx.match ~= "mesh" and main and is_pawn(owner) then
-        for _, e in ipairs(list) do
-            if e.asset == main then
-                local why = looks_different(src.key, e.comp)
-                if why then
-                    if not rejected[ownerAddr or 0] then
-                        rejected[ownerAddr or 0] = true
-                        ctx.chatter("%s is not a scene copy of %s: its body differs (%s)", ctx.name_of(owner), src.ownerLabel or src.key, why)
-                    end
-                    return 0
+        if #list == 0 then
+            return 0
+        end
+        src = list[1].src
+    else
+        if not src then
+            return 0
+        end
+        -- the actor's meshes that use this character's sculpted assets
+        if owner then
+            for _, c in ipairs(skeletal_comps(owner)) do
+                local m = ctx.mesh_prop(c)
+                local s = m and sources[m]
+                if s and s.key == src.key then
+                    list[#list + 1] = { comp = c, asset = m, src = s }
+                    shared[m] = true
                 end
-                break
+            end
+        end
+        if #list == 0 then
+            list[1] = { comp = comp, asset = asset, src = src } -- the actor can't be asked: this mesh alone
+            shared[asset] = true
+        end
+    end
+    if not forced then
+        local n = 0
+        for _ in pairs(shared) do
+            n = n + 1
+        end
+        local need = math.min(2, keyAssets[src.key] or 1)
+        if ctx.match == "mesh" then
+            need = 1
+        end
+        local who = owner and controlled(owner) or 0
+        if who == 2 then
+            return 0 -- another player's character (or the player's own pawn, not being edited)
+        end
+        if who == 1 then
+            need = 2 -- an NPC: one shared mesh is not enough to call it a copy
+        end
+        if n < need then
+            return 0
+        end
+        -- the body: without the character's main mesh it is an NPC wearing the same eyes / hair / outfit piece
+        local main = mainAsset[src.key]
+        if ctx.match ~= "mesh" and main and not shared[main] then
+            return 0
+        end
+        -- a pawn with the character's body and outfit: an NPC built from the same parts, unless its body has the same shape
+        if ctx.match ~= "mesh" and main and is_pawn(owner) then
+            for _, e in ipairs(list) do
+                if e.asset == main then
+                    local why = looks_different(src.key, e.comp)
+                    if why then
+                        turn_down(owner, ownerAddr, src.ownerLabel or src.key, "its body differs (" .. why .. ")")
+                        return 0
+                    end
+                    break
+                end
             end
         end
     end
     local added = 0
     for _, e in ipairs(list) do
         local ca = addr(e.comp)
-        -- the property read says it uses the character's asset: the engine must agree
+        -- the property read says it uses that asset: the engine must agree
         local real = ctx.mesh_asset_addr and ctx.mesh_asset_addr(e.comp)
         if ctx.mesh_asset_addr and real ~= e.asset then
             ca = nil
@@ -287,21 +472,40 @@ local function consider(comp)
             local rig = ctx.build(e.comp, e.src, owner)
             if rig then
                 order = order + 1
-                copies[ca] = { comp = e.comp, full = ctx.full_name(e.comp), asset = e.asset, key = e.src.key, rig = rig, owner = ownerAddr, order = order }
+                copies[ca] = { comp = e.comp, full = ctx.full_name(e.comp), asset = e.asset, key = e.src.key, rig = rig, owner = ownerAddr, order = order,
+                    forced = e.forced == true, ruled = forced, who = owner and who_of(owner) or "?", ownerLabel = owner and shown_name(owner) or "?",
+                    ofLabel = e.src.ownerLabel or e.src.key }
                 added = added + 1
                 changed = true
             end
         end
     end
     if added > 0 then
+        rejected[ownerAddr or 0] = nil
+        reportDirty = true
         stats.found = stats.found + added
-        ctx.say("scene copy of %s found: %d mesh(es) on %s", src.ownerLabel or src.key, added, owner and ctx.name_of(owner) or "?")
+        ctx.say("scene copy of %s found: %d mesh(es) on %s%s", src.ownerLabel or src.key, added, owner and ctx.name_of(owner) or "?",
+            forced and (" (rule: " .. rule.mode .. " " .. rule.who .. (rule.of ~= "" and (" of " .. rule.of) or "") .. ", " .. rule.source .. ")") or "")
     end
     return added
 end
 
+-- Actors a "copy <who> <of>" rule names, among all skeletal meshes (only while such a rule exists).
+local function ruled_owner(comp, checked)
+    local owner = owner_of(comp)
+    local oa = owner and addr(owner)
+    if not oa then
+        return false
+    end
+    if checked[oa] == nil then
+        local r = rule_for(owner)
+        checked[oa] = r ~= nil and r.mode == "copy" and r.of ~= ""
+    end
+    return checked[oa]
+end
+
 local function search(reason)
-    if next(sources) == nil then
+    if next(sources) == nil and not hasTargeted then
         return
     end
     local t0 = os.clock()
@@ -309,9 +513,10 @@ local function search(reason)
     stats.searches = stats.searches + 1
     stats.lastReason = reason
     local found = 0
+    local checked = {}
     for _, comp in ipairs(ctx.find_all() or {}) do
         local asset = ctx.mesh_prop(comp)
-        if asset and sources[asset] then
+        if (asset and sources[asset]) or (hasTargeted and ruled_owner(comp, checked)) then
             found = found + consider(comp)
         end
     end
@@ -320,7 +525,7 @@ local function search(reason)
 end
 
 local function burst(now, reason)
-    if next(sources) == nil then
+    if next(sources) == nil and not hasTargeted then
         return
     end
     for _, d in ipairs(BURST) do
@@ -403,7 +608,7 @@ end
 -- The meshes sculpted as part of characters (main.lua's rigs before copies are added) and the
 -- characters being sculpted (actor address -> true). Copies whose source went away are dropped.
 function C.set_sources(rigs, plannedAddr)
-    sources, keyAssets, tracked, planned, mainAsset, mainComp = {}, {}, {}, {}, {}, {}
+    sources, keyAssets, tracked, planned, mainAsset, mainComp, keyInfo = {}, {}, {}, {}, {}, {}, {}
     primary = nil
     local perKey = {}
     local sig = {}
@@ -422,6 +627,23 @@ function C.set_sources(rigs, plannedAddr)
             end
             if r.primary and not primary then
                 primary = { comp = r.comp, full = r.full }
+            end
+            if r.actorKey and not keyInfo[r.actorKey] then
+                local names, seen = {}, {}
+                local function add(v)
+                    if type(v) == "string" and v ~= "" and not seen[v:lower()] then
+                        seen[v:lower()] = true
+                        names[#names + 1] = v:lower()
+                    end
+                end
+                add(r.actorKey)
+                if ctx.key_identity then
+                    local ok, id = pcall(ctx.key_identity, r.actorKey)
+                    add(ok and id or nil)
+                end
+                add(r.ownerLabel)
+                add(r.ownerEngine)
+                keyInfo[r.actorKey] = { names = names, label = r.ownerLabel or r.actorKey, engine = r.ownerEngine }
             end
             if r.primary and r.meshAddr and not mainAsset[r.actorKey] then
                 mainAsset[r.actorKey] = r.meshAddr
@@ -445,6 +667,10 @@ function C.set_sources(rigs, plannedAddr)
         local s = sources[c.asset]
         if tracked[a] then
             drop(a, "now sculpted as a character")
+        elseif c.forced then
+            if not keyInfo[c.key] then
+                drop(a, "its character is no longer sculpted")
+            end
         elseif not s or s.key ~= c.key then
             drop(a, "its character no longer has that mesh")
         elseif c.owner and planned[c.owner] then
@@ -455,7 +681,7 @@ end
 
 -- A component that may be a copy (new, or just given a mesh): looked at a few times.
 function C.offer(comp)
-    if comp == nil or #pending >= MAX_PENDING or next(sources) == nil then
+    if comp == nil or #pending >= MAX_PENDING or (next(sources) == nil and not hasTargeted) then
         return
     end
     local now = ctx.now_ms()
@@ -476,6 +702,104 @@ function C.search_now()
     search("asked for")
 end
 
+-- The rules, most important first (main.lua puts the window's before config.lua's before the game profile's).
+-- Every copy is let go and looked for again under the new rules.
+function C.set_rules(list)
+    local out = {}
+    local seen = {}
+    for _, r in ipairs(list or {}) do
+        local c = compile_rule(r)
+        local k = c and (c.who:lower() .. "|" .. c.source)
+        if c and not seen[k] then
+            seen[k] = true
+            out[#out + 1] = c
+        end
+    end
+    -- exact names before wildcards within a source; sources keep their order
+    local rank = {}
+    for i, r in ipairs(out) do
+        rank[r] = i
+    end
+    local sourceRank = {}
+    for _, r in ipairs(out) do
+        sourceRank[r.source] = sourceRank[r.source] or rank[r]
+    end
+    table.sort(out, function(a, b)
+        local sa, sb = sourceRank[a.source], sourceRank[b.source]
+        if sa ~= sb then
+            return sa < sb
+        end
+        if (a.exact ~= nil) ~= (b.exact ~= nil) then
+            return a.exact ~= nil
+        end
+        return rank[a] < rank[b]
+    end)
+    rules = out
+    hasTargeted = false
+    for _, r in ipairs(rules) do
+        hasTargeted = hasTargeted or (r.mode == "copy" and r.of ~= "")
+    end
+    for a in pairs(copies) do
+        drop(a, "rules changed")
+    end
+    rejected = {}
+    reportDirty = true
+    if ctx then
+        burst(ctx.now_ms(), "rules changed")
+    end
+end
+
+function C.rules()
+    return rules
+end
+
+-- For the window (bridge_in.txt): the copies now (one line per actor), the actors turned down lately, the rules.
+--   scopy <tab> <who> <tab> <shown name> <tab> <copy of: key> <tab> <copy of: shown name> <tab> <meshes> <tab> <1 = by a rule>
+--   snot  <tab> <who> <tab> <shown name> <tab> <of: shown name> <tab> <why>
+--   srule <tab> <never|copy> <tab> <who> <tab> <of> <tab> <source>
+function C.report()
+    local lines = {}
+    local byOwner, owners = {}, {}
+    for _, c in ipairs(copyList) do
+        if copies[addr(c.comp) or 0] == c then
+            local k = tostring(c.owner or c.who)
+            if not byOwner[k] then
+                byOwner[k] = { who = c.who, label = c.ownerLabel, key = c.key, of = c.ofLabel, n = 0, ruled = c.ruled }
+                owners[#owners + 1] = k
+            end
+            byOwner[k].n = byOwner[k].n + 1
+        end
+    end
+    local function clean(v)
+        return (tostring(v or ""):gsub("[\t\r\n]", " "))
+    end
+    for _, k in ipairs(owners) do
+        local o = byOwner[k]
+        lines[#lines + 1] = table.concat({ "scopy", clean(o.who), clean(o.label), clean(o.key), clean(o.of), tostring(o.n), o.ruled and "1" or "0" }, "\t")
+    end
+    local rej = {}
+    for _, r in pairs(rejected) do
+        rej[#rej + 1] = r
+    end
+    table.sort(rej, function(a, b)
+        return a.order > b.order
+    end)
+    for _, r in ipairs(rej) do
+        lines[#lines + 1] = table.concat({ "snot", clean(r.who), clean(r.label), clean(r.of), clean(r.why) }, "\t")
+    end
+    for _, r in ipairs(rules) do
+        lines[#lines + 1] = table.concat({ "srule", r.mode, clean(r.who), clean(r.of), clean(r.source) }, "\t")
+    end
+    return table.concat(lines, "\n")
+end
+
+-- True once after the report changed (main.lua then rewrites bridge_in.txt).
+function C.report_dirty()
+    local d = reportDirty
+    reportDirty = false
+    return d
+end
+
 -- Runs every tick. Returns true when the copies changed (main.lua then rebuilds the mesh list).
 function C.tick(now)
     -- copies still there and still the same mesh
@@ -486,7 +810,7 @@ function C.tick(now)
             drop(a, "mesh changed")
         end
     end
-    if next(sources) == nil then
+    if next(sources) == nil and not hasTargeted then
         pending, searches = {}, {}
     else
         -- new components, once their mesh is likely set
@@ -549,14 +873,31 @@ function C.rigs()
 end
 
 function C.status()
-    return string.format("scene copies: %d mesh(es) now, %d found, %d search(es)%s%s", #C.rigs(), stats.found, stats.searches,
+    local text = string.format("scene copies: %d mesh(es) now, %d found, %d search(es)%s%s", #C.rigs(), stats.found, stats.searches,
         stats.searches > 0 and string.format(" (last: %s, %.1f ms)", stats.lastReason, stats.ms) or "",
         next(sources) == nil and "; no sculpted meshes to look for" or "")
+    for _, c in ipairs(copyList) do
+        if copies[addr(c.comp) or 0] == c then
+            text = text .. string.format("\n  %s on %s (%s) -> %s%s", c.rig and c.rig.engine or "?", c.ownerLabel or "?", c.who or "?", c.ofLabel or c.key,
+                c.ruled and " [rule]" or "")
+        end
+    end
+    for _, r in pairs(rejected) do
+        text = text .. string.format("\n  not a copy: %s (%s): %s", r.label, r.who, r.why)
+    end
+    if #rules == 0 then
+        text = text .. "\n  no rules (ubs copies never <who> | copy <who> [of <character>] | forget <who>)"
+    end
+    for _, r in ipairs(rules) do
+        text = text .. string.format("\n  rule: %s %s%s (%s)", r.mode, r.who, r.of ~= "" and (" of " .. r.of) or "", r.source)
+    end
+    return text
 end
 
 -- Tests
 C._debug = function()
-    return { sources = sources, mainAsset = mainAsset, copies = copies, pending = pending, searches = searches, away = away, unsupported = unsupported, sig = sourceSig }
+    return { sources = sources, mainAsset = mainAsset, copies = copies, pending = pending, searches = searches, away = away, unsupported = unsupported, sig = sourceSig,
+        rules = rules, rejected = rejected, keyInfo = keyInfo }
 end
 
 return C

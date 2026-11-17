@@ -300,6 +300,7 @@ local function map(p)
     -- the remembered Auto Ground switch (presets folder) lands in the work dir
     if p:find("\\_auto_ground.txt", 1, true) then return work .. "/_auto_ground.txt" end
     if p:find("\\_physics.txt", 1, true) then return work .. "/_physics.txt" end
+    if p:find("\\_scene_copies.txt", 1, true) then return work .. "/_scene_copies.txt" end
     if p:sub(1, #modPrefix) == modPrefix then return work .. "/" .. p:sub(#modPrefix + 1):gsub("\\", "/") end
     if p:sub(1, #legacyPrefix) == legacyPrefix then return work .. "/legacy/" .. p:sub(#legacyPrefix + 1):gsub("\\", "/") end
     return p
@@ -309,7 +310,7 @@ io.open = function(p, m)
     return realOpen(map(p), m)
 end
 os.remove = function(p) return realRemove(map(p)) end
-os.execute("rm -rf " .. work .. "/native " .. work .. "/Scripts " .. work .. "/legacy " .. work .. "/_auto_ground.txt " .. work .. "/_physics.txt && mkdir -p " .. work .. "/native")
+os.execute("rm -rf " .. work .. "/native " .. work .. "/Scripts " .. work .. "/legacy " .. work .. "/_auto_ground.txt " .. work .. "/_physics.txt " .. work .. "/_scene_copies.txt && mkdir -p " .. work .. "/native")
 local legacyText = '{\n  // my notes survive the move\n  "Project": "SomeGame",\n  "PrimaryComponent": "CharacterMesh0",\n  "WorldMeshSearch": true,\n  "Hook": { "Slot": 303, "Buffers": "0x5A8", "ReadIndex": "0x674" },\n}\n'
 if mode == "legacy" then
     os.execute("mkdir -p " .. work .. "/legacy/Scripts/GameProfiles " .. work .. "/legacy/native")
@@ -368,13 +369,14 @@ print = function(s) printed[#printed + 1] = s end
 
 local peerGround = "0:0" -- the window's Auto Ground switch keeps its last click count between calls
 local peerPhysics = nil -- the window's Jiggle physics choice "<clicks>:<mode>" (UUEPBS_PEER_PHYSICS)
+local peerCopyRules = nil -- the window's scene-copy rules "<clicks>:mode|who|of;..." (UUEPBS_PEER_COPYRULES)
 local peerWeight = nil -- the window's "Heavier when bigger" slider "<changes>:<strength>" (UUEPBS_PEER_PHYSWEIGHT)
 local function run_peer(rescan, pick, pickId, refresh, session, ui, morphs, keep, remember, relist, ground)
     ground = ground or peerGround
     peerGround = ground
     local report = work .. "/peer_report.txt"
     os.execute(string.format((peerPhysics and ("UUEPBS_PEER_PHYSICS=" .. peerPhysics .. " ") or "")
-        .. (peerWeight and ("UUEPBS_PEER_PHYSWEIGHT=" .. peerWeight .. " ") or "") .. (mode == "names" and "UUEPBS_PEER_ENGINE=1 " or "") .. '%s %s/native %d %d %s %d %s %d "%s" "%s" "%s" %d %s > %s', peer, work, rescan, pick, pickId, refresh, session or "dll1", ui or 0, morphs or "-", keep or "-", remember or "-", relist or 0, ground, report))
+        .. (peerCopyRules and ("UUEPBS_PEER_COPYRULES='" .. peerCopyRules .. "' ") or "") .. (peerWeight and ("UUEPBS_PEER_PHYSWEIGHT=" .. peerWeight .. " ") or "") .. (mode == "names" and "UUEPBS_PEER_ENGINE=1 " or "") .. '%s %s/native %d %d %s %d %s %d "%s" "%s" "%s" %d %s > %s', peer, work, rescan, pick, pickId, refresh, session or "dll1", ui or 0, morphs or "-", keep or "-", remember or "-", relist or 0, ground, report))
     local h = realOpen(report, "rb")
     local out = h:read("a")
     h:close()
@@ -796,6 +798,32 @@ run_peer(0, 0, "none", 0, "dll1", 1, "-", "-", "-", 1)
 loop()
 s = run_peer(0, 0, "none", 0, "dll1", 1, "-", "-", "-", 1)
 check(s:find("physics follow [", 1, true) and (read(work .. "/_physics.txt") or ""):match("^follow"), "and back to follow:\n" .. s)
+-- the window's scene-copy rules (Status > Scene copies): taken, echoed with copies_seen, saved, shown with their source
+if mode == "gon" then
+    local scansBeforeRules = scanCalls
+    check(s:find("copies_seen [0]", 1, true), "scene copies on, nothing taken from the window yet:\n" .. s)
+    local otherKey = s:match("cand " .. otherName .. "[^\n]* key=(%S+)")
+    check(otherKey ~= nil, "the guard is in the list:\n" .. s)
+    peerCopyRules = "1:never|Nenu;copy|BP_Seq_*|player;copy|key:" .. tostring(otherKey)
+    run_peer(0, 0, "none", 0, "dll1", 1, "-", "-", "-", 1)
+    loop()
+    s = run_peer(0, 0, "none", 0, "dll1", 1, "-", "-", "-", 1)
+    check(s:find("copies_seen [1]", 1, true), "the rules were taken:\n" .. s)
+    check(s:find("srule never Nenu of= from=window\n", 1, true) and s:find("srule copy BP_Seq_* of=player from=window\n", 1, true), "and are shown:\n" .. s)
+    local saved = read(work .. "/_scene_copies.txt") or ""
+    check(saved:find("never\tNenu\n", 1, true) and saved:find("copy\tBP_Seq_*\tplayer\n", 1, true), "and saved:\n" .. saved)
+    check(not saved:find("key:", 1, true) and select(2, saved:gsub("\ncopy\t", "")) == 2, "a key the window sent is saved as the actor's name:\n" .. saved)
+    peerCopyRules = "2:"
+    run_peer(0, 0, "none", 0, "dll1", 1, "-", "-", "-", 1)
+    loop()
+    s = run_peer(0, 0, "none", 0, "dll1", 1, "-", "-", "-", 1)
+    check(s:find("copies_seen [2]", 1, true) and not s:find("srule ", 1, true), "every rule removed:\n" .. s)
+    peerCopyRules = "2:" -- the DLL keeps sending its last list
+    -- a rule change searches the world again for copies (a short burst): let it finish, then leave the
+    -- world-search budget checked below as it was
+    for _ = 1, 15 do loop() end
+    scanCalls = scansBeforeRules
+end
 -- the "Heavier when bigger" slider: 100% by default, 2.50 taken, shown and remembered next to the mode
 check(s:find("physics weight 1.00\n", 1, true), "heavier when bigger is 100% by default:\n" .. s)
 peerWeight = "1:2.50"

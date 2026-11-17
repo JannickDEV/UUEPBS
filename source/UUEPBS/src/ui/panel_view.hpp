@@ -9,6 +9,7 @@
 #pragma once
 
 #include "../core/body_groups.hpp"
+#include "../core/bridge.hpp"
 #include "../core/changes.hpp"
 #include "../core/history.hpp"
 #include "../core/morphs.hpp"
@@ -118,6 +119,17 @@ namespace uuepbs::ui
         virtual float physics_weight() { return -1.0f; }
         virtual void set_physics_weight(float weight) { (void)weight; }
         virtual std::string physics_info() { return {}; } // what the script did, one line
+        // Scene copies (uuepbs_copies.lua): the copies right now, actors lately turned down and every rule.
+        // False = scene copies are off (config.lua) or an older script.
+        virtual bool scene_copies(std::vector<bridge::CopyActor>& now, std::vector<bridge::CopyActor>& turned_down, std::vector<bridge::CopyRule>& rules)
+        {
+            (void)now;
+            (void)turned_down;
+            (void)rules;
+            return false;
+        }
+        // The window's rules (source "window"), sent to the script, which applies and saves them (_scene_copies.txt).
+        virtual void set_scene_copy_rules(const std::vector<bridge::CopyRule>& rules) { (void)rules; }
         // Who an actor key is across reloads (character_memory.hpp), "" when unknown. Renames are
         // stored under it, so they survive reloads.
         virtual std::string identity_of(const std::string& key) { (void)key; return {}; }
@@ -284,6 +296,10 @@ namespace uuepbs::ui
         void draw_status();
         void draw_skin_picker();
         void draw_edited_characters();
+        void draw_scene_copies();
+        // Sets (mode "never" / "copy") or forgets (mode "") the window's scene-copy rule for `who`.
+        void set_copy_rule(const std::string& mode, const std::string& who, const std::string& of, const std::string& shown);
+        std::string copy_of_current() const; // how a rule names the character picked in the window
         bool is_edited(const std::string& key) const;
 
         // Quality-of-life pieces, each in its own function so the layout can move them around.
@@ -399,6 +415,7 @@ namespace uuepbs::ui
         bool m_simplified_changed_only{false};
         char m_body_filter[64]{}; // Body tab search: every category's sliders whose name matches
         char m_char_filter[64]{}; // Choose character search
+        char m_copy_who[96]{};    // Status > Scene copies: a name for a new rule
         char m_anim_filter[96]{}; // Hand Contact animation list search
 
         // Presets tab: details of the picked preset

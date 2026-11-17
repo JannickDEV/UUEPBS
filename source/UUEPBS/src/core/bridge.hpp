@@ -24,6 +24,11 @@
 //     looks <tab> <actor key> <tab> <text>             (optional: what the Looks tab changed on that character)
 //     play <tab> <actor key> <tab> <animation name>    (optional: the montage, else the single animation, it plays)
 //     cmd <tab> <id> <tab> <verb> <tab> <argument>
+//     scopy <tab> <who> <tab> <shown name> <tab> <copy of: actor key> <tab> <copy of: name> <tab> <meshes> <tab> <1 = by a rule>
+//     snot <tab> <who> <tab> <shown name> <tab> <of: name> <tab> <why>     (lately turned down as a copy)
+//     srule <tab> <never|copy> <tab> <who> <tab> <of> <tab> <window|config|profile>
+//                                                       (scene copies, uuepbs_copies.lua; setup copies_seen = the copyrules
+//                                                        counter last taken, "" = scene copies off)
 //     #end <seq>
 //
 //   bridge_out.txt  written by the DLL (atomically replaced), read by Lua
@@ -45,6 +50,8 @@
 //                                                       (Character Scale > Camera; none = the game's own camera)
 //     collui <tab> <counter> <tab> <on 0/1>             (the window's "Collision follows Height" switch was clicked)
 //     height <tab> <actor key> <tab> <height>           (Character Scale > Height, != 1; Lua sizes its collision capsule)
+//     copyrules <tab> <counter>                         (the window's scene-copy rules, bumped on each change; then
+//     crule <tab> <never|copy> <tab> <who> <tab> <of>    the whole list: who / of may be "key:<actor key>")
 //
 // Actor keys: "player" for the default character (the controlled pawn or the profile's Target),
 // otherwise the actor's address in hex. "primary" is the main mesh of that character.
@@ -98,6 +105,32 @@ namespace uuepbs::bridge
         std::string engine; // engine object name (empty from older scripts)
     };
 
+    // Scene copies (uuepbs_copies.lua): a rule the window, config.lua or the game profile set ...
+    struct CopyRule
+    {
+        std::string mode;   // "never" or "copy"
+        std::string who;    // identity, engine name, class or shown name; * = wildcard; "key:<actor key>" from the window
+        std::string of;     // "copy" only: the character it copies ("" = whichever shares its meshes, "player")
+        std::string source; // "window", "config", "profile"
+        bool operator==(const CopyRule&) const = default;
+    };
+
+    // ... and an actor that is a copy right now, or was lately turned down.
+    struct CopyActor
+    {
+        std::string who;   // what a rule calls it (its identity, else its engine name)
+        std::string label; // shown name
+        std::string of_key;
+        std::string of_label;
+        std::string why; // turned down: why
+        int meshes{};
+        bool ruled{}; // a copy because of a rule
+    };
+
+    // The window's rules (source "window") with `who`'s rule replaced: mode "never" / "copy" puts it first,
+    // "" removes it. Names compare without case.
+    std::vector<CopyRule> with_copy_rule(const std::vector<CopyRule>& rules, const std::string& mode, const std::string& who, const std::string& of = {});
+
     struct Command
     {
         int64_t id{};
@@ -121,6 +154,9 @@ namespace uuepbs::bridge
         std::vector<NpcSighting> party;           // ... and NPCs that are a party member (key, who = face mesh, label)
         std::map<std::string, std::string> looks; // actor key -> what Looks changed there (looks.hpp)
         std::map<std::string, std::string> playing; // actor key -> animation it plays (Hand Contact)
+        std::vector<CopyActor> copies;               // scene copies right now (one per actor)
+        std::vector<CopyActor> turned_down;          // actors lately turned down as copies
+        std::vector<CopyRule> copy_rules;            // every scene-copy rule, most important first
 
         std::string setting(const std::string& key, const std::string& fallback = {}) const
         {
@@ -154,6 +190,8 @@ namespace uuepbs::bridge
         bool collision_on{};   // ... with the wished state
         uint64_t physics{};       // Jiggle physics choice in the window: bumped on each click ...
         std::string physics_mode; // ... with the wished mode (follow / off / keep)
+        uint64_t copy_rules{};             // the window's scene-copy rules: bumped on each change ...
+        std::vector<CopyRule> copy_rule_list; // ... with the whole list (window rules only)
         uint64_t physics_weight{};       // "Heavier when bigger" slider: bumped on each change ...
         std::string physics_weight_value; // ... with the wished strength ("1.00" = 100%)
         std::string hook_state{"waiting"};

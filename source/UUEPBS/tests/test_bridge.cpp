@@ -71,6 +71,20 @@ int main(int argc, char** argv)
     CHECK(en && en->party.size() == 1 && en->party[0].label == "Sciel" && en->party[0].engine == "BP_Pawn_AICompanion_Sciel_C_2");
     CHECK(en && en->rigs.size() == 1 && en->rigs[0].label == "Eve Body" && en->rigs[0].owner == "Eve (player)" && en->rigs[0].actor == "player"
           && en->rigs[0].engine == "SkeletalMeshComponent_2147482611" && en->rigs[0].owner_engine == "BP_Eve_C_0");
+    // scene copies: what Lua found / turned down and its rules; the window's rules back
+    auto sc = parse_lua_state("UBS1 s 9\nsetup\tcopies_seen=3\nscopy\tDamaris\tDamaris\tD1\tDamaris\t2\t1\nsnot\tNenu\tNenu\tDamaris\tits body differs\n"
+                              "srule\tnever\tCI_NPC_*\t\tconfig\nsrule\tcopy\tBP_Seq_*\tplayer\tprofile\nsrule\tcopy\t\t\n#end 9\n");
+    CHECK(sc && sc->setting("copies_seen") == "3" && sc->copies.size() == 1 && sc->copies[0].meshes == 2 && sc->copies[0].ruled && sc->copies[0].of_key == "D1");
+    CHECK(sc && sc->turned_down.size() == 1 && sc->turned_down[0].who == "Nenu" && sc->turned_down[0].why == "its body differs");
+    CHECK(sc && sc->copy_rules.size() == 2 && sc->copy_rules[0].source == "config" && sc->copy_rules[1].of == "player");
+    std::vector<CopyRule> mine = {{"never", "Nenu", "", "window"}, {"copy", "Bard", "", "window"}, {"never", "CI_NPC_*", "", "config"}};
+    auto edited = with_copy_rule(mine, "copy", "nenu", "player");
+    CHECK(edited.size() == 2 && edited[0].mode == "copy" && edited[0].who == "nenu" && edited[0].of == "player" && edited[1].who == "Bard");
+    auto forgot = with_copy_rule(edited, "", "BARD");
+    CHECK(forgot.size() == 1 && forgot[0].who == "nenu");
+    CHECK(with_copy_rule(mine, "never", "x", "ignored")[0].of.empty());
+    DllState dc; dc.copy_rules = 4; dc.copy_rule_list = {{"never", "key:7FF6AB", "", "window"}, {"copy", "Bard\tx", "player", "window"}};
+    CHECK(format_dll_state(dc).find("copyrules\t4\ncrule\tnever\tkey:7FF6AB\t\ncrule\tcopy\tBard x\tplayer\nphysweight\t") != std::string::npos);
     std::printf(fails ? "BRIDGE TESTS FAILED\n" : "bridge tests passed\n");
     return fails;
 }

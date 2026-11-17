@@ -233,6 +233,31 @@ namespace uuepbs::bridge
             {
                 state.looks[std::string(f[1])] = std::string(f[2]);
             }
+            else if ((kind == "scopy" || kind == "snot") && f.size() >= 3 && !f[1].empty())
+            {
+                CopyActor c;
+                c.who = std::string(f[1]);
+                c.label = std::string(f[2]);
+                if (kind == "scopy")
+                {
+                    c.of_key = f.size() >= 4 ? std::string(f[3]) : std::string();
+                    c.of_label = f.size() >= 5 ? std::string(f[4]) : c.of_key;
+                    c.meshes = f.size() >= 6 ? static_cast<int>(to_int(f[5])) : 0;
+                    c.ruled = f.size() >= 7 && f[6] == "1";
+                    state.copies.push_back(std::move(c));
+                }
+                else
+                {
+                    c.of_label = f.size() >= 4 ? std::string(f[3]) : std::string();
+                    c.why = f.size() >= 5 ? std::string(f[4]) : std::string();
+                    state.turned_down.push_back(std::move(c));
+                }
+            }
+            else if (kind == "srule" && f.size() >= 3 && !f[2].empty())
+            {
+                state.copy_rules.push_back({std::string(f[1]), std::string(f[2]), f.size() >= 4 ? std::string(f[3]) : std::string(),
+                                            f.size() >= 5 && !f[4].empty() ? std::string(f[4]) : std::string("window")});
+            }
             else if (kind == "cmd" && f.size() >= 3)
             {
                 Command c;
@@ -252,6 +277,24 @@ namespace uuepbs::bridge
             }
         }
         return state;
+    }
+
+    std::vector<CopyRule> with_copy_rule(const std::vector<CopyRule>& rules, const std::string& mode, const std::string& who, const std::string& of)
+    {
+        std::vector<CopyRule> out;
+        const std::string name = fold_case(who);
+        if (!mode.empty() && !who.empty())
+        {
+            out.push_back({mode, who, mode == "copy" ? of : std::string(), "window"});
+        }
+        for (const CopyRule& r : rules)
+        {
+            if (r.source == "window" && fold_case(r.who) != name)
+            {
+                out.push_back(r);
+            }
+        }
+        return out;
     }
 
     std::string clean_field(std::string_view text)
@@ -301,6 +344,11 @@ namespace uuepbs::bridge
         out += "groundui\t" + std::to_string(s.ground) + "\t" + (s.ground_on ? "1" : "0") + "\n";
         out += "collui\t" + std::to_string(s.collision) + "\t" + (s.collision_on ? "1" : "0") + "\n";
         out += "physicsui\t" + std::to_string(s.physics) + "\t" + clean_field(s.physics_mode) + "\n";
+        out += "copyrules\t" + std::to_string(s.copy_rules) + "\n";
+        for (const CopyRule& r : s.copy_rule_list)
+        {
+            out += "crule\t" + clean_field(r.mode) + "\t" + clean_field(r.who) + "\t" + clean_field(r.of) + "\n";
+        }
         out += "physweight\t" + std::to_string(s.physics_weight) + "\t" + clean_field(s.physics_weight_value) + "\n";
         out += "hook\t" + clean_field(s.hook_state) + "\t" + clean_field(s.hook_text) + "\n";
         out += std::string("ui\t") + (s.window_open ? "1" : "0") + "\n";
