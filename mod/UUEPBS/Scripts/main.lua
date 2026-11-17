@@ -2914,7 +2914,7 @@ local function read_dll_state()
         elseif kind == "copyrules" then
             -- the window's scene-copy rules (Status > Scene copies, Choose character right-click): the whole list follows
             local n = tonumber(a) or 0
-            if seen.copyrules >= 0 and n ~= seen.copyrules then
+            if seen.copyrules >= 0 and n > seen.copyrules then -- the counter only grows within a DLL session
                 copyRulesNew = true
             end
             seen.copyrules = n

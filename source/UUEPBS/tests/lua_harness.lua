@@ -726,6 +726,7 @@ s = run_peer(0, 0, "none", 0, "dll1", 1, "-", "-", "-", 1)
 check(s:find("physics follow [", 1, true) and (read(work .. "/_physics.txt") or ""):match("^follow"), "and back to follow:\n" .. s)
 -- the window's scene-copy rules (Status > Scene copies): taken, echoed with copies_seen, saved, shown with their source
 if mode == "gon" then
+    local scansBeforeRules = scanCalls
     check(s:find("copies_seen [0]", 1, true), "scene copies on, nothing taken from the window yet:\n" .. s)
     local otherKey = s:match("cand " .. otherName .. "[^\n]* key=(%S+)")
     check(otherKey ~= nil, "the guard is in the list:\n" .. s)
@@ -743,7 +744,11 @@ if mode == "gon" then
     loop()
     s = run_peer(0, 0, "none", 0, "dll1", 1, "-", "-", "-", 1)
     check(s:find("copies_seen [2]", 1, true) and not s:find("srule ", 1, true), "every rule removed:\n" .. s)
-    peerCopyRules = nil
+    peerCopyRules = "2:" -- the DLL keeps sending its last list
+    -- a rule change searches the world again for copies (a short burst): let it finish, then leave the
+    -- world-search budget checked below as it was
+    for _ = 1, 15 do loop() end
+    scanCalls = scansBeforeRules
 end
 other._loc = { X = 0, Y = 0, Z = 0 }
 settle()
