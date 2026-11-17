@@ -73,6 +73,12 @@ namespace uuepbs
         BodyGroup group;                // section/title/hint/spread as resolved
         std::vector<std::string> bones; // real bone names on this skeleton
         bool custom{false};             // came from the game profile
+        // `bones` and everything hanging below them that no group or anatomy part claims and that is not a
+        // rigging helper (IK, sockets, weapons): the fingers below a hand, the rest of a tail below its root.
+        // Parents come before their children. chain_parent[i] = index in `chain` of chain[i]'s parent, -1 for
+        // the group's own bones. Length / thickness sliders on tails, ears and fingers use the whole chain.
+        std::vector<std::string> chain;
+        std::vector<int32_t> chain_parent;
     };
 
     // Which signed local axis of a bone points up / forward / outward (measure_long_axes).
@@ -95,6 +101,9 @@ namespace uuepbs
         std::map<std::string, BoneFrame> frames; // folded bone name -> directions
         double height{0.0};                       // measured character height (0 = not measured)
     };
+
+    // IK targets, virtual bones, sockets and weapon / prop attachments: never part of a body chain.
+    bool rigging_helper(std::string_view bone);
 
     // Matches the groups against a skeleton; groups with no bones are left out.
     BodyMap resolve_body_groups(const std::vector<std::string>& names, const std::vector<int32_t>& parents, const BoneDictionary& dict,

@@ -622,7 +622,82 @@ namespace uuepbs
                 map.parts.insert(map.parts.begin(), std::move(glans));
             }
         }
+        // 6) Every group's chain: its bones and what hangs below them, down to the next group or part.
+        {
+            std::vector<uint8_t> claimed = taken;
+            std::map<std::string, size_t> index_of;
+            for (size_t i = 0; i < n; ++i)
+            {
+                index_of.emplace(names[i], i);
+            }
+            for (const PartBones& pb : map.parts)
+            {
+                for (const std::string& b : pb.bones)
+                {
+                    if (const auto it = index_of.find(b); it != index_of.end())
+                    {
+                        claimed[it->second] = 1;
+                    }
+                }
+            }
+            std::vector<std::vector<size_t>> children(n);
+            if (have_parents)
+            {
+                for (size_t i = 0; i < n; ++i)
+                {
+                    if (parents[i] >= 0 && static_cast<size_t>(parents[i]) < n)
+                    {
+                        children[static_cast<size_t>(parents[i])].push_back(i);
+                    }
+                }
+            }
+            for (GroupBones& gb : map.groups)
+            {
+                gb.chain = gb.bones;
+                gb.chain_parent.assign(gb.bones.size(), -1);
+                std::vector<size_t> at; // skeleton index of every chain entry
+                for (const std::string& b : gb.bones)
+                {
+                    const auto it = index_of.find(b);
+                    at.push_back(it == index_of.end() ? n : it->second);
+                }
+                for (size_t k = 0; k < at.size(); ++k) // breadth first: parents before children
+                {
+                    if (at[k] >= n)
+                    {
+                        continue;
+                    }
+                    for (size_t c : children[at[k]])
+                    {
+                        if (claimed[c] || rigging_helper(names[c]) || std::find(at.begin(), at.end(), c) != at.end())
+                        {
+                            continue; // another group's or part's bone, or IK / socket: it and what hangs below it stay out
+                        }
+                        gb.chain.push_back(names[c]);
+                        gb.chain_parent.push_back(static_cast<int32_t>(k));
+                        at.push_back(c);
+                    }
+                }
+            }
+        }
         return map;
+    }
+
+    bool rigging_helper(std::string_view bone)
+    {
+        const std::string f = fold_case(bone);
+        if (f.rfind("ik_", 0) == 0 || f.rfind("ik ", 0) == 0 || f.rfind("vb ", 0) == 0)
+        {
+            return true;
+        }
+        for (const char* w : {"weapon", "socket", "attach", "prop", "ctrl", "control", "pole", "target", "camera", "_ik", "ikhandle"})
+        {
+            if (f.find(w) != std::string::npos)
+            {
+                return true;
+            }
+        }
+        return false;
     }
 
     BodyMapSource& BodyMapSource::instance()

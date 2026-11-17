@@ -193,23 +193,221 @@ int main()
         EditBook book;
         set_scale_value(book, "height", 3.5);
         CHECK(std::fabs(scale_value(book, "height") - 2.0) < 1e-9); // clamped to the default max
-        set_height_range(0.2, 5.0);
-        CHECK(scale_lo(*h) == 0.2 && scale_hi(*h) == 5.0);
+        set_height_range(0.25, 6.0);
+        CHECK(scale_lo(*h) == 0.25 && scale_hi(*h) == 6.0);
         set_scale_value(book, "height", 3.5);
         CHECK(std::fabs(scale_value(book, "height") - 3.5) < 1e-9);
         double world = 0.0;
         apply_proportions(book, BodyMap{}, world);
         CHECK(std::fabs(world - 3.5) < 1e-9);
         set_scale_value(book, "height", 0.1);
-        CHECK(std::fabs(scale_value(book, "height") - 0.2) < 1e-9);
+        CHECK(std::fabs(scale_value(book, "height") - 0.25) < 1e-9);
         const ScaleSlider* head = find_scale_slider("head");
-        CHECK(head && scale_lo(*head) == 0.5 && scale_hi(*head) == 2.0); // other sliders keep their range
+        CHECK(head && scale_lo(*head) == 0.2 && scale_hi(*head) == 5.0); // other sliders keep their range
         set_height_range(0.0, 100.0); // kept within 0.05..20
         CHECK(scale_lo(*h) == kHeightRangeMin && scale_hi(*h) == kHeightRangeMax);
         set_height_range(1.5, 0.5); // min above 1 / max below 1: kept on their side of 1
         CHECK(scale_lo(*h) < 1.0 && scale_hi(*h) > 1.0);
         set_height_range(std::nan(""), std::nan("")); // garbage = default
         CHECK(scale_lo(*h) == 0.5 && scale_hi(*h) == 2.0);
+    }
+
+    // ---- RaceMenu-style ranges: typed values go far past the track ---------------------------
+    {
+        EditBook book;
+        set_scale_value(book, "tail_length", 12.0);
+        CHECK(near(scale_value(book, "tail_length"), 12.0));
+        set_scale_value(book, "tail_length", 50.0);
+        CHECK(near(scale_value(book, "tail_length"), kTypedFactorMax));
+        set_scale_value(book, "head", 0.001);
+        CHECK(near(scale_value(book, "head"), kTypedFactorMin));
+        set_scale_value(book, "breast_lift", 7.0);
+        CHECK(near(scale_value(book, "breast_lift"), 7.0));
+        set_scale_value(book, "breast_lift", -15.0);
+        CHECK(near(scale_value(book, "breast_lift"), -kTypedOffsetMax));
+        // Height and the camera keep their own ranges
+        set_scale_value(book, "camera_distance", 9.0);
+        CHECK(near(scale_value(book, "camera_distance"), scale_hi(*find_scale_slider("camera_distance"))));
+        set_height_range(std::nan(""), std::nan(""));
+        set_scale_value(book, "height", 9.0);
+        CHECK(near(scale_value(book, "height"), kHeightDefaultMax));
+    }
+
+    // ---- Chain sliders: tail / ear / finger length and thickness along the whole chain --------------
+    {
+        Skel s = load();
+        BodyMap map = resolve_body_groups(s.names, s.parents, BoneDictionary::builtin());
+        measure_long_axes(map, s.names, s.parents, fk(s));
+        const GroupBones* tail = nullptr;
+        const GroupBones* hands = nullptr;
+        for (const GroupBones& gb : map.groups)
+        {
+            if (gb.group.title == "Tail")
+                tail = &gb;
+            if (gb.group.title == "Hands")
+                hands = &gb;
+        }
+        CHECK(tail && tail->bones.size() == 1 && tail->bones[0] == "tail_01" && tail->chain.size() == 8 && tail->group.section == "Tail");
+        CHECK(tail && tail->chain_parent.size() == tail->chain.size() && tail->chain_parent[0] == -1 && tail->chain_parent[7] == 6);
+        // the hands' chain: the fingers, never another group's bones
+        CHECK(hands && std::find(hands->chain.begin(), hands->chain.end(), "index_03_l") != hands->chain.end());
+        CHECK(hands && reach_bones(*hands, Reach::Below).size() + hands->bones.size() == hands->chain.size());
+        CHECK(hands && std::find(hands->chain.begin(), hands->chain.end(), "lowerarm_l") == hands->chain.end());
+        CHECK(scale_slider_bones(*find_scale_slider("tail_length"), map).size() == 8);
+        CHECK(scale_slider_bones(*find_scale_slider("tail_root"), map).size() == 1);
+
+        const std::vector<Xform> original = fk(s);
+        auto path = [&](const std::vector<Xform>& p, const char* from, const char* to) {
+            // length along the chain from `from` down to `to`
+            double len = 0;
+            for (int i = index_of(s, to); i >= 0 && i != index_of(s, from); i = s.parents[i])
+            {
+                const int q = s.parents[i];
+                double d = 0;
+                for (int a = 0; a < 3; ++a)
+                    d += (p[i].pos[a] - p[q].pos[a]) * (p[i].pos[a] - p[q].pos[a]);
+                len += std::sqrt(d);
+            }
+            return len;
+        };
+        auto run = [&](const EditBook& book) {
+            RigSculptor rig;
+            rig.set_skeleton(s.names, s.parents);
+            double world = 1.0;
+            rig.bind(apply_proportions(book, map, world), 1, world);
+            std::vector<Xform> pose = original;
+            rig.apply(pose.data(), (int)pose.size());
+            return pose;
+        };
+        const double tail0 = path(original, "tail_01", "tail_08");
+        const int tip = index_of(s, "tail_07");
+        const int tl = long_axis_of(map, "tail_07");
+        auto cross = [&](const std::vector<Xform>& p) { return p[tip].scl[(tl + 1) % 3] / original[tip].scl[(tl + 1) % 3]; };
+
+        EditBook book;
+        set_scale_value(book, "tail_length", 1.5);
+        std::vector<Xform> p = run(book);
+        std::printf("tail length 1.5: tail %.2f -> %.2f cm, tip thickness x%.3f\n", tail0, path(p, "tail_01", "tail_08"), cross(p));
+        CHECK(std::fabs(path(p, "tail_01", "tail_08") / tail0 - 1.5) < 1e-3 && std::fabs(cross(p) - 1.0) < 1e-6);
+
+        // Tail size (the Body tab row: tail_01, "scale children too") and Tail length together: 1.2 x 1.5 long, 1.2 thick,
+        // not 1.5 compounded down eight bones.
+        BoneEdit size;
+        size.axis[0] = size.axis[1] = size.axis[2] = 1.2;
+        size.spread = Spread::Chain;
+        book["tail_01"] = EditEntry{"tail_01", size};
+        p = run(book);
+        std::printf("tail size 1.2 + length 1.5: tail x%.3f, tip thickness x%.3f\n", path(p, "tail_01", "tail_08") / tail0, cross(p));
+        CHECK(std::fabs(path(p, "tail_01", "tail_08") / tail0 - 1.8) < 1e-3 && std::fabs(cross(p) - 1.2) < 1e-6);
+        // and size alone still scales the whole tail through its root, as before
+        book.erase(scale_key("tail_length"));
+        p = run(book);
+        CHECK(std::fabs(path(p, "tail_01", "tail_08") / tail0 - 1.2) < 1e-3 && std::fabs(cross(p) - 1.2) < 1e-6);
+
+        // Tail thickness: same length, thicker all the way.
+        EditBook thick;
+        set_scale_value(thick, "tail_thickness", 1.4);
+        p = run(thick);
+        CHECK(std::fabs(path(p, "tail_01", "tail_08") / tail0 - 1.0) < 1e-6 && std::fabs(cross(p) - 1.4) < 1e-6);
+
+        // Finger length: longer fingers, the hand keeps its size and place.
+        EditBook fingers;
+        set_scale_value(fingers, "finger_length", 1.4);
+        p = run(fingers);
+        const int hand = index_of(s, "hand_l");
+        const double f0 = path(original, "index_01_l", "index_03_l"), f1 = path(p, "index_01_l", "index_03_l");
+        double drift = 0;
+        for (int a = 0; a < 3; ++a)
+            drift = std::max(drift, std::fabs(p[hand].scl[a] - original[hand].scl[a]) + std::fabs(p[hand].pos[a] - original[hand].pos[a]));
+        std::printf("finger length 1.4: index finger %.2f -> %.2f cm, hand drift %.3g\n", f0, f1, drift);
+        CHECK(std::fabs(f1 / f0 - 1.4) < 1e-3 && drift < 1e-6);
+
+        // Turn sliders: the measured directions decide the axis, mirrored on both sides.
+        auto at = [&](const std::vector<Xform>& q, const char* bone) { return q[index_of(s, bone)]; };
+        auto apart = [&](const std::vector<Xform>& q, const char* l, const char* r) {
+            double d = 0;
+            for (int a = 0; a < 3; ++a)
+                d += (at(q, l).pos[a] - at(q, r).pos[a]) * (at(q, l).pos[a] - at(q, r).pos[a]);
+            return std::sqrt(d);
+        };
+        // Roku's reference rig: X = left, +Y = forward (the tail runs to -Y), Z = up.
+        auto pitch = [&](const std::vector<Xform>& q, const char* from, const char* to) { // forward (0) towards up (+90)
+            const double dy = at(q, to).pos[1] - at(q, from).pos[1], dz = at(q, to).pos[2] - at(q, from).pos[2];
+            return std::atan2(dz, dy) * 180.0 / 3.14159265358979323846;
+        };
+        auto heading = [&](const std::vector<Xform>& q, const char* from, const char* to, double left) { // forward (0) towards out (+90)
+            const double dx = at(q, to).pos[0] - at(q, from).pos[0], dy = at(q, to).pos[1] - at(q, from).pos[1];
+            return std::atan2(left * dx, dy) * 180.0 / 3.14159265358979323846;
+        };
+        EditBook perky;
+        set_scale_value(perky, "breast_perkiness", 1.0);
+        p = run(perky);
+        const double tilt_l = pitch(p, "boob_l", "nipp_l") - pitch(original, "boob_l", "nipp_l");
+        const double tilt_r = pitch(p, "boob_r", "nipp_r") - pitch(original, "boob_r", "nipp_r");
+        std::printf("breast perkiness +1: breasts tilted up %.1f / %.1f deg\n", tilt_l, tilt_r);
+        CHECK(tilt_l > 8.0 && std::fabs(tilt_l - tilt_r) < 0.5);
+        // Breast angle: the breasts' heading (boob -> nipple, seen from above) turns outward on both sides.
+        EditBook angle;
+        set_scale_value(angle, "breast_angle", 1.0);
+        p = run(angle);
+        const double turn_l = heading(p, "boob_l", "nipp_l", 1.0) - heading(original, "boob_l", "nipp_l", 1.0);
+        const double turn_r = heading(p, "boob_r", "nipp_r", -1.0) - heading(original, "boob_r", "nipp_r", -1.0);
+        std::printf("breast angle +1: breasts turned out %.1f / %.1f deg\n", turn_l, turn_r);
+        CHECK(turn_l > 8.0 && std::fabs(turn_l - turn_r) < 0.5);
+        EditBook spacing;
+        set_scale_value(spacing, "nipple_spacing", 1.0);
+        p = run(spacing);
+        CHECK(apart(p, "nipp_l", "nipp_r") < apart(original, "nipp_l", "nipp_r") - 0.3);
+        // Ear angle: the ear (base -> tip) leans from up towards out.
+        auto elevation = [&](const std::vector<Xform>& q, double left) {
+            const double dx = at(q, "c_ear_02_l").pos[0] - at(q, "c_ear_01_l").pos[0], dz = at(q, "c_ear_02_l").pos[2] - at(q, "c_ear_01_l").pos[2];
+            return std::atan2(dz, left * dx) * 180.0 / 3.14159265358979323846;
+        };
+        EditBook flare;
+        set_scale_value(flare, "ear_angle", 1.0);
+        p = run(flare);
+        std::printf("ear angle +1: ear elevation %.1f -> %.1f deg\n", elevation(original, 1.0), elevation(p, 1.0));
+        CHECK(elevation(p, 1.0) < elevation(original, 1.0) - 8.0);
+
+        // Ear length: the ear's tip moves out along the ear.
+        EditBook ears;
+        set_scale_value(ears, "ear_length", 1.5);
+        p = run(ears);
+        CHECK(std::fabs(path(p, "c_ear_01_l", "c_ear_02_l") / path(original, "c_ear_01_l", "c_ear_02_l") - 1.5) < 1e-3);
+    }
+
+    // ---- Carnal Instinct: both tails, ear tips, toes ------------------------------------------
+    {
+        std::ifstream f("fixtures/carnal_instinct_cache.txt");
+        std::string line;
+        std::vector<std::string> names;
+        std::vector<int32_t> parents;
+        while (std::getline(f, line))
+        {
+            std::istringstream l(line);
+            std::string kind, item;
+            std::getline(l, kind, '\t');
+            if (kind == "names" && names.empty())
+                while (std::getline(l, item, '\t'))
+                    names.push_back(item);
+            if (kind == "parents" && parents.empty())
+                while (std::getline(l, item, '\t'))
+                    parents.push_back(std::stoi(item));
+        }
+        const BodyMap map = resolve_body_groups(names, parents, BoneDictionary::builtin());
+        const std::vector<std::string> tail = scale_slider_bones(*find_scale_slider("tail_length"), map);
+        const std::vector<std::string> ear = scale_slider_bones(*find_scale_slider("ear_length"), map);
+        const std::vector<std::string> toes = scale_slider_bones(*find_scale_slider("toe_length"), map);
+        const std::vector<std::string> fingers = scale_slider_bones(*find_scale_slider("finger_length"), map);
+        std::printf("Carnal Instinct: tail %zu bones, ears %zu, toes %zu, fingers %zu\n", tail.size(), ear.size(), toes.size(), fingers.size());
+        CHECK(tail.size() == 8 + 13 && has(&tail, "FTail_NUB") && has(&tail, "Tail07"));
+        CHECK(ear.size() == 4 && has(&ear, "Ear_Tip_L"));
+        CHECK(toes.size() == 2 && has(&toes, "ball_l"));
+        CHECK(fingers.size() == 30 && !has(&fingers, "hand_l"));
+        // IK and virtual bones never join a chain
+        for (const GroupBones& gb : map.groups)
+            for (const std::string& b : gb.chain)
+                CHECK(!rigging_helper(b));
     }
 
     // ---- slider table -------------------------------------------------------------------
@@ -244,7 +442,7 @@ int main()
                 CHECK(sl.axes == ScaleAxes::Girth && sl.spread == Spread::Keep);
             }
         }
-        CHECK(body == 21 && muscle == 9);
+        CHECK(body == 60 && muscle == 9);
     }
 
     // ---- Muscle: girth only, children keep their size -----------------------------------

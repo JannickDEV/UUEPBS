@@ -123,6 +123,8 @@ namespace uuepbs
                                 "palm", "nail", "knuckle"}},
                 {"Hips & Legs", true, {"hip", "butt", "buttock", "ass", "glute", "gluteus", "bum", "booty", "thigh", "leg", "knee",
                                        "calf", "calves", "shin", "foot", "feet", "ankle", "toe", "heel", "pelvis", "lower body"}},
+                {"Tail", true, {"tail"}},
+                {"Wings", true, {"wing", "wingspan"}},
                 {"Torso", false, {"pregnant", "pregnancy"}},
                 {"Torso", true, {"waist", "belly", "stomach", "tummy", "ab", "abdomen", "abdominal", "torso", "spine", "back",
                                  "rib", "ribcage", "navel", "upper body", "love handle", "shoulder", "collarbone", "clavicle",
@@ -388,7 +390,7 @@ namespace uuepbs
 
     int section_rank(std::string_view section)
     {
-        static const char* const order[] = {"Head & Neck", "Face", "Torso", "Chest", "Hips & Legs", "Arms", "Muscles", "Body shape"};
+        static const char* const order[] = {"Head & Neck", "Face", "Torso", "Chest", "Hips & Legs", "Arms", "Tail", "Wings", "Muscles", "Body shape"};
         const std::string key = fold_case(section);
         for (size_t i = 0; i < std::size(order); ++i)
         {

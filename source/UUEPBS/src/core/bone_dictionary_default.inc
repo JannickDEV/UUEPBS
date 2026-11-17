@@ -58,7 +58,6 @@ R"UBSD(, "*koshi*"],
     { "Title": "Calves", "Bones": ["calf", "lowerleg", "leg", "shin", "calf#", "legstretch", "knee", "*xiaotui*"],
       "Extra": ["*xtui*"], "Helpers": true, "Children": "keep_size", "Hint": "Lower legs." },
     { "Title": "Feet", "Bones": ["foot", "foot#", "ankle"], "Children": "scale_too", "Hint": "Feet and toes." },
-    { "Title": "Tail", "Bones": ["tailroot", "tailbase", "tail", "tail#"], "Children": "scale_too", "Hint": "The whole tail, from its root." },
 
     { "Section": "Arms", "Title": "Upper arms", "Bones": ["upperarm", "arm", "shldrbend", "upperarm#", "armstretch", "*dabi*"],
       "Helpers": true, "Children": "keep_size", "Hint": "Upper arms." },
@@ -66,11 +65,16 @@ R"UBSD(, "*koshi*"],
       "Helpers": true, "Children": "keep_size", "Hint": "Forearms." },
     { "Title": "Hands", "Bones": ["hand", "hand#", "wrist"], "Children": "scale_too", "Hint": "Hands and fingers." },
 
+    { "Section": "Tail", "Title": "Tail", "Bones": ["tailroot", "tailbase", "tail", "tail#"], "Children": "scale_too", "Hint": "The whole tail, from its root." },
+
+    { "Section": "Wings", "Title": "Wings", "Bones": ["wingroot", "wingbase", "wing", "wing#", "wingshoulder", "wingarm", "wingupper"],
+      "Children": "scale_too", "Hint": "Both wings, from their roots." },
+
     { "Section": "Muscles", "Title": "Deltoids", "Bones": ["*deltoid*", "delt", "delt#", "*shoulderdelt*"], "MatchAll": true, "Children": "scale_too",
-      "Hint": "Shoulder muscle helper bones." },
+      "H)UBSD"
+R"UBSD(int": "Shoulder muscle helper bones." },
     { "Title": "Biceps", "Bones": ["*bicep*"], "MatchAll": true, "Children": "scale_too", "Hint": "Biceps helper bones." },
-    { "Title": "Triceps", "Bones": ["*tricep*"], "MatchAll": true,)UBSD"
-R"UBSD( "Children": "scale_too", "Hint": "Triceps helper bones." },
+    { "Title": "Triceps", "Bones": ["*tricep*"], "MatchAll": true, "Children": "scale_too", "Hint": "Triceps helper bones." },
     { "Title": "Pecs", "Bones": ["*pectoral*", "pec", "pec#", "pecs", "*pecs*", "*claviclepec*", "*chestmuscle*"], "MatchAll": true,
       "Children": "scale_too", "Hint": "Chest muscle helper bones." },
     { "Title": "Lats", "Bones": ["*latissimus*", "lat", "lats", "lat#", "*lats"], "MatchAll": true, "Children": "scale_too",
