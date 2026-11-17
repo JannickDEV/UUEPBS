@@ -935,8 +935,11 @@ namespace uuepbs::ui
         int index = 0;
         std::string picked_id;
         std::string picked_name;
+        std::vector<bridge::CopyActor> copies_now, copies_down;
+        std::vector<bridge::CopyRule> copy_rules;
+        const bool copies_on = m_targets->scene_copies(copies_now, copies_down, copy_rules);
         auto tile = [&](const std::string& id, const std::string& name, const std::string& sub, const std::string& letters, bool selected, bool edited,
-                        ImTextureData* face) {
+                        ImTextureData* face, const std::string& key) {
             ImGui::PushID(id.c_str());
             if (index % cols != 0)
             {
@@ -953,6 +956,35 @@ namespace uuepbs::ui
             {
                 const std::string tip = sub.empty() ? name : name + "\n" + sub;
                 tooltip(tip.c_str());
+            }
+            // Right-click: scene-copy rules for this actor (Status > Scene copies lists them)
+            if (copies_on && id != "auto" && key != kPlayerActor && ImGui::BeginPopupContextItem("##copyrule"))
+            {
+                const std::string who = "key:" + key;
+                const std::string cur = CharacterNames::instance().shown(m_target.label, m_target.key, identity_of(m_target.key));
+                ImGui::TextColored(muted(), "Scene copy rules for %s", name.c_str());
+                ImGui::Separator();
+                if (ImGui::MenuItem("Never a scene copy"))
+                {
+                    set_copy_rule("never", who, "", name);
+                }
+                if (ImGui::IsItemHovered())
+                {
+                    ImGui::SetTooltip("It never gets another character's sliders (an NPC built from the same body and outfit).");
+                }
+                if (key != m_target.key && ImGui::MenuItem(("Scene copy of " + cur).c_str()))
+                {
+                    set_copy_rule("copy", who, copy_of_current(), name);
+                }
+                if (ImGui::IsItemHovered())
+                {
+                    ImGui::SetTooltip("It always gets %s's sliders, even when it uses meshes of its own.", cur.c_str());
+                }
+                if (ImGui::MenuItem("Forget its rule"))
+                {
+                    set_copy_rule("", who, "", name);
+                }
+                ImGui::EndPopup();
             }
             ImDrawList* dl = ImGui::GetWindowDrawList();
             const ImVec2 b(a.x + tile_w, a.y + tile_h);
@@ -988,7 +1020,7 @@ namespace uuepbs::ui
 
         if (contains_folded("Automatic player", char_needle))
         {
-            tile("auto", "Automatic", "the character you control", "AUTO", m_target.id == "auto", is_edited(kPlayerActor), nullptr);
+            tile("auto", "Automatic", "the character you control", "AUTO", m_target.id == "auto", is_edited(kPlayerActor), nullptr, kPlayerActor);
         }
         for (const TargetChoice& t : m_target_list)
         {
@@ -1001,7 +1033,7 @@ namespace uuepbs::ui
                 continue;
             }
             ImTextureData* face = portrait_or_request(t.id, t.key, identity, t.label, t.engine);
-            tile(t.id, name, sub, face ? std::string() : monogram(name), t.id == m_target.id, is_edited(t.key), face);
+            tile(t.id, name, sub, face ? std::string() : monogram(name), t.id == m_target.id, is_edited(t.key), face, t.key);
         }
         if (index == 0)
         {
@@ -1012,7 +1044,8 @@ namespace uuepbs::ui
         ImGui::PushFont(nullptr, base * 0.86f);
         ImGui::TextColored(muted(), "A square marks a character with edited sliders. Characters without a portrait get a name tile; "
                                     "put PNG/JPG portraits named after the character in the presets folder's _portraits folder. "
-                                    "Refresh searches the whole level.");
+                                    "Refresh searches the whole level.%s",
+                           copies_on ? " Right-click a character to say whether it is a scene copy." : "");
         ImGui::PopFont();
         ImGui::PopTextWrapPos();
         if (!picked_id.empty())
@@ -1022,6 +1055,232 @@ namespace uuepbs::ui
             ImGui::CloseCurrentPopup();
         }
         ImGui::EndPopup();
+    }
+
+    std::string PanelView::copy_of_current() const
+    {
+        if (m_target.key == kPlayerActor || m_target.key.empty())
+        {
+            return "player";
+        }
+        const std::string id = m_targets ? m_targets->identity_of(m_target.key) : std::string();
+        return id.empty() ? "key:" + m_target.key : id;
+    }
+
+    void PanelView::set_copy_rule(const std::string& mode, const std::string& who, const std::string& of, const std::string& shown)
+    {
+        if (!m_targets || who.empty())
+        {
+            return;
+        }
+        std::vector<bridge::CopyActor> now, down;
+        std::vector<bridge::CopyRule> rules;
+        if (!m_targets->scene_copies(now, down, rules))
+        {
+            set_message("Scene copies are off (SceneCopies in config.lua)");
+            return;
+        }
+        m_targets->set_scene_copy_rules(bridge::with_copy_rule(rules, mode, who, of));
+        set_message(mode == "never" ? shown + " is never a scene copy now"
+                    : mode == "copy" ? shown + " is a scene copy now"
+                                     : "Forgot the scene-copy rule for " + shown);
+    }
+
+    // Status > Scene copies: cutscene / menu / preview actors that get a character's sliders, and the rules
+    // that overrule the automatic guess (uuepbs_copies.lua).
+    void PanelView::draw_scene_copies()
+    {
+        if (!m_targets)
+        {
+            return;
+        }
+        std::vector<bridge::CopyActor> now, down;
+        std::vector<bridge::CopyRule> rules;
+        if (!m_targets->scene_copies(now, down, rules))
+        {
+            return; // off in config.lua, or a script without them
+        }
+        Skin& sk = skin();
+        ImGui::Spacing();
+        section_bar("Scene copies");
+        ImGui::PushTextWrapPos(0.0f);
+        ImGui::TextColored(muted(), "Cutscene, menu and preview actors that show an edited character get its sliders. When the guess is wrong, "
+                                    "say so here (or right-click a character in Choose character). Your rules are kept in _scene_copies.txt "
+                                    "in the presets folder.");
+        ImGui::PopTextWrapPos();
+        const float row_btn = std::max(sk.button_width("Not a copy"), sk.button_width("It is a copy"));
+        const auto flags = ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_SizingStretchProp;
+        std::string set_mode, set_who, set_of, set_shown;
+
+        // copies right now
+        if (now.empty())
+        {
+            ImGui::TextColored(muted(), "No scene copies right now.");
+        }
+        else if (ImGui::BeginTable("##copies", 3, flags))
+        {
+            ImGui::TableSetupColumn("Copy", ImGuiTableColumnFlags_WidthStretch, 2.0f);
+            ImGui::TableSetupColumn("Gets the sliders of", ImGuiTableColumnFlags_WidthStretch, 2.0f);
+            ImGui::TableSetupColumn("##act", ImGuiTableColumnFlags_WidthFixed, row_btn);
+            ImGui::TableHeadersRow();
+            for (const auto& c : now)
+            {
+                ImGui::PushID(("c" + c.who).c_str());
+                ImGui::TableNextRow();
+                ImGui::TableNextColumn();
+                ImGui::AlignTextToFramePadding();
+                ImGui::TextUnformatted(c.label.c_str());
+                const std::string tip = "Rules call it \"" + c.who + "\"";
+                tooltip(tip.c_str());
+                ImGui::TableNextColumn();
+                ImGui::AlignTextToFramePadding();
+                ImGui::Text("%s (%d mesh%s)%s", c.of_label.c_str(), c.meshes, c.meshes == 1 ? "" : "es", c.ruled ? " - by a rule" : "");
+                ImGui::TableNextColumn();
+                if (sk.button("Not a copy"))
+                {
+                    set_mode = "never", set_who = c.who, set_shown = c.label;
+                }
+                tooltip("It never gets another character's sliders from now on (remembered).");
+                ImGui::PopID();
+            }
+            ImGui::EndTable();
+        }
+
+        // turned down lately
+        if (!down.empty())
+        {
+            ImGui::Spacing();
+            ImGui::TextColored(muted(), "Turned down lately");
+            if (ImGui::BeginTable("##copiesdown", 3, flags))
+            {
+                ImGui::TableSetupColumn("Actor", ImGuiTableColumnFlags_WidthStretch, 1.5f);
+                ImGui::TableSetupColumn("Why", ImGuiTableColumnFlags_WidthStretch, 3.0f);
+                ImGui::TableSetupColumn("##act", ImGuiTableColumnFlags_WidthFixed, row_btn);
+                for (const auto& c : down)
+                {
+                    ImGui::PushID(("d" + c.who).c_str());
+                    ImGui::TableNextRow();
+                    ImGui::TableNextColumn();
+                    ImGui::AlignTextToFramePadding();
+                    ImGui::TextUnformatted(c.label.c_str());
+                    const std::string tip = "Rules call it \"" + c.who + "\"";
+                    tooltip(tip.c_str());
+                    ImGui::TableNextColumn();
+                    ImGui::PushTextWrapPos(0.0f);
+                    ImGui::TextColored(muted(), "not a copy of %s: %s", c.of_label.c_str(), c.why.c_str());
+                    ImGui::PopTextWrapPos();
+                    ImGui::TableNextColumn();
+                    if (sk.button("It is a copy"))
+                    {
+                        set_mode = "copy", set_who = c.who, set_shown = c.label;
+                    }
+                    const std::string ctip = "It gets " + c.of_label + "'s sliders from now on (remembered).";
+                    tooltip(ctip.c_str());
+                    ImGui::PopID();
+                }
+                ImGui::EndTable();
+            }
+        }
+
+        // rules
+        ImGui::Spacing();
+        ImGui::TextColored(muted(), "Rules (first match wins; yours before config.lua's before the game profile's)");
+        if (rules.empty())
+        {
+            ImGui::TextColored(muted(), "None. The mod guesses from the meshes an actor shares with the character.");
+        }
+        else if (ImGui::BeginTable("##copyrules", 4, flags))
+        {
+            ImGui::TableSetupColumn("Actor", ImGuiTableColumnFlags_WidthStretch, 2.0f);
+            ImGui::TableSetupColumn("Rule", ImGuiTableColumnFlags_WidthStretch, 2.5f);
+            ImGui::TableSetupColumn("From", ImGuiTableColumnFlags_WidthStretch, 1.0f);
+            ImGui::TableSetupColumn("##act", ImGuiTableColumnFlags_WidthFixed, sk.button_width("Remove", "delete"));
+            ImGui::TableHeadersRow();
+            int i = 0;
+            for (const auto& r : rules)
+            {
+                ImGui::PushID(i++);
+                ImGui::TableNextRow();
+                ImGui::TableNextColumn();
+                ImGui::AlignTextToFramePadding();
+                ImGui::TextUnformatted(r.who.c_str());
+                ImGui::TableNextColumn();
+                ImGui::AlignTextToFramePadding();
+                if (r.mode == "never")
+                {
+                    ImGui::TextUnformatted("never a copy");
+                }
+                else if (r.of.empty())
+                {
+                    ImGui::TextUnformatted("a copy (of whoever shares its meshes)");
+                }
+                else
+                {
+                    ImGui::Text("a copy of %s", r.of == "player" ? "the player" : r.of.c_str());
+                }
+                ImGui::TableNextColumn();
+                ImGui::AlignTextToFramePadding();
+                ImGui::TextColored(muted(), "%s", r.source == "window" ? "you" : r.source == "config" ? "config.lua" : "game profile");
+                ImGui::TableNextColumn();
+                if (r.source == "window")
+                {
+                    if (sk.button("Remove", "delete"))
+                    {
+                        set_mode = "", set_who = r.who, set_shown = r.who;
+                    }
+                }
+                ImGui::PopID();
+            }
+            ImGui::EndTable();
+        }
+
+        // a new rule by name
+        ImGui::Spacing();
+        const std::string cur = CharacterNames::instance().shown(m_target.label, m_target.key, m_targets->identity_of(m_target.key));
+        const std::string copy_btn = "Copy of " + (cur.empty() ? std::string("player") : cur);
+        ImGui::SetNextItemWidth(std::min(ImGui::GetContentRegionAvail().x, dpi_px(280.0f)));
+        ImGui::InputTextWithHint("##copywho", "Name, identity or class (* = any)", m_copy_who, sizeof(m_copy_who));
+        tooltip("An identity (\"remembered as\"), an engine name (CI_NPC_Bard_Nenu_C_1), a class (BP_Cine_Player_C) or the shown\n"
+                "name, any case. * is a wildcard: CI_NPC_* names every actor whose name starts that way.");
+        std::string typed(m_copy_who);
+        while (!typed.empty() && (typed.back() == ' ' || typed.front() == ' '))
+        {
+            typed.erase(typed.back() == ' ' ? typed.size() - 1 : 0, 1);
+        }
+        ImGui::BeginDisabled(typed.empty());
+        ImGui::SameLine();
+        if (sk.button("Never a copy"))
+        {
+            set_mode = "never", set_who = typed, set_shown = typed;
+        }
+        ImGui::SameLine();
+        if (sk.button("Always a copy"))
+        {
+            set_mode = "copy", set_who = typed, set_shown = typed;
+        }
+        tooltip("A copy of whichever edited character it shares meshes with, without the other checks.");
+        ImGui::SameLine();
+        if (sk.button(copy_btn.c_str()))
+        {
+            set_mode = "copy", set_who = typed, set_of = copy_of_current(), set_shown = typed;
+        }
+        {
+            const std::string tip = "Always gets " + cur + "'s sliders (the character picked in the window), even when it uses meshes of its own.";
+            tooltip(tip.c_str());
+        }
+        ImGui::EndDisabled();
+
+        if (!set_who.empty())
+        {
+            m_targets->set_scene_copy_rules(bridge::with_copy_rule(rules, set_mode, set_who, set_of));
+            set_message(set_mode == "never" ? set_shown + " is never a scene copy now"
+                        : set_mode == "copy" ? set_shown + " is a scene copy now"
+                                             : "Forgot the scene-copy rule for " + set_shown);
+            if (set_who == typed)
+            {
+                m_copy_who[0] = '\0';
+            }
+        }
     }
 
     void PanelView::draw_rename_popup()
@@ -3259,6 +3518,7 @@ namespace uuepbs::ui
         ImGui::PopTextWrapPos();
 
         draw_edited_characters();
+        draw_scene_copies();
         draw_skin_picker();
 
         ImGui::Spacing();

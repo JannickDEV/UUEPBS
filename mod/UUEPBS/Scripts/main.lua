@@ -2098,6 +2098,28 @@ do
     end
     late.assemble = assemble
 
+    -- Scene-copy rules name characters by identity: the one behind an actor key ("player" for the default character).
+    late.key_identity = function(key)
+        if key == PLAYER_KEY then
+            return "player"
+        end
+        local e = planByKey[key]
+        return (e and alive(e.actor)) and identity_of(e.actor) or nil
+    end
+    -- The loaded actor behind an actor key the window sent (a character in the plan or the picker), or nil.
+    late.actor_of_key = function(key)
+        local e = planByKey[key]
+        if e and alive(e.actor) then
+            return e.actor
+        end
+        for _, c in ipairs(candidates) do
+            if (c.key == key or c.id == key) and alive(c.actor) then
+                return c.actor
+            end
+        end
+        return nil
+    end
+
     local function queue_key(key)
         if queued[key] or not planByKey[key] then
             return
@@ -2729,6 +2751,8 @@ local function build_state()
         -- the window's "Jiggle physics" choice and what it did (uuepbs_physics.lua)
         "physics_ui=" .. (late.physics and late.physics.mode() or ""),
         "physics_info=" .. clean(late.physics and late.physics.summary() or ""),
+        -- Status > Scene copies: "" = scene copies off; else the window's rule list counter last taken
+        "copies_seen=" .. (late.copies and tostring(late.copyRulesSeen) or ""),
     }, "\t"))
     add("scan\t" .. scanCount)
     -- engine names go last on each line (older DLLs ignore the extra field)
@@ -2761,6 +2785,9 @@ local function build_state()
     if late.hands then
         add(late.hands.report())
     end
+    if late.copies then
+        add(late.copies.report())
+    end
     for _, c in ipairs(pendingCommands) do
         add("cmd\t" .. c.id .. "\t" .. clean(c.verb) .. "\t" .. clean(c.arg))
     end
@@ -2788,7 +2815,7 @@ local function write_state()
     stateDirty = false
 end
 
-local seen = { rescan = 0, pick = 0, refresh = 0, relist = 0, groundui = 0, collui = 0, physicsui = 0, session = nil }
+local seen = { rescan = 0, pick = 0, refresh = 0, relist = 0, groundui = 0, collui = 0, physicsui = 0, copyrules = 0, session = nil }
 local hookState, hookText = "waiting", ""
 local windowOpen = false
 local lastDllText = nil
@@ -2817,11 +2844,13 @@ local function read_dll_state()
     local scaledNow = {} -- characters whose sliders scale bones ("scaled" lines)
     local cams = {} -- Character Scale > Camera, actor key -> fields (uuepbs_camera.lua)
     local heights = {} -- Character Scale > Height (!= 1), actor key -> text (uuepbs_collision.lua)
+    local copyRules, copyRulesNew, copyRulesN = {}, false, nil -- Status > Scene copies: the window's rule list, when it changed
     local dllSession = text:match("^UBS1 (%S+)")
     if dllSession ~= seen.session then
         -- New DLL session: take its counters as the baseline.
         seen.session = dllSession
         seen.rescan, seen.pick, seen.refresh, seen.relist, seen.groundui, seen.collui, seen.physicsui = -1, -1, -1, -1, -1, -1, -1
+        seen.copyrules = -1
     end
     local mine = false -- ack/replies are only ours once the DLL has seen this script's session
     local open = false
@@ -2882,6 +2911,19 @@ local function read_dll_state()
                 late.set_physics(b)
             end
             seen.physicsui = n
+        elseif kind == "copyrules" then
+            -- the window's scene-copy rules (Status > Scene copies, Choose character right-click): the whole list follows
+            local n = tonumber(a) or 0
+            if seen.copyrules >= 0 and n ~= seen.copyrules then
+                copyRulesNew = true
+            end
+            seen.copyrules = n
+            copyRulesN = n
+        elseif kind == "crule" then
+            local who, of = b:match("^([^\t]*)\t?(.*)$")
+            if a ~= "" and who and who ~= "" then
+                copyRules[#copyRules + 1] = { mode = a, who = who, of = of or "" }
+            end
         elseif kind == "relist" then
             local n = tonumber(a) or 0
             if seen.relist >= 0 and n ~= seen.relist then
@@ -2958,6 +3000,17 @@ local function read_dll_state()
         end
     end
     windowOpen = open
+    -- copies_seen echoes the counter once the list is applied: the window then shows the script's list again
+    if copyRulesNew and late.set_copy_rules then
+        ExecuteInGameThread(function()
+            late.set_copy_rules(copyRules) -- reads actor names: on the game thread
+            late.copyRulesSeen = copyRulesN
+            stateDirty = true
+        end)
+    elseif copyRulesN and copyRulesN ~= late.copyRulesSeen then
+        late.copyRulesSeen = copyRulesN
+        stateDirty = true
+    end
     if late.deformers_scaled then
         late.deformers_scaled(scaledNow)
     end
@@ -3255,6 +3308,118 @@ do
     end
 end
 
+-- Scene-copy rules (when the automatic guess is wrong): "never" / "copy" an actor, "copy <who> <of>" a named
+-- character. The window's and console's rules are kept in <presets>\_scene_copies.txt (one per line:
+-- never <tab> <who>  or  copy <tab> <who> [<tab> <of>]); config.lua (SceneCopyNever / SceneCopyAlways) and the
+-- game profile ("SceneCopies": { "Never": [...], "Always": {...} }) add theirs after them.
+late.copyRulesFile = presetFolder .. "\\_scene_copies.txt"
+late.copyUserRules = {} -- { mode, who, of }, the window's / console's
+late.copyRulesSeen = 0 -- the window's rule list counter last taken (sent back as copies_seen)
+
+-- A list or table of names from config.lua / the game profile as rules: { "Nenu", "CI_NPC_*" } or
+-- { ["BP_Cine_*"] = "player" } (copy of that character) / { ["Nenu"] = "" } (copy of whoever it shares meshes with).
+function late.rules_from(tbl, mode, source, out)
+    if type(tbl) ~= "table" then
+        return
+    end
+    for k, v in pairs(tbl) do
+        if type(k) == "number" and type(v) == "string" then
+            out[#out + 1] = { mode = mode, who = v, of = "", source = source }
+        elseif type(k) == "string" and k:sub(1, 1) ~= "_" then
+            out[#out + 1] = { mode = mode, who = k, of = (mode == "copy" and type(v) == "string") and v or "", source = source }
+        end
+    end
+end
+
+function late.apply_copy_rules()
+    if not late.copies then
+        return
+    end
+    local all = {}
+    for _, r in ipairs(late.copyUserRules) do
+        all[#all + 1] = { mode = r.mode, who = r.who, of = r.of, source = "window" }
+    end
+    late.rules_from(Config.SceneCopyNever, "never", "config", all)
+    late.rules_from(Config.SceneCopyAlways, "copy", "config", all)
+    local pr = type(Profile.SceneCopies) == "table" and Profile.SceneCopies or {}
+    late.rules_from(pr.Never, "never", "profile", all)
+    late.rules_from(pr.Always, "copy", "profile", all)
+    late.copies.set_rules(all)
+    stateDirty = true
+end
+
+function late.load_copy_rules()
+    late.copyUserRules = {}
+    local text = read_text(late.copyRulesFile) or ""
+    for line in (text .. "\n"):gmatch("([^\r\n]*)\r?\n") do
+        if line:match("%S") and not line:match("^%s*#") then
+            local mode, who, of = line:match("^%s*(%a+)\t([^\t]+)\t?([^\t]*)")
+            if not mode then
+                mode, who = line:match("^%s*(%a+)%s+(.-)%s*$") -- hand-written with spaces: "never Nenu"
+                of = ""
+            end
+            mode = mode and mode:lower()
+            if (mode == "never" or mode == "copy") and who and who:match("%S") then
+                late.copyUserRules[#late.copyUserRules + 1] = { mode = mode, who = who, of = of or "" }
+            end
+        end
+    end
+    if #late.copyUserRules > 0 then
+        say("scene copy rules: %d from _scene_copies.txt", #late.copyUserRules)
+    end
+    late.apply_copy_rules()
+end
+
+function late.save_copy_rules()
+    local lines = { "# UUEPBS scene-copy rules (Status > Scene copies in the window, or ubs copies never|copy|forget).",
+        "# never <tab> <who>  |  copy <tab> <who>  |  copy <tab> <who> <tab> <character>   (* is a wildcard)" }
+    for _, r in ipairs(late.copyUserRules) do
+        lines[#lines + 1] = r.mode .. "\t" .. r.who .. ((r.mode == "copy" and r.of ~= "") and ("\t" .. r.of) or "")
+    end
+    local f = io.open(late.copyRulesFile, "wb")
+    if f then
+        f:write(table.concat(lines, "\n"), "\n")
+        f:close()
+    end
+end
+
+-- "key:<actor key>" (the window's Choose character list) as the identity of that actor (else its engine name).
+function late.resolve_who(v)
+    v = tostring(v or "")
+    local key = v:match("^key:(.+)$")
+    if not key then
+        return v
+    end
+    if key == PLAYER_KEY then
+        return "player"
+    end
+    local a = late.actor_of_key and late.actor_of_key(key)
+    if not a then
+        return nil
+    end
+    return identity_of(a) or name_of(a)
+end
+
+-- The window's / console's rules replaced (each { mode, who, of }), saved and applied.
+function late.set_copy_rules(list)
+    local out, seen = {}, {}
+    for _, r in ipairs(list) do
+        local mode = string.lower(r.mode or "")
+        local who = late.resolve_who(r.who)
+        local of = mode == "copy" and (late.resolve_who(r.of or "") or "") or ""
+        if who and who ~= "" and (mode == "never" or mode == "copy") and not seen[who:lower()] then
+            seen[who:lower()] = true
+            out[#out + 1] = { mode = mode, who = who, of = of }
+        elseif who == nil then
+            say("scene copy rule skipped: %s is not loaded any more", tostring(r.who))
+        end
+    end
+    late.copyUserRules = out
+    late.save_copy_rules()
+    late.apply_copy_rules()
+    say("scene copy rules: %d set in the window / console", #out)
+end
+
 -- Scene copies (uuepbs_copies.lua): the edited character as cutscenes and menu previews show it
 -- (their own actors with the same mesh assets) gets the same sliders. Kept in `late` (local limit).
 if Config.SceneCopies ~= false then
@@ -3295,6 +3460,17 @@ if Config.SceneCopies ~= false then
                 end)
                 return ok and yes == true
             end,
+            -- rules name actors by these (Status > Scene copies, _scene_copies.txt)
+            identity = function(actor)
+                return identity_of(actor)
+            end,
+            class_name = class_name,
+            label_of = function(actor)
+                return late.display_name and late.display_name(actor) or name_of(actor)
+            end,
+            key_identity = function(key)
+                return late.key_identity and late.key_identity(key) or nil
+            end,
             morph_value = get_morph,
             morph_overridden = function(comp, name)
                 local a = address_num(comp)
@@ -3315,6 +3491,7 @@ if Config.SceneCopies ~= false then
                     engine = engine, ownerEngine = src.ownerEngine, full = full_name(comp), meshAddr = mesh_prop(comp), copy = true }
             end,
         })
+        late.load_copy_rules()
     else
         say("scene copies off: %s", tostring(mod))
     end
@@ -3477,6 +3654,9 @@ local function tick()
         end
         if late.copies and late.copies.tick(t) then
             late.assemble() -- a cutscene / menu copy of an edited character came or went
+        end
+        if late.copies and late.copies.report_dirty() then
+            stateDirty = true -- the window lists the copies and the actors turned down
         end
         if rigsChanged then
             rigsChanged = false
@@ -3661,7 +3841,7 @@ local function rest_of(params, first)
     return table.concat(parts, " ")
 end
 
-local usage = "uuepbs (or ubs) ui | status | rescan | copies | camera | collision [on|off] | hands | list | load <name> | next | prev | save <name> | on | off | compare [on|off] | reset [all] | diag | skin [name] | morph <name> [weight] | ground [on|off|<extra cm>] | physics [follow|off|keep]"
+local usage = "uuepbs (or ubs) ui | status | rescan | copies [never|copy|forget <who>] | camera | collision [on|off] | hands | list | load <name> | next | prev | save <name> | on | off | compare [on|off] | reset [all] | diag | skin [name] | morph <name> [weight] | ground [on|off|<extra cm>] | physics [follow|off|keep]"
 
 local function console(_, params, out)
     local verb = string.lower(params[1] or "")
@@ -3692,6 +3872,31 @@ local function console(_, params, out)
             reply(late.physics.status())
         end
         send_command("status", "", true)
+    elseif verb == "copies" and late.copies and ({ never = 1, copy = 1, always = 1, forget = 1 })[string.lower(params[2] or "")] then
+        -- ubs copies never <who> | copy <who> [of <character>] | forget <who>
+        local sub = string.lower(params[2])
+        local rest = {}
+        for i = 3, #params do
+            rest[#rest + 1] = params[i]
+        end
+        local text = table.concat(rest, " ")
+        local who, of = text:match("^(.-)%s+of%s+(.+)$")
+        who = who or text
+        if who == "" then
+            reply("usage: ubs copies never <who> | copy <who> [of <character>] | forget <who>   (* is a wildcard)")
+        else
+            local list = {}
+            for _, r in ipairs(late.copyUserRules) do
+                if r.who:lower() ~= who:lower() then
+                    list[#list + 1] = r
+                end
+            end
+            if sub ~= "forget" then
+                table.insert(list, 1, { mode = sub == "never" and "never" or "copy", who = who, of = of or "" })
+            end
+            late.set_copy_rules(list)
+            reply(late.copies.status())
+        end
     elseif verb == "copies" then
         if late.copies then
             late.copies.search_now()

@@ -70,6 +70,27 @@ struct FakeTargets : ui::TargetSource
     std::string physics_mode() override { return physics; }
     void set_physics_mode(const std::string& m) override { physics = m; }
     std::string physics_info() override { return "Roku (player): 1 Kawaii, 1 Rigid Body scaled"; }
+    // Status > Scene copies
+    std::vector<bridge::CopyRule> copy_rules{{"never", "Nenu", "", "window"}, {"copy", "BP_Seq_*", "player", "config"}};
+    bool scene_copies(std::vector<bridge::CopyActor>& now, std::vector<bridge::CopyActor>& down, std::vector<bridge::CopyRule>& rules) override
+    {
+        now = {{"BP_PlayerCapture_C", "Inventory preview", "player", "Roku (player)", "", 3, false}};
+        down = {{"Vendor", "Vendor", "", "Roku (player)", "its body differs (Morph_BreastEnl 0.20 there, 0.60 on the character)", 0, false}};
+        rules = copy_rules;
+        return true;
+    }
+    void set_scene_copy_rules(const std::vector<bridge::CopyRule>& r) override
+    {
+        std::vector<bridge::CopyRule> all = r;
+        for (const auto& x : copy_rules)
+        {
+            if (x.source != "window")
+            {
+                all.push_back(x);
+            }
+        }
+        copy_rules = all;
+    }
 };
 
 // A stand-in preset thumbnail: a simple figure on a dark backdrop, written as an (uncompressed) PNG.

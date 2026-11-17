@@ -415,6 +415,52 @@ namespace
             }
         }
 
+        bool scene_copies(std::vector<uuepbs::bridge::CopyActor>& now, std::vector<uuepbs::bridge::CopyActor>& turned_down,
+                          std::vector<uuepbs::bridge::CopyRule>& rules) override
+        {
+            std::lock_guard guard(m_lock);
+            if (m_state.setting("copies_seen").empty())
+            {
+                return false; // scene copies off, or a script without them
+            }
+            now = m_state.copies;
+            turned_down = m_state.turned_down;
+            rules.clear();
+            if (m_copy_wish)
+            {
+                // changed in the window, not yet taken by the script: show the window's list with the others' rules
+                rules = m_out.copy_rule_list;
+                for (const auto& r : m_state.copy_rules)
+                {
+                    if (r.source != "window")
+                    {
+                        rules.push_back(r);
+                    }
+                }
+            }
+            else
+            {
+                rules = m_state.copy_rules;
+            }
+            return true;
+        }
+
+        void set_scene_copy_rules(const std::vector<uuepbs::bridge::CopyRule>& rules) override
+        {
+            std::lock_guard guard(m_lock);
+            ++m_out.copy_rules;
+            m_out.copy_rule_list.clear();
+            for (const auto& r : rules)
+            {
+                if (r.source == "window")
+                {
+                    m_out.copy_rule_list.push_back(r);
+                }
+            }
+            m_copy_wish = true;
+            m_out_dirty = true;
+        }
+
         int collision_follow() override
         {
             std::lock_guard guard(m_lock);
@@ -980,6 +1026,10 @@ namespace
                 if (!m_physics_wish.empty() && m_state.setting("physics_ui") == m_physics_wish)
                 {
                     m_physics_wish.clear(); // the script took the window's Jiggle physics choice
+                }
+                if (m_copy_wish && m_state.setting("copies_seen") == std::to_string(m_out.copy_rules))
+                {
+                    m_copy_wish = false; // the script took the window's scene-copy rules
                 }
             }
             for (const auto& c : todo)
@@ -1815,6 +1865,7 @@ namespace
         fs::path m_hand_file;
         int m_collision_wish{-1}; // collision switch clicked in the window and not yet confirmed by the script (m_lock)
         std::string m_physics_wish; // Jiggle physics choice not yet confirmed by the script (m_lock)
+        bool m_copy_wish{}; // scene-copy rules changed in the window and not yet taken by the script (m_lock)
         int m_ground_wish{-1}; // Auto Ground switch clicked in the window and not yet confirmed by the script (m_lock)
         bool m_out_dirty{true};
         Clock::time_point m_last_publish{};

@@ -103,6 +103,18 @@ return {
     -- "outfit" (the rule above) or "mesh": one shared mesh is enough, for games whose cutscene / menu
     -- copies only reuse the body. Careful: NPCs that share the body mesh with the character then match too.
     SceneCopyMatch = "outfit",
+    -- When the guess is wrong, name the actors yourself. Names are an identity (what the window shows under
+    -- "remembered as", e.g. "Nenu"), an engine name ("CI_NPC_Bard_Nenu_C_1"), a class ("BP_Cine_Player_C") or
+    -- the shown name, any case, with * as a wildcard ("CI_NPC_*").
+    --   SceneCopyNever: never a copy, e.g. { "Nenu", "CI_NPC_*" }
+    --   SceneCopyAlways: always a copy. { "BP_Cine_*" } = a copy of whichever edited character it shares meshes
+    --     with; { ["BP_Seq_Eve_*"] = "player" } = a copy of that character ("player" = the one you play, else
+    --     its name), even when the actor uses meshes of its own (all of its meshes get those sliders).
+    -- The window (Status > Scene copies, right-click in Choose character) and "ubs copies never|copy|forget"
+    -- keep their rules in <presets folder>\_scene_copies.txt; those win over these, and these over the game
+    -- profile's "SceneCopies": { "Never": [...], "Always": {...} }.
+    SceneCopyNever = {},
+    SceneCopyAlways = {},
 
     -- Character Scale > Height: how far the slider goes (1 = the game's size). Values in presets and
     -- saved sessions are kept within this range too, so raise it before loading a taller preset.

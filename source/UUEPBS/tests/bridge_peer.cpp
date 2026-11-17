@@ -22,6 +22,8 @@ int main(int argc, char** argv)
     std::printf("presets %s\nkey %s\ngame %s\nengine %s\n", st->setting("presets").c_str(), st->setting("key").c_str(), st->setting("game").c_str(), st->setting("engine").c_str());
     std::printf("ground %s ui %s\n", st->setting("ground").c_str(), st->setting("ground_ui").c_str());
     std::printf("physics %s [%s]\n", st->setting("physics_ui").c_str(), st->setting("physics_info").c_str());
+    std::printf("copies_seen [%s]\n", st->setting("copies_seen").c_str());
+    for (auto& r : st->copy_rules) std::printf("srule %s %s of=%s from=%s\n", r.mode.c_str(), r.who.c_str(), r.of.c_str(), r.source.c_str());
     std::printf("target %s %s key=%s\n", st->target.id.c_str(), st->target.label.c_str(), st->target.key.c_str());
     std::printf("candidates %zu\n", st->candidates.size());
     for (auto& c : st->candidates) std::printf("cand %s key=%s\n", c.label.c_str(), c.key.c_str());
@@ -72,6 +74,21 @@ int main(int argc, char** argv)
         const std::string g = p;
         out.physics = std::stoull(g.substr(0, g.find(':')));
         out.physics_mode = g.substr(g.find(':') + 1);
+    }
+    if (const char* p = std::getenv("UUEPBS_PEER_COPYRULES")) // the window's scene-copy rules "<clicks>:mode|who|of;mode|who|of"
+    {
+        const std::string g = p;
+        out.copy_rules = std::stoull(g.substr(0, g.find(':')));
+        std::string rest = g.substr(g.find(':') + 1);
+        while (!rest.empty())
+        {
+            const std::string one = rest.substr(0, rest.find(';'));
+            rest = rest.find(';') == std::string::npos ? std::string() : rest.substr(rest.find(';') + 1);
+            const size_t a = one.find('|'), b = one.find('|', a + 1);
+            if (a != std::string::npos)
+                out.copy_rule_list.push_back({one.substr(0, a), one.substr(a + 1, b == std::string::npos ? std::string::npos : b - a - 1),
+                                              b == std::string::npos ? std::string() : one.substr(b + 1), "window"});
+        }
     }
     out.hook_state = "live"; out.hook_text = "pose hook live on vtable 0x77ED320 slot 374";
     if (argc > 8 && std::string(argv[8]) != "-")
