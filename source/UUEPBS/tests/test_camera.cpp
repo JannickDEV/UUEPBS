@@ -120,6 +120,27 @@ static void test_collision_lines()
     CHECK(idle.find("height\t") == std::string::npos && idle.find("collui\t0\t0\n") != std::string::npos);
 }
 
+// Height done by the engine: "escale" lines from Lua, "escaled" acknowledgements back.
+static void test_engine_scale_lines()
+{
+    const std::string in = "UBS1 s 4\nsetup\tversion=3\nescale\t7FF6AB10\t1.5000\nescale\t2A\t0.8\nescale\t0\t2\nescale\t2B\tx\n"
+                           "escale\t2C\t-1\n#end 4\n";
+    const auto st = bridge::parse_lua_state(in);
+    CHECK(st.has_value());
+    if (st)
+    {
+        CHECK(st->engine_scales.size() == 2);
+        CHECK(st->engine_scales.count(0x7FF6AB10) && std::fabs(st->engine_scales.at(0x7FF6AB10) - 1.5) < 1e-12);
+        CHECK(st->engine_scales.count(0x2A) && std::fabs(st->engine_scales.at(0x2A) - 0.8) < 1e-12);
+    }
+    bridge::DllState d;
+    d.engine_scales = {{0x7FF6AB10, 1.5}};
+    const std::string out = bridge::format_dll_state(d);
+    CHECK(out.find("escaled\t7FF6AB10\t1.5000\n") != std::string::npos);
+    CHECK(out.ends_with("#end\n"));
+    CHECK(bridge::format_dll_state(bridge::DllState{}).find("escaled") == std::string::npos);
+}
+
 static void test_presets()
 {
     EditBook book;
@@ -144,6 +165,7 @@ int main()
     test_no_bones();
     test_bridge();
     test_collision_lines();
+    test_engine_scale_lines();
     test_presets();
     if (g_fail == 0)
     {

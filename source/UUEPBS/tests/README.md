@@ -67,6 +67,9 @@ Host-side tests (Linux/macOS/WSL with g++ 13+ or clang 17+). None of them need W
     # the camera moved in the game (Scripts/uuepbs_camera.lua) against a mocked engine: the active camera's spring arm,
     # Follow height, lift and distance, the game zooming vs easing back, restoring, camera / eye height fallbacks
     lua camera_test.lua ../../../mod/UUEPBS/Scripts
+    # Height done by the engine (Scripts/uuepbs_scale.lua): meshes scaled only after the DLL took the factor off
+    # the bones ("escale" / "escaled" lines), meshes on a mesh not scaled twice, the game's scale written back
+    lua scale_test.lua ../../../mod/UUEPBS/Scripts
     # scene copies (Scripts/uuepbs_copies.lua): an NPC wearing the character's eyes / hair with a body of its
     # own is not a copy, a match must be confirmed by GetSkinnedAsset (Afterparty laptops and bicycles)
     lua copies_test.lua ../../../mod/UUEPBS/Scripts

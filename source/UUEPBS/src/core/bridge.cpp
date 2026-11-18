@@ -4,6 +4,7 @@
 #include "sculpt.hpp"
 
 #include <cctype>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -258,6 +259,19 @@ namespace uuepbs::bridge
                 state.copy_rules.push_back({std::string(f[1]), std::string(f[2]), f.size() >= 4 ? std::string(f[3]) : std::string(),
                                             f.size() >= 5 && !f[4].empty() ? std::string(f[4]) : std::string("window")});
             }
+            else if (kind == "escale" && f.size() >= 3)
+            {
+                // Height done by the engine: the factor Lua is about to put on (or has put on) this mesh's
+                // RelativeScale3D, or inherits from a mesh it hangs on.
+                const uintptr_t address = static_cast<uintptr_t>(to_uint(f[1], 16));
+                const std::string number(f[2]);
+                char* end = nullptr;
+                const double v = std::strtod(number.c_str(), &end);
+                if (address != 0 && end != number.c_str() && std::isfinite(v) && v > 0.0)
+                {
+                    state.engine_scales[address] = v;
+                }
+            }
             else if (kind == "cmd" && f.size() >= 3)
             {
                 Command c;
@@ -377,6 +391,12 @@ namespace uuepbs::bridge
             char buf[32];
             std::snprintf(buf, sizeof(buf), "%.4f", height);
             out += "height\t" + clean_field(key) + "\t" + buf + "\n";
+        }
+        for (const auto& [address, factor] : s.engine_scales)
+        {
+            char buf[64];
+            std::snprintf(buf, sizeof(buf), "escaled\t%llX\t%.4f\n", static_cast<unsigned long long>(address), factor);
+            out += buf;
         }
         out += "morph\t" + std::to_string(s.morph_revision) + "\n";
         for (const DllState::Morph& m : s.morphs)

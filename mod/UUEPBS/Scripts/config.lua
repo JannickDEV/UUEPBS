@@ -131,6 +131,13 @@ return {
     HeightMin = 0.5,
     HeightMax = 2.0,
 
+    -- Height done by the engine: a character's meshes get their scale (RelativeScale3D) times Height, and the
+    -- DLL only does what is left on the bones. The game's animation then sees a body of the right size, so a
+    -- head that looks at the camera or at someone keeps looking at it instead of tilting up (down when smaller)
+    -- once the capsule or camera moved with Height. The engine follows about half a second after the Height
+    -- slider stops moving. "ubs scale" shows what was scaled. false = all of Height on the bones (as before 3.x).
+    HeightByEngine = true,
+
     -- Character Scale > Camera: moves the third-person camera of the character you play (its spring arm /
     -- camera boom, else its camera component, else its eye height) by the Camera sliders, e.g. up with
     -- Height. "ubs camera" shows what was found. false = the game's camera is never touched.

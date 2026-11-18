@@ -3,6 +3,7 @@
 #include "proportions.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 
 namespace uuepbs
@@ -433,8 +434,15 @@ namespace uuepbs
         rig->sculptor.set_ground_primary(rig->primary); // (before the bind: other meshes plan a little differently)
         const bool proportions = has_proportions(book);
         const uint64_t body_rev = proportions ? BodyMapSource::instance().revision() : 0;
-        if (rig->sculptor.bound_revision() != wanted || rig->bound_body != body_rev)
+        // Height done by the engine: the mesh is already this much bigger, the bones do the rest.
+        double engine = 1.0;
+        if (const auto e = m_engine_scales.find(self); e != m_engine_scales.end() && std::isfinite(e->second) && e->second > 0.0)
         {
+            engine = e->second;
+        }
+        if (rig->sculptor.bound_revision() != wanted || rig->bound_body != body_rev || rig->bound_engine != engine)
+        {
+            rig->bound_engine = engine;
             if (proportions)
             {
                 // Character Scale: fold the proportion sliders into this rig's bone edits.
@@ -469,11 +477,11 @@ namespace uuepbs
                 }
                 double world = 1.0;
                 const EditBook folded = apply_proportions(book, rig->body, world);
-                rig->sculptor.bind(folded, wanted, world);
+                rig->sculptor.bind(folded, wanted, world / engine);
             }
             else
             {
-                rig->sculptor.bind(book, wanted);
+                rig->sculptor.bind(book, wanted, 1.0 / engine);
             }
             rig->bound_body = body_rev;
         }
@@ -610,6 +618,30 @@ namespace uuepbs
                 }
             }
         }
+    }
+
+    void Registry::set_engine_scales(std::map<uintptr_t, double> scales)
+    {
+        for (auto it = scales.begin(); it != scales.end();)
+        {
+            // 1 is the same as no entry; nonsense is ignored (all of Height stays on the bones)
+            if (!std::isfinite(it->second) || it->second <= 0.0 || std::fabs(it->second - 1.0) < 1.0e-4)
+            {
+                it = scales.erase(it);
+            }
+            else
+            {
+                ++it;
+            }
+        }
+        std::lock_guard guard(m_lock);
+        m_engine_scales = std::move(scales);
+    }
+
+    std::map<uintptr_t, double> Registry::engine_scales() const
+    {
+        std::lock_guard guard(m_lock);
+        return m_engine_scales;
     }
 
     void Registry::set_ground(const GroundOptions& options)
@@ -941,7 +973,11 @@ namespace uuepbs
         std::lock_guard guard(m_lock);
         for (const auto& [key, a] : m_actors)
         {
-            const double h = scale_value(a.book, "height");
+            double h = scale_value(a.book, "height");
+            if (const ScaleSlider* s = find_scale_slider("height"))
+            {
+                h = std::clamp(h, scale_lo(*s), scale_hi(*s)); // what the pose hook applies (Lua scales meshes by this)
+            }
             if (std::fabs(h - 1.0) >= kScaleNeutralEps)
             {
                 out.emplace_back(key, h);

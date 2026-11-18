@@ -2892,6 +2892,9 @@ local function build_state()
     if late.copies then
         add(late.copies.report())
     end
+    if late.scale then
+        add(late.scale.report())
+    end
     for _, c in ipairs(pendingCommands) do
         add("cmd\t" .. c.id .. "\t" .. clean(c.verb) .. "\t" .. clean(c.arg))
     end
@@ -2948,6 +2951,7 @@ local function read_dll_state()
     local scaledNow = {} -- characters whose sliders scale bones ("scaled" lines)
     local cams = {} -- Character Scale > Camera, actor key -> fields (uuepbs_camera.lua)
     local heights = {} -- Character Scale > Height (!= 1), actor key -> text (uuepbs_collision.lua)
+    local escaled = {} -- Height done by the engine: mesh address -> factor the DLL takes off the bones (uuepbs_scale.lua)
     local copyRules, copyRulesNew, copyRulesN = {}, false, nil -- Status > Scene copies: the window's rule list, when it changed
     local dllSession = text:match("^UBS1 (%S+)")
     if dllSession ~= seen.session then
@@ -3086,6 +3090,10 @@ local function read_dll_state()
             if a ~= "" then
                 heights[a] = b
             end
+        elseif kind == "escaled" then
+            if a ~= "" then
+                escaled[a] = b
+            end
         elseif kind == "keep" then
             if a ~= "" and not keep[a] then
                 keep[a] = b
@@ -3132,6 +3140,9 @@ local function read_dll_state()
     end
     if late.collision then
         late.collision.want(heights)
+    end
+    if late.scale then
+        late.scale.want(heights, escaled)
     end
     if sawMorphs then
         morphWanted = wanted
@@ -3732,6 +3743,22 @@ if Config.CollisionFollow ~= "never" then
     end
 end
 
+-- Height done by the engine (uuepbs_scale.lua): the meshes get RelativeScale3D times Height so the game's
+-- animation (head look-at, aim) sees a body of the right size; the DLL takes that factor off the bones.
+if Config.HeightByEngine ~= false then
+    local okS, mod = pcall(require, "uuepbs_scale")
+    if okS and type(mod) == "table" then
+        late.scale = mod
+        mod.setup({
+            chatter = chatter,
+            alive = alive,
+            address_num = address_num,
+        })
+    else
+        say("engine scale off: %s", tostring(mod))
+    end
+end
+
 local function tick()
     local ok, err = pcall(function()
         if pendingProfileText then
@@ -3804,6 +3831,9 @@ local function tick()
         late.apply_deformers()
         late.apply_physics()
         late.ground.tick(rigs)
+        if late.scale and late.scale.tick(rigs, now_ms()) then
+            stateDirty = true -- the DLL must hear which factor to take off the bones before a mesh is scaled
+        end
         if late.hands then
             local okH, changed = pcall(late.hands.poll, rigs)
             if okH and changed then
@@ -3971,7 +4001,7 @@ local function rest_of(params, first)
     return table.concat(parts, " ")
 end
 
-local usage = "uuepbs (or ubs) ui | status | rescan | copies [never|copy|forget <who>] | camera | collision [on|off] | hands | list | load <name> | next | prev | save <name> | on | off | compare [on|off] | reset [all] | diag | skin [name] | morph <name> [weight] | ground [on|off|<extra cm>] | physics [follow|off|keep|weight <percent>]"
+local usage = "uuepbs (or ubs) ui | status | rescan | copies [never|copy|forget <who>] | camera | collision [on|off] | scale | hands | list | load <name> | next | prev | save <name> | on | off | compare [on|off] | reset [all] | diag | skin [name] | morph <name> [weight] | ground [on|off|<extra cm>] | physics [follow|off|keep|weight <percent>]"
 
 local function console(_, params, out)
     local verb = string.lower(params[1] or "")
@@ -4058,6 +4088,8 @@ local function console(_, params, out)
         end
     elseif verb == "camera" then
         reply(late.camera and late.camera.status() or "camera control is off (CameraControl in config.lua)")
+    elseif verb == "scale" then
+        reply(late.scale and late.scale.summary() or "engine scale is off (HeightByEngine = false in config.lua): Height is done on the bones")
     elseif verb == "collision" then
         -- ubs collision [on | off]
         local arg = string.lower(params[2] or "")
