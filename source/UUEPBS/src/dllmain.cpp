@@ -1166,6 +1166,9 @@ namespace
             }
             sync_rigs(state);
             sync_morph_names(state);
+            // Height done by the engine (uuepbs_scale.lua): what Lua scaled each mesh by is taken off the bones,
+            // and published back ("escaled") so Lua knows when it may change RelativeScale3D.
+            reg.set_engine_scales(state.engine_scales);
 
             std::vector<uuepbs::bridge::Command> todo;
             {
@@ -1754,6 +1757,7 @@ namespace
             auto cameras = send_morphs ? reg.camera_wishes() : decltype(reg.camera_wishes()){};
             // Height for the collision capsule: none while off or comparing (Lua puts the game's capsule back).
             auto heights = send_morphs ? reg.height_wishes() : decltype(reg.height_wishes()){};
+            auto engine_scales = reg.engine_scales();
             {
                 std::lock_guard guard(m_lock);
                 if (morph_rev != m_out.morph_revision)
@@ -1790,6 +1794,11 @@ namespace
                 if (heights != m_out.heights)
                 {
                     m_out.heights = std::move(heights);
+                    m_out_dirty = true;
+                }
+                if (engine_scales != m_out.engine_scales)
+                {
+                    m_out.engine_scales = std::move(engine_scales);
                     m_out_dirty = true;
                 }
                 if (!m_out_dirty && Clock::now() - m_last_publish < std::chrono::seconds(5))

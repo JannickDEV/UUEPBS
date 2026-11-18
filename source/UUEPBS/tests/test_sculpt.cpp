@@ -545,6 +545,69 @@ int main()
         reg.untrack_all();
     }
 
+    // Height done by the engine (uuepbs_scale.lua): the factor Lua put on the mesh's RelativeScale3D comes off the bones.
+    {
+        alignas(16) static unsigned char comp[0x1000] = {};
+        const auto original = fk(s, s.local);
+        std::vector<Xform> bufs[2] = {original, original};
+        auto put = [&](size_t off, auto v) {
+            std::memcpy(comp + off, &v, sizeof(v));
+        };
+        put(0x0, (uintptr_t)0x1234);
+        put(0xC, (int32_t)79);
+        put(0x10, (uintptr_t)0x5555);
+        RawArray a0{bufs[0].data(), (int32_t)bufs[0].size(), (int32_t)bufs[0].size()};
+        RawArray a1{bufs[1].data(), (int32_t)bufs[1].size(), (int32_t)bufs[1].size()};
+        put(0x600, a0);
+        put(0x610, a1);
+        put(0x648, (int32_t)1);
+        Registry& reg = Registry::instance();
+        reg.set_layout(PoseLayout{0x600, 0x648, 16, 96});
+        reg.set_active_actor(kPlayerActor, "Roku", "auto");
+        std::string msg;
+        CHECK(reg.track((uintptr_t)comp, "CharacterMesh0", "BP_Test_C_0", s.names, s.parents, true, msg, kPlayerActor));
+        EditBook bk;
+        set_scale_value(bk, "height", 1.5);
+        reg.replace_edits(bk);
+        auto scaled_by = [&](double f) {
+            double w = 0.0;
+            for (size_t i = 0; i < original.size(); ++i)
+            {
+                for (int a = 0; a < 3; ++a)
+                {
+                    w = std::max(w, std::fabs(bufs[1][i].pos[a] - original[i].pos[a] * f));
+                    w = std::max(w, std::fabs(bufs[1][i].scl[a] - original[i].scl[a] * f));
+                }
+                for (int a = 0; a < 4; ++a)
+                {
+                    w = std::max(w, std::fabs(bufs[1][i].rot[a] - original[i].rot[a])); // Height never turns a bone
+                }
+            }
+            return w;
+        };
+        reg.on_pose_finalized(comp);
+        CHECK(scaled_by(1.5) < 1e-6); // all of Height on the bones
+        reg.set_engine_scales({{(uintptr_t)comp, 1.5}});
+        reg.on_pose_finalized(comp);
+        CHECK(scaled_by(1.0) < 1e-9); // all of it done by the engine: the game's pose untouched
+        reg.set_engine_scales({{(uintptr_t)comp, 1.2}});
+        reg.on_pose_finalized(comp);
+        CHECK(scaled_by(1.25) < 1e-6); // the rest on the bones
+        CHECK(reg.engine_scales().size() == 1 && std::fabs(reg.engine_scales().at((uintptr_t)comp) - 1.2) < 1e-12);
+        reg.set_enabled(false); // showing the original: the bones take the engine's factor back off
+        reg.on_pose_finalized(comp);
+        CHECK(scaled_by(1.0 / 1.2) < 1e-6);
+        reg.set_enabled(true);
+        reg.set_engine_scales({{(uintptr_t)comp, 1.0}, {(uintptr_t)0x42, -3.0}}); // 1 and nonsense are dropped
+        CHECK(reg.engine_scales().empty());
+        reg.on_pose_finalized(comp);
+        CHECK(scaled_by(1.5) < 1e-6);
+        reg.replace_edits({});
+        reg.on_pose_finalized(comp);
+        CHECK(scaled_by(1.0) < 1e-9);
+        reg.untrack_all();
+    }
+
     // UE4 layout: 48-byte float transforms. Edits must not compound through float round trips.
     {
         alignas(16) static unsigned char comp[0x1000] = {};

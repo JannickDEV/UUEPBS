@@ -23,6 +23,9 @@
 //     manim <tab> <name> <tab> <name> ...              (optional: morphs something else keeps setting)
 //     looks <tab> <actor key> <tab> <text>             (optional: what the Looks tab changed on that character)
 //     play <tab> <actor key> <tab> <animation name>    (optional: the montage, else the single animation, it plays)
+//     escale <tab> <rig address hex> <tab> <factor>   (Height done by the engine, uuepbs_scale.lua: the mesh's
+//                                                       RelativeScale3D is, or is about to be, the game's times this
+//                                                       factor, its own or inherited; the DLL takes it off the bones)
 //     cmd <tab> <id> <tab> <verb> <tab> <argument>
 //     scopy <tab> <who> <tab> <shown name> <tab> <copy of: actor key> <tab> <copy of: name> <tab> <meshes> <tab> <1 = by a rule>
 //     snot <tab> <who> <tab> <shown name> <tab> <of: name> <tab> <why>     (lately turned down as a copy)
@@ -50,6 +53,8 @@
 //                                                       (Character Scale > Camera; none = the game's own camera)
 //     collui <tab> <counter> <tab> <on 0/1>             (the window's "Collision follows Height" switch was clicked)
 //     height <tab> <actor key> <tab> <height>           (Character Scale > Height, != 1; Lua sizes its collision capsule)
+//     escaled <tab> <rig address hex> <tab> <factor>  (the escale factors the DLL now takes off the bones; Lua
+//                                                       changes RelativeScale3D only once its factor is listed here)
 //     copyrules <tab> <counter>                         (the window's scene-copy rules, bumped on each change; then
 //     crule <tab> <never|copy> <tab> <who> <tab> <of>    the whole list: who / of may be "key:<actor key>")
 //
@@ -157,6 +162,7 @@ namespace uuepbs::bridge
         std::vector<CopyActor> copies;               // scene copies right now (one per actor)
         std::vector<CopyActor> turned_down;          // actors lately turned down as copies
         std::vector<CopyRule> copy_rules;            // every scene-copy rule, most important first
+        std::map<uintptr_t, double> engine_scales;   // "escale": rig address -> engine scale factor Lua puts on it
 
         std::string setting(const std::string& key, const std::string& fallback = {}) const
         {
@@ -211,6 +217,7 @@ namespace uuepbs::bridge
         std::vector<std::string> scaled;                        // characters whose sliders scale bones right now
         std::vector<std::pair<std::string, CameraWish>> cameras; // Character Scale > Camera, per actor key
         std::vector<std::pair<std::string, double>> heights;    // Character Scale > Height (!= 1), per actor key
+        std::map<uintptr_t, double> engine_scales;              // "escaled": engine scale factors taken off the bones
     };
 
     std::string format_dll_state(const DllState& state);

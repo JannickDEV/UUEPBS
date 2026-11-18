@@ -181,6 +181,13 @@ namespace uuepbs
         void replace_edits(EditBook book);
         void clear_edits();
 
+        // Height done by the engine (uuepbs_scale.lua): component address -> how much bigger Lua made (or is about to
+        // make) that mesh through its RelativeScale3D. The pose hook takes that factor off its own Height scale, so
+        // the mesh ends up as tall as Height says, and the game's animation graph sees a body of the right size
+        // (head look-at, aim, sockets other characters read). Missing = 1 (all of Height done on the bones).
+        void set_engine_scales(std::map<uintptr_t, double> scales);
+        std::map<uintptr_t, double> engine_scales() const;
+
         // Auto Ground (see GroundOptions in sculpt.hpp), for every tracked mesh.
         void set_ground(const GroundOptions& options);
         GroundOptions ground() const;
@@ -290,6 +297,7 @@ namespace uuepbs
             BodyMap body;
             uint64_t body_revision{0};  // BodyMapSource revision `body` was resolved from (0 = never)
             uint64_t bound_body{0};     // BodyMapSource revision the sculptor was last bound with
+            double bound_engine{1.0};   // engine scale factor the sculptor was last bound with
             std::vector<Xform> scratch; // float poses are converted here
             std::vector<int32_t> inputs; // bones converted for the current frame
             std::string probe_name;      // Auto Ground: actor hip bone name looked up last, and its index here
@@ -325,6 +333,7 @@ namespace uuepbs
         std::atomic<bool> m_enabled{true};
         CompareSwitch m_compare;
         GroundOptions m_ground{}; // guarded by m_lock
+        std::map<uintptr_t, double> m_engine_scales; // guarded by m_lock
         HandOptions m_hands{};    // guarded by m_lock
         std::vector<std::string> m_hand_anims;          // folded name parts, guarded by m_lock
         std::optional<anim_picks::Choice> m_hand_choice; // window's picks, guarded by m_lock
