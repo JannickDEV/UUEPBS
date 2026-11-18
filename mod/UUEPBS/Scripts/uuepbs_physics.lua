@@ -101,6 +101,12 @@ for _, p in ipairs({ { "ConeLimit" }, { "TwistLimit" }, { "LinearLimit" }, { "An
     end
 end
 
+-- Node kinds that read their settings on every frame (Kawaii Physics, Spring Bone): a changed value takes effect
+-- at once, so their blueprint is never restarted for them. Restarting re-initializes the whole animation
+-- blueprint, the most fragile thing this module does, and some games (Afterparty) build a new animation
+-- instance when that happens.
+local LIVE_KINDS = { kawaii = true, spring = true }
+
 local MAX_WEIGHT = 3.0   -- 300%
 local HEAVY_MIN, HEAVY_MAX = 0.04, 50 -- the weight factor stays in here, so huge or tiny sliders keep the simulation stable
 
@@ -401,8 +407,9 @@ local function bone_of(v)
     return str(b)
 end
 
--- Every value this module changes is remembered as { obj, path, kind ("num"/"vec"), original }.
-local function remember(list, obj, path, kind)
+-- Every value this module changes is remembered as { obj, path, kind ("num"/"vec"), original, owner }.
+-- owner = the address of the animation instance holding a node value (nil for Physics Asset values).
+local function remember(list, obj, path, kind, owner)
     local v = get(obj, path)
     if kind == "vec" then
         v = vec(v)
@@ -410,7 +417,7 @@ local function remember(list, obj, path, kind)
         v = nil
     end
     if v ~= nil then
-        list[#list + 1] = { obj = obj, path = path, kind = kind, value = v }
+        list[#list + 1] = { obj = obj, path = path, kind = kind, value = v, owner = owner }
         return list[#list]
     end
     return nil
@@ -424,10 +431,15 @@ local function write(entry, factor)
     return set(entry.obj, entry.path, entry.value * factor)
 end
 
-local function put_back(list)
+-- Puts remembered values back. `current` (a set of animation instance addresses, optional) skips node values
+-- whose instance is no longer the mesh's: the game replaced it (a new instance starts from its own defaults) and
+-- the old one may already be freed, so writing into it would corrupt memory and crash the game.
+local function put_back(list, current)
     for i = #list, 1, -1 do
         local e = list[i]
-        if e.kind == "vec" then
+        if current and e.owner and not current[e.owner] then
+            -- gone with its instance
+        elseif e.kind == "vec" then
             set_vec(e.obj, e.path, e.value)
         else
             set(e.obj, e.path, e.value)
@@ -444,19 +456,20 @@ local function node_targets(n)
         return out
     end
     local own = bone_of(get(node, { spec.bone }))
+    local owner = address(n.inst)
     for _, f in ipairs(spec.fields) do
-        out[#out + 1] = { obj = node, path = f[1], how = f[2], bone = own }
+        out[#out + 1] = { obj = node, path = f[1], how = f[2], bone = own, owner = owner }
     end
     if weight > 0 then
         for _, f in ipairs(spec.weight or {}) do
-            out[#out + 1] = { obj = node, path = f[1], how = f[2], bone = own }
+            out[#out + 1] = { obj = node, path = f[1], how = f[2], bone = own, owner = owner }
         end
     end
     for _, a in ipairs(spec.arrays or {}) do
         for _, el in ipairs(items(get(node, { a[1] }))) do
             local b = bone_of(get(el, { a[2] })) or own
             for _, f in ipairs(a[3]) do
-                out[#out + 1] = { obj = el, path = f[1], how = f[2], bone = b }
+                out[#out + 1] = { obj = el, path = f[1], how = f[2], bone = b, owner = owner }
             end
         end
     end
@@ -546,7 +559,7 @@ local function scale_targets(targets, scales, saved, index)
         local id = tostring(address(t.obj) or t.obj) .. "/" .. table.concat(t.path, ".")
         local e = index[id]
         if not e and s and not is_one(s) then
-            e = remember(saved, t.obj, t.path, (t.how == "vec") and "vec" or "num")
+            e = remember(saved, t.obj, t.path, (t.how == "vec") and "vec" or "num", t.owner)
             index[id] = e or false
         end
         if e then
@@ -591,6 +604,12 @@ local function restart(st, force, t)
     if not st.restart_main and not st.restart_post then
         return
     end
+    if st.no_restart then
+        -- this game builds a new animation instance on a restart (see track()): restarting again would only
+        -- throw away the sizes just written, over and over
+        st.restart_main, st.restart_post, st.waiting = false, false, false
+        return
+    end
     if not force and st.restarted and t - st.restarted < REINIT_MS then
         return
     end
@@ -602,7 +621,7 @@ local function restart(st, force, t)
         end
     end
     if st.restart_main then
-        if not force and st.main and montage_playing(st.main) then
+        if not force and alive(st.main) and montage_playing(st.main) then
             if not st.waiting then
                 st.waiting = true
                 say("physics: %s plays an animation; its physics picks up the new sizes when it ends", st.label)
@@ -653,9 +672,9 @@ local function switch_off(st)
     return n
 end
 
-local function switch_on(st)
+local function switch_on(st, current)
     for _, nd in ipairs(st.nodes) do
-        local node = nd.off and node_of(nd)
+        local node = nd.off and (not current or current[address(nd.inst) or false]) and node_of(nd)
         if node and get(node, { "Alpha" }) == 0 then
             set(node, { "Alpha" }, nd.off.alpha)
             if nd.off.bool ~= nil then
@@ -704,7 +723,23 @@ local function physics_asset(comp)
     return alive(pa) and pa or nil
 end
 
-local function track(r)
+-- The addresses of a tracked mesh's animation instances right now (an empty set once the mesh is gone).
+local function current_instances(st)
+    local cur = {}
+    if alive(st.comp) then
+        local main, post = anim_instances(st.comp)
+        for _, inst in ipairs({ main or false, post or false }) do
+            local ia = inst and address(inst)
+            if ia then
+                cur[ia] = true
+            end
+        end
+    end
+    return cur
+end
+
+local function track(r, t)
+    t = t or 0
     local a = address(r.comp)
     local st = a and tracked[a]
     local main, post = anim_instances(r.comp)
@@ -718,11 +753,24 @@ local function track(r)
         end
         return st
     end
+    -- The mesh has new animation instances. Shortly after our own restart that means this game builds new
+    -- instances on a restart (Afterparty does): the old ones are dropped and freed by the engine, and the new
+    -- ones start from their defaults. Nothing may be written into the old ones any more (P.release skips
+    -- them), and restarting again would only loop, so this mesh is not restarted from now on.
+    local noRestart = false
     if st then
+        noRestart = st.no_restart or (st.restarted ~= nil and t - st.restarted < 2 * REINIT_MS)
+        if noRestart and not st.no_restart then
+            say("physics: %s got a new animation blueprint instance after a restart; its physics is no longer restarted "
+                .. "(Kawaii Physics and Spring Bone sizes still follow at once)", st.label)
+        end
+        st.no_restart = noRestart or nil -- also no restart while putting the old values back
         P.release(a)
+        -- the release may have changed the instances again
+        main, post = anim_instances(r.comp)
     end
     st = { comp = r.comp, key = r.actorKey, label = r.label or name_of(r.comp), main = main, post = post, nodes = {},
-        saved = {}, index = {}, applied = nil, due = 0, assets = {} }
+        saved = {}, index = {}, applied = nil, due = 0, assets = {}, no_restart = noRestart or nil }
     -- (not ipairs({ main, post }): with no main instance - a hair or outfit mesh that only has a post-process
     -- blueprint - ipairs would stop at the nil and miss the post-process nodes)
     for _, pair in ipairs({ { main, false }, { post, true } }) do
@@ -794,9 +842,9 @@ local function scales_key(scales)
     return table.concat(parts, ";")
 end
 
-local function unfollow(st)
+local function unfollow(st, current)
     if #st.saved > 0 then
-        put_back(st.saved)
+        put_back(st.saved, current)
         st.saved, st.index = {}, {}
         st.restart_main = st.restart_main or st.main_changed
         st.restart_post = st.restart_post or st.post_changed
@@ -833,7 +881,14 @@ local function follow(st, t, force)
         return
     end
     -- node fields (per character, nothing shared)
-    put_back(st.saved)
+    local current = {}
+    for _, inst in ipairs({ st.main or false, st.post or false }) do
+        local ia = inst and address(inst)
+        if ia then
+            current[ia] = true
+        end
+    end
+    put_back(st.saved, current)
     st.saved, st.index = {}, {}
     local nodeCount, bodyCount = 0, 0
     st.main_changed, st.post_changed = false, false
@@ -841,8 +896,10 @@ local function follow(st, t, force)
         local k = scale_targets(node_targets(nd), scales, st.saved, st.index)
         if k > 0 then
             nodeCount = nodeCount + 1
-            st.main_changed = st.main_changed or not nd.post
-            st.post_changed = st.post_changed or nd.post
+            if not LIVE_KINDS[nd.kind] then
+                st.main_changed = st.main_changed or not nd.post
+                st.post_changed = st.post_changed or nd.post
+            end
         end
     end
     -- physics asset geometry (shared by everyone with this body)
@@ -880,14 +937,16 @@ local function follow(st, t, force)
     end
 end
 
--- Puts everything of one mesh back.
+-- Puts everything of one mesh back. Values held by animation instances the mesh no longer has are left alone
+-- (that memory may be freed).
 function P.release(a)
     local st = tracked[a]
     if not st then
         return
     end
-    switch_on(st)
-    unfollow(st)
+    local current = current_instances(st)
+    switch_on(st, current)
+    unfollow(st, current)
     if alive(st.comp) then
         restart(st, true, math.huge)
     end
@@ -964,7 +1023,7 @@ function P.apply(rigs, scaled, t)
         end
     end
     for _, r in pairs(want) do
-        local st = track(r)
+        local st = track(r, t)
         if mode == "off" then
             unfollow(st)
             local n = switch_off(st)
