@@ -260,7 +260,7 @@ The Simplified Panel sliders (Thighs, Waist, Breasts, Biceps…) find their bone
 You can edit it, and the window picks up changes within a couple of seconds. A copy is built into the DLL, so a missing or broken file never breaks anything.
 
 * **Supported out of the box:** UE4/UE5 mannequin, MetaHuman (including `upperarm_bicep`, `latissimus` and `clavicle_pec` helpers), Mixamo, Daz Genesis, Blender Rigify and Auto-Rig Pro (`thigh_stretch.l`, `.x` centre bones), Character Creator, VRoid, 3ds Max Biped and **Advanced Skeleton** (Wuchang: `Hip_L` = thigh, `Shoulder_L` = upper arm, `Root_M`, `SDtui`/`SDabi` helpers).
-  Category prefixes like BoR's `MOT_`/`SUP_`/`PRG_` are stripped, and some pinyin and romaji words are included (`datui`, `dabi`, `xiaotui`, `pigu`, `momo`, `shiri`…).
+  Category prefixes like BoR's `MOT_`/`SUP_`/`PRG_` (and Nymphomaniac's `b_`/`b_F_`) are stripped, and some pinyin and romaji words are included (`datui`, `dabi`, `xiaotui`, `pigu`, `momo`, `shiri`…).
 * **Muscles section:** biceps, triceps, deltoids, pecs, lats, traps, serratus, abs, obliques, quads, hamstrings and calf muscles. It appears only when the rig has such helper bones.
 * **How matching works:** bone names are cleaned (prefixes, the left/right marker and `_M`-style suffixes removed), then compared with each group's patterns (`*` = anything, `#` = digits, `=Name` = the exact original name).
   A group's first matching pattern wins, and both sides are taken together. Twist, roll, stretch and "thicker" helpers of limbs come along automatically.

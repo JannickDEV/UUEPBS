@@ -182,7 +182,7 @@ namespace uuepbs
         static const StemRules rules = [] {
             StemRules r;
             r.raw_prefixes = {"MOT_", "SUP_", "PRG_", "SCB_", "SBC_", "CC_Base_", "J_Bip_C_", "J_Bip_", "J_Sec_", "J_Adj_",
-                              "Bip001 ", "Bip01 ", "Bip001_", "Bip01_", "DEF-", "ORG-", "MCH-", "ValveBiped."};
+                              "Bip001 ", "Bip01 ", "Bip001_", "Bip01_", "DEF-", "ORG-", "MCH-", "ValveBiped.", "b_FS_", "b_F_", "b_"};
             r.raw_suffixes = {"_M", ".M", "_C", ".C", "_x", ".x", "_SkinJNT", "_jnt", "_bind"};
             r.stem_prefixes = {"mixamorig", "ccbase", "jbipc", "jbip", "jsec", "jadj", "bip001", "bip01", "def", "org", "valvebiped"};
             return r;
