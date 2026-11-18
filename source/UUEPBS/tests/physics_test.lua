@@ -78,9 +78,11 @@ local function make_mesh(name, scales)
         SphericalLimits = { { DrivingBone = { BoneName = fname("butt_l") }, OffsetLocation = v3(1, 2, 3), Radius = 6 } } }
     local dyn = { Alpha = 1, BoundBone = { BoneName = fname("penis_01") }, BoxExtents = v3(2, 2, 10), LocalJointOffset = v3(0, 0, 5),
         SphereCollisionRadius = 3, SphericalLimits = {}, AngularSpringConstant = 50, LinearSpringConstant = 20 }
+    local tail = { Alpha = 1, BoundBone = { BoneName = fname("penis_01") }, BoxExtents = v3(1, 1, 4), SphericalLimits = {} }
     local rbn = { Alpha = 1, OverridePhysicsAsset = nil }
     local mainCls = class("AnimBlueprintGeneratedClass /Game/ABP_Main.ABP_Main_C", {
         { "AnimGraphNode_KawaiiPhysics_1", "AnimNode_KawaiiPhysics" },
+        { "AnimGraphNode_AnimDynamics_1", "AnimNode_AnimDynamics" },
         { "AnimGraphNode_StateMachine", "AnimNode_StateMachine" },
     }, engineAnim)
     local postCls = class("AnimBlueprintGeneratedClass /Game/PP.PP_C", {
@@ -88,12 +90,12 @@ local function make_mesh(name, scales)
         { "AnimGraphNode_AnimDynamics", "AnimNode_AnimDynamics" },
     }, engineAnim)
     local main = object({ name = "ABP_Main", montage = false,
-        AnimGraphNode_KawaiiPhysics_1 = kawaii, AnimGraphNode_StateMachine = {} })
+        AnimGraphNode_KawaiiPhysics_1 = kawaii, AnimGraphNode_AnimDynamics_1 = tail, AnimGraphNode_StateMachine = {} })
     main.GetClass = function() return mainCls end
     main.IsAnyMontagePlaying = function(self) return self.montage end
     local post = object({ name = "PP", AnimGraphNode_RigidBody = rbn, AnimGraphNode_AnimDynamics = dyn })
     post.GetClass = function() return postCls end
-    local m = object({ name = name, scales = scales, main = main, post = post, kawaii = kawaii, dyn = dyn, rbn = rbn,
+    local m = object({ name = name, scales = scales, main = main, post = post, kawaii = kawaii, dyn = dyn, tail = tail, rbn = rbn,
         bDisablePostProcessBlueprint = false, bDisableRigidBodyAnimNode = false, postRestarts = 0, mainRestarts = 0,
         cloth = false, PhysicsAssetOverride = nil })
     m.GetAnimInstance = function(self) return self.main end
@@ -302,6 +304,77 @@ do
     end
     check(found, "post-process nodes found without a main animation instance")
     P.apply({}, {}, 96000)
+end
+
+-- Kawaii Physics and Spring Bone read their settings every frame: a mesh with only those is never restarted
+do
+    local k = make_mesh("KawaiiOnly", { root = { 1, 1, 1 }, butt_l = { 1.5, 1.5, 1.5 } })
+    k.main.AnimGraphNode_AnimDynamics_1 = nil
+    k.post = nil
+    P.set_mode("follow")
+    P.apply({ { comp = k, label = "KawaiiOnly", actorKey = "k" } }, { k = true }, 100000)
+    check(near(k.kawaii.PhysicsSettings.Radius, 7.5), "kawaii only: radius follows")
+    check(k.mainRestarts == 0 and k.postRestarts == 0, "kawaii only: no blueprint restart (" .. k.mainRestarts .. ")")
+    P.apply({}, {}, 101000)
+    check(k.kawaii.PhysicsSettings.Radius == 5 and k.mainRestarts == 0, "kawaii only: back without a restart")
+end
+
+-- Afterparty crash: the game builds a NEW animation instance when the blueprint restarts and frees the old one.
+-- Nothing may be written into (or called on) the old instance afterwards, and the restarts must not loop.
+do
+    local m = make_mesh("Swap", { root = { 1, 1, 1 }, butt_l = { 1.5, 1.5, 1.5 }, penis_01 = { 2, 1, 1 } })
+    local touchedFreed = 0
+    local function free(inst)
+        -- a freed object: any read or write through it is a crash in the game
+        local mt = { __index = function(_, key)
+            if key == "GetAddress" then
+                return rawget(inst, "_addr")
+            end
+            touchedFreed = touchedFreed + 1
+            return nil
+        end, __newindex = function() touchedFreed = touchedFreed + 1 end }
+        local addr = inst.GetAddress
+        for key in pairs(inst) do
+            inst[key] = nil
+        end
+        inst._addr = addr
+        setmetatable(inst, mt)
+    end
+    local function fresh_main(old)
+        local cls = old.GetClass()
+        local kawaii = { Alpha = 1, RootBone = { BoneName = fname("butt_l") }, PhysicsSettings = { Radius = 5, Stiffness = 0.1, Damping = 0.1 },
+            DummyBoneLength = 0, SphericalLimits = {} }
+        local tail = { Alpha = 1, BoundBone = { BoneName = fname("penis_01") }, BoxExtents = v3(1, 1, 4), SphericalLimits = {} }
+        local n = object({ name = "ABP_Main", montage = false, AnimGraphNode_KawaiiPhysics_1 = kawaii, AnimGraphNode_AnimDynamics_1 = tail,
+            AnimGraphNode_StateMachine = {} })
+        n.GetClass = function() return cls end
+        n.IsAnyMontagePlaying = function(self) return self.montage end
+        return n
+    end
+    local setAllow = m.SetAllowRigidBodyAnimNode
+    m.SetAllowRigidBodyAnimNode = function(self, allow, reinit)
+        local before = self.mainRestarts
+        setAllow(self, allow, reinit)
+        if self.mainRestarts > before then
+            local old = self.main
+            self.main = fresh_main(old)
+            free(old)
+        end
+    end
+    m.post = nil
+    local r = { { comp = m, label = "Swap", actorKey = "swap" } }
+    P.set_mode("follow")
+    for i = 0, 12 do
+        P.apply(r, { swap = true }, 110000 + 400 * i)
+    end
+    check(touchedFreed == 0, "swap: the freed animation instance was touched " .. touchedFreed .. " time(s)")
+    check(m.mainRestarts <= 2, "swap: restarts loop (" .. m.mainRestarts .. ")")
+    check(near(m.main.AnimGraphNode_KawaiiPhysics_1.PhysicsSettings.Radius, 7.5), "swap: the new instance still follows the sliders")
+    local mr = m.mainRestarts
+    P.apply({}, {}, 120000)
+    check(touchedFreed == 0, "swap: release touched the freed instance")
+    check(m.main.AnimGraphNode_KawaiiPhysics_1.PhysicsSettings.Radius == 5, "swap: put back on the new instance")
+    check(m.mainRestarts == mr, "swap: no restart after the game showed it rebuilds the instance")
 end
 
 -- restore_all
