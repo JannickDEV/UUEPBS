@@ -97,6 +97,24 @@ int main(int argc, char** argv)
         CHECK(has(m, "Tail", "TailRoot") && has(m, "Tail", "FTail_01") && !has(m, "Tail", "Tail01") && m["Tail"].size() == 2);
         CHECK(has(m, "Rib cage", "spine_02") && has(m, "Thighs", "thigh_l") && !m.count("Nipples"));
     }
+    // Nymphomaniac (UE5): every bone has a "b_" prefix, face bones "b_F_" / "b_FS_".
+    {
+        CHECK(bone_stem("b_Thigh_L") == "thigh" && bone_stem("b_F_Eye_L") == "eye" && bone_stem("b_FS_EyeBase_R") == "eyebase" && bone_stem("b_Foot_L") == "foot");
+        std::vector<std::string> names; std::vector<int32_t> parents;
+        std::ifstream f("fixtures/nymphomaniac_cache.txt"); std::string line;
+        while (std::getline(f, line))
+        {
+            std::istringstream l(line); std::string kind, item; std::getline(l, kind, '\t');
+            if (kind == "names" && names.empty()) while (std::getline(l, item, '\t')) names.push_back(item);
+            if (kind == "parents" && parents.empty()) while (std::getline(l, item, '\t')) parents.push_back(std::stoi(item));
+        }
+        CHECK(names.size() == 119 && parents.size() == names.size());
+        auto m = show("Nymphomaniac", names, parents, d);
+        CHECK(has(m, "Hips", "b_Pelvis") && has(m, "Waist", "b_Spine1") && has(m, "Rib cage", "b_Spine2") && has(m, "Shoulders", "b_Clavicle_L"));
+        CHECK(has(m, "Thighs", "b_Thigh_L") && has(m, "Thighs", "b_ThighTwist_R") && has(m, "Calves", "b_Calf_R") && has(m, "Feet", "b_Foot_L"));
+        CHECK(has(m, "Upper arms", "b_Arm_L") && has(m, "Forearms", "b_ForeArm_R") && has(m, "Hands", "b_Hand_L") && has(m, "Breasts", "b_Boob_R"));
+        CHECK(has(m, "Head", "b_Head") && has(m, "Neck", "b_Neck") && has(m, "Eyes", "b_F_Eye_L") && has(m, "Ears", "b_F_Ear_R") && has(m, "Tail", "b_Tail_0"));
+    }
     for (int a = 2; a < argc; ++a)
     {
         std::vector<std::string> names; std::vector<int32_t> parents;

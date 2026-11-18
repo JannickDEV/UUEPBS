@@ -17,7 +17,7 @@ R"UBSD({
   ],
 
   "IgnorePrefixes": ["MOT_", "SUP_", "PRG_", "SCB_", "SBC_", "CC_Base_", "J_Bip_C_", "J_Bip_", "J_Sec_", "J_Adj_",
-                     "Bip001 ", "Bip01 ", "Bip001_", "Bip01_", "DEF-", "ORG-", "MCH-", "ValveBiped."],
+                     "Bip001 ", "Bip01 ", "Bip001_", "Bip01_", "DEF-", "ORG-", "MCH-", "ValveBiped.", "b_FS_", "b_F_", "b_"],
   "IgnoreSuffixes": ["_M", ".M", "_C", ".C", "_x", ".x", "_SkinJNT", "_jnt", "_bind"],
   "IgnoreStemPrefixes": ["mixamorig", "ccbase", "jbipc", "jbip", "jsec", "jadj", "bip001", "bip01", "def", "org", "valvebiped"],
   "HelperWords": ["twist", "roll", "jiggle", "bend", "share", "helper", "stretch", "part", "correct", "thicker", "volume", "fix"],
@@ -33,8 +33,8 @@ R"UBSD({
 
     { "Section": "Torso", "Title": "Rib cage", "Bones": ["spine02", "spine2", "chestlower", "chest", "abdomenupper", "spine002", "ribs", "ribcage", "*xiong"],
       "Children": "keep_size", "Hint": "Upper torso. Arms, neck and breasts keep their size but move with it." },
-    { "Title": "Waist", "Bones": ["spine01", "abdomenlower", "abdomen", "spine", "spine001", "waist", "spine1", "*yaobu*")UBSD"
-R"UBSD(, "*koshi*"],
+    { "Title": "Waist", "Bones": ["spine01", "abdomenlower", "abdomen", "spine", "spine001", "wais)UBSD"
+R"UBSD(t", "spine1", "*yaobu*", "*koshi*"],
       "Children": "keep_size", "Hint": "Mid torso / waist." },
     { "Title": "Belly", "Bones": ["belly", "belly#", "stomach", "tummy", "*belly*", "*fubu*"], "Children": "scale_too",
       "Hint": "Belly / stomach soft-body bone." },
@@ -70,9 +70,9 @@ R"UBSD(, "*koshi*"],
     { "Section": "Wings", "Title": "Wings", "Bones": ["wingroot", "wingbase", "wing", "wing#", "wingshoulder", "wingarm", "wingupper"],
       "Children": "scale_too", "Hint": "Both wings, from their roots." },
 
-    { "Section": "Muscles", "Title": "Deltoids", "Bones": ["*deltoid*", "delt", "delt#", "*shoulderdelt*"], "MatchAll": true, "Children": "scale_too",
-      "H)UBSD"
-R"UBSD(int": "Shoulder muscle helper bones." },
+    { "Section": "Muscles", "Title": "Deltoids", "Bones": ["*deltoid*", "delt", "delt#", "*shoulderdelt*"], "MatchAll": true, "Children")UBSD"
+R"UBSD(: "scale_too",
+      "Hint": "Shoulder muscle helper bones." },
     { "Title": "Biceps", "Bones": ["*bicep*"], "MatchAll": true, "Children": "scale_too", "Hint": "Biceps helper bones." },
     { "Title": "Triceps", "Bones": ["*tricep*"], "MatchAll": true, "Children": "scale_too", "Hint": "Triceps helper bones." },
     { "Title": "Pecs", "Bones": ["*pectoral*", "pec", "pec#", "pecs", "*pecs*", "*claviclepec*", "*chestmuscle*"], "MatchAll": true,
